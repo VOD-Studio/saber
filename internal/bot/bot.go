@@ -4,12 +4,11 @@ package bot
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 
@@ -46,46 +45,48 @@ func Run(version string) {
 	// Load configuration
 	cfg, err := config.Load(flags.ConfigPath)
 	if err != nil {
-		log.Fatal().Err(err).Str("path", flags.ConfigPath).Msg("Failed to load configuration")
+		slog.Error("Failed to load configuration", "error", err, "path", flags.ConfigPath)
+		os.Exit(1)
 	}
 
-	log.Info().
-		Str("path", flags.ConfigPath).
-		Str("homeserver", cfg.Matrix.Homeserver).
-		Str("user_id", cfg.Matrix.UserID).
-		Msg("Configuration loaded")
+	slog.Info("Configuration loaded",
+		"path", flags.ConfigPath,
+		"homeserver", cfg.Matrix.Homeserver,
+		"user_id", cfg.Matrix.UserID)
 
 	// Create Matrix client
 	client, err := matrix.NewMatrixClient(&cfg.Matrix)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to create Matrix client")
+		slog.Error("Failed to create Matrix client", "error", err)
+		os.Exit(1)
 	}
 
 	// If using password auth, perform login
 	if cfg.Matrix.UsePasswordAuth() {
-		log.Info().Msg("Performing password login...")
+		slog.Info("Performing password login...")
 		if err := client.Login(context.Background()); err != nil {
-			log.Fatal().Err(err).Msg("Login failed")
+			slog.Error("Login failed", "error", err)
+			os.Exit(1)
 		}
 
 		// Optionally save session for future use
 		sessionPath := flags.ConfigPath + ".session"
 		if err := client.SaveSession(sessionPath); err != nil {
-			log.Warn().Err(err).Msg("Failed to save session")
+			slog.Warn("Failed to save session", "error", err)
 		} else {
-			log.Info().Str("path", sessionPath).Msg("Session saved")
+			slog.Info("Session saved", "path", sessionPath)
 		}
 	}
 
 	// Verify login
 	if err := client.VerifyLogin(context.Background()); err != nil {
-		log.Fatal().Err(err).Msg("Login verification failed")
+		slog.Error("Login verification failed", "error", err)
+		os.Exit(1)
 	}
 
-	log.Info().
-		Str("user_id", client.GetUserID().String()).
-		Str("device_id", client.GetDeviceID().String()).
-		Msg("Matrix client authenticated")
+	slog.Info("Matrix client authenticated",
+		"user_id", client.GetUserID().String(),
+		"device_id", client.GetDeviceID().String())
 
 	// Setup command service
 	mautrixClient := client.GetClient()
@@ -102,7 +103,7 @@ func Run(version string) {
 	if syncer, ok := mautrixClient.Syncer.(*mautrix.DefaultSyncer); ok {
 		syncer.OnEventType(event.EventMessage, eventHandler.OnMessage)
 	} else {
-		log.Warn().Msg("Client syncer is not DefaultSyncer, event handling may not work")
+		slog.Warn("Client syncer is not DefaultSyncer, event handling may not work")
 	}
 
 	// Create presence service
@@ -110,16 +111,16 @@ func Run(version string) {
 
 	// Set presence to online
 	if err := presence.SetPresence("online", "Saber Bot is running"); err != nil {
-		log.Warn().Err(err).Msg("Failed to set presence")
+		slog.Warn("Failed to set presence", "error", err)
 	}
 
 	// Auto-join rooms if configured
 	if len(cfg.Matrix.AutoJoinRooms) > 0 {
 		rooms := matrix.NewRoomService(client)
 		for _, roomID := range cfg.Matrix.AutoJoinRooms {
-			log.Info().Str("room", roomID).Msg("Joining room")
+			slog.Info("Joining room", "room", roomID)
 			if _, err := rooms.JoinRoom(context.Background(), roomID); err != nil {
-				log.Warn().Err(err).Str("room", roomID).Msg("Failed to join room")
+				slog.Warn("Failed to join room", "room", roomID, "error", err)
 			}
 		}
 	}
@@ -134,39 +135,47 @@ func Run(version string) {
 	// Start sync with auto-reconnect
 	go func() {
 		reconnectCfg := matrix.DefaultReconnectConfig()
-		log.Info().
-			Int("max_retries", reconnectCfg.MaxRetries).
-			Dur("initial_delay", reconnectCfg.InitialDelay).
-			Dur("max_delay", reconnectCfg.MaxDelay).
-			Msg("Starting Matrix sync with auto-reconnect")
+		slog.Info("Starting Matrix sync with auto-reconnect",
+			"max_retries", reconnectCfg.MaxRetries,
+			"initial_delay", reconnectCfg.InitialDelay,
+			"max_delay", reconnectCfg.MaxDelay)
 
 		if err := presence.StartSyncWithReconnect(ctx, reconnectCfg); err != nil {
 			if err != context.Canceled {
-				log.Error().Err(err).Msg("Sync failed")
+				slog.Error("Sync failed", "error", err)
 			}
 		}
 	}()
 
-	log.Info().Msg("Saber Bot is running. Press Ctrl+C to exit.")
+	slog.Info("Saber Bot is running. Press Ctrl+C to exit.")
 
 	// Wait for shutdown signal
 	sig := <-sigChan
-	log.Info().Str("signal", sig.String()).Msg("Shutdown signal received")
+	slog.Info("Shutdown signal received", "signal", sig.String())
 
 	// Graceful shutdown
 	cancel()
-	log.Info().Msg("Bot stopped")
+	slog.Info("Bot stopped")
 }
 
 // setupLogging configures the global logger based on verbose flag.
 func setupLogging(verbose bool) {
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	level := slog.LevelInfo
+	if verbose {
+		level = slog.LevelDebug
+	}
+
+	opts := &slog.HandlerOptions{
+		Level:     level,
+		AddSource: false,
+	}
+
+	handler := slog.NewJSONHandler(os.Stdout, opts)
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
 
 	if verbose {
-		zerolog.SetGlobalLevel(zerolog.DebugLevel)
-		log.Info().Msg("Debug logging enabled")
-	} else {
-		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+		slog.Debug("Debug logging enabled")
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/rs/zerolog/log"
+	"log/slog"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
@@ -105,10 +105,7 @@ func (p *PresenceService) SetPresence(state PresenceState, statusMsg string) err
 
 // SetPresenceWithContext sets the user's presence state with context support.
 func (p *PresenceService) SetPresenceWithContext(ctx context.Context, state PresenceState, statusMsg string) error {
-	log.Info().
-		Str("presence", string(state)).
-		Str("status_msg", statusMsg).
-		Msg("Setting presence state")
+	slog.Info("Setting presence state", "presence", string(state), "status_msg", statusMsg)
 
 	req := mautrix.ReqPresence{
 		Presence:  event.Presence(state),
@@ -117,19 +114,14 @@ func (p *PresenceService) SetPresenceWithContext(ctx context.Context, state Pres
 
 	err := p.client.SetPresence(ctx, req)
 	if err != nil {
-		log.Error().
-			Err(err).
-			Str("presence", string(state)).
-			Msg("Failed to set presence")
+		slog.Error("Failed to set presence", "presence", string(state), "error", err)
 		return fmt.Errorf("failed to set presence: %w", err)
 	}
 
 	p.lastPresence = state
 	p.lastStatusMsg = statusMsg
 
-	log.Info().
-		Str("presence", string(state)).
-		Msg("Presence state updated successfully")
+	slog.Info("Presence state updated successfully", "presence", string(state))
 
 	return nil
 }
@@ -142,16 +134,11 @@ func (p *PresenceService) GetPresence(userID string) (*PresenceInfo, error) {
 
 // GetPresenceWithContext retrieves the presence information for a given user with context support.
 func (p *PresenceService) GetPresenceWithContext(ctx context.Context, userID string) (*PresenceInfo, error) {
-	log.Debug().
-		Str("user_id", userID).
-		Msg("Getting presence for user")
+	slog.Debug("Getting presence for user", "user_id", userID)
 
 	resp, err := p.client.GetPresence(ctx, id.UserID(userID))
 	if err != nil {
-		log.Error().
-			Err(err).
-			Str("user_id", userID).
-			Msg("Failed to get presence")
+		slog.Error("Failed to get presence", "user_id", userID, "error", err)
 		return nil, fmt.Errorf("failed to get presence for user %s: %w", userID, err)
 	}
 
@@ -163,11 +150,7 @@ func (p *PresenceService) GetPresenceWithContext(ctx context.Context, userID str
 		CurrentlyActive: resp.CurrentlyActive,
 	}
 
-	log.Debug().
-		Str("user_id", userID).
-		Str("presence", string(info.Presence)).
-		Bool("currently_active", info.CurrentlyActive).
-		Msg("Retrieved presence info")
+	slog.Debug("Retrieved presence info", "user_id", userID, "presence", string(info.Presence), "currently_active", info.CurrentlyActive)
 
 	return info, nil
 }
@@ -181,23 +164,15 @@ func (p *PresenceService) StartTyping(roomID string, timeout int) error {
 
 // StartTypingWithContext sends a typing indicator with context support.
 func (p *PresenceService) StartTypingWithContext(ctx context.Context, roomID string, timeout time.Duration) error {
-	log.Debug().
-		Str("room_id", roomID).
-		Dur("timeout", timeout).
-		Msg("Starting typing indicator")
+	slog.Debug("Starting typing indicator", "room_id", roomID, "timeout", timeout)
 
 	_, err := p.client.UserTyping(ctx, id.RoomID(roomID), true, timeout)
 	if err != nil {
-		log.Error().
-			Err(err).
-			Str("room_id", roomID).
-			Msg("Failed to start typing indicator")
+		slog.Error("Failed to start typing indicator", "room_id", roomID, "error", err)
 		return fmt.Errorf("failed to start typing in room %s: %w", roomID, err)
 	}
 
-	log.Debug().
-		Str("room_id", roomID).
-		Msg("Typing indicator started")
+	slog.Debug("Typing indicator started", "room_id", roomID)
 
 	return nil
 }
@@ -210,22 +185,15 @@ func (p *PresenceService) StopTyping(roomID string) error {
 
 // StopTypingWithContext stops the typing indicator with context support.
 func (p *PresenceService) StopTypingWithContext(ctx context.Context, roomID string) error {
-	log.Debug().
-		Str("room_id", roomID).
-		Msg("Stopping typing indicator")
+	slog.Debug("Stopping typing indicator", "room_id", roomID)
 
 	_, err := p.client.UserTyping(ctx, id.RoomID(roomID), false, 0)
 	if err != nil {
-		log.Error().
-			Err(err).
-			Str("room_id", roomID).
-			Msg("Failed to stop typing indicator")
+		slog.Error("Failed to stop typing indicator", "room_id", roomID, "error", err)
 		return fmt.Errorf("failed to stop typing in room %s: %w", roomID, err)
 	}
 
-	log.Debug().
-		Str("room_id", roomID).
-		Msg("Typing indicator stopped")
+	slog.Debug("Typing indicator stopped", "room_id", roomID)
 
 	return nil
 }
@@ -238,25 +206,15 @@ func (p *PresenceService) MarkAsRead(roomID string, eventID string) error {
 
 // MarkAsReadWithContext sends a read receipt with context support.
 func (p *PresenceService) MarkAsReadWithContext(ctx context.Context, roomID string, eventID string) error {
-	log.Debug().
-		Str("room_id", roomID).
-		Str("event_id", eventID).
-		Msg("Marking message as read")
+	slog.Debug("Marking message as read", "room_id", roomID, "event_id", eventID)
 
 	err := p.client.MarkRead(ctx, id.RoomID(roomID), id.EventID(eventID))
 	if err != nil {
-		log.Error().
-			Err(err).
-			Str("room_id", roomID).
-			Str("event_id", eventID).
-			Msg("Failed to mark message as read")
+		slog.Error("Failed to mark message as read", "room_id", roomID, "event_id", eventID, "error", err)
 		return fmt.Errorf("failed to mark message as read in room %s: %w", roomID, err)
 	}
 
-	log.Debug().
-		Str("room_id", roomID).
-		Str("event_id", eventID).
-		Msg("Message marked as read")
+	slog.Debug("Message marked as read", "room_id", roomID, "event_id", eventID)
 
 	return nil
 }
@@ -270,26 +228,15 @@ func (p *PresenceService) SendReceipt(roomID string, eventID string, receiptType
 
 // SendReceiptWithContext sends a read receipt with context support.
 func (p *PresenceService) SendReceiptWithContext(ctx context.Context, roomID string, eventID string, receiptType event.ReceiptType) error {
-	log.Debug().
-		Str("room_id", roomID).
-		Str("event_id", eventID).
-		Str("receipt_type", string(receiptType)).
-		Msg("Sending receipt")
+	slog.Debug("Sending receipt", "room_id", roomID, "event_id", eventID, "receipt_type", string(receiptType))
 
 	err := p.client.SendReceipt(ctx, id.RoomID(roomID), id.EventID(eventID), receiptType, nil)
 	if err != nil {
-		log.Error().
-			Err(err).
-			Str("room_id", roomID).
-			Str("event_id", eventID).
-			Msg("Failed to send receipt")
+		slog.Error("Failed to send receipt", "room_id", roomID, "event_id", eventID, "error", err)
 		return fmt.Errorf("failed to send receipt in room %s: %w", roomID, err)
 	}
 
-	log.Debug().
-		Str("room_id", roomID).
-		Str("event_id", eventID).
-		Msg("Receipt sent successfully")
+	slog.Debug("Receipt sent successfully", "room_id", roomID, "event_id", eventID)
 
 	return nil
 }
@@ -310,17 +257,12 @@ func (p *PresenceService) saveSessionOnDisconnect() {
 		return
 	}
 
-	log.Info().
-		Str("path", p.sessionPath).
-		Msg("Saving session on disconnect")
+	slog.Info("Saving session on disconnect", "path", p.sessionPath)
 
 	if err := p.sessionSaver(p.sessionPath); err != nil {
-		log.Error().
-			Err(err).
-			Str("path", p.sessionPath).
-			Msg("Failed to save session on disconnect")
+		slog.Error("Failed to save session on disconnect", "path", p.sessionPath, "error", err)
 	} else {
-		log.Info().Msg("Session saved successfully on disconnect")
+		slog.Info("Session saved successfully on disconnect")
 	}
 }
 
@@ -354,14 +296,12 @@ func (p *PresenceService) StartSyncWithReconnect(ctx context.Context, cfg *Recon
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info().Msg("Context cancelled, stopping sync")
+			slog.Info("Context cancelled, stopping sync")
 			return ctx.Err()
 		default:
 		}
 
-		log.Info().
-			Int("attempt", attempt).
-			Msg("Starting sync")
+		slog.Info("Starting sync", "attempt", attempt)
 
 		// Start sync - this blocks until disconnect or error
 		err := p.client.SyncWithContext(ctx)
@@ -369,57 +309,45 @@ func (p *PresenceService) StartSyncWithReconnect(ctx context.Context, cfg *Recon
 		if err != nil {
 			// Check if context was cancelled
 			if ctx.Err() != nil {
-				log.Info().Msg("Sync stopped due to context cancellation")
+				slog.Info("Sync stopped due to context cancellation")
 				return ctx.Err()
 			}
 
-			log.Warn().
-				Err(err).
-				Int("attempt", attempt).
-				Msg("Sync disconnected with error")
+			slog.Warn("Sync disconnected with error", "attempt", attempt, "error", err)
 
 			// Save session on disconnect
 			p.saveSessionOnDisconnect()
 
 			// Check retry limit
 			if maxRetries > 0 && attempt >= maxRetries {
-				log.Error().
-					Int("max_retries", maxRetries).
-					Msg("Maximum reconnection attempts reached")
+				slog.Error("Maximum reconnection attempts reached", "max_retries", maxRetries)
 				return fmt.Errorf("maximum reconnection attempts (%d) reached: %w", maxRetries, err)
 			}
 
 			// Calculate backoff delay
 			backoff := p.calculateBackoff(attempt)
 
-			log.Info().
-				Dur("backoff", backoff).
-				Int("attempt", attempt).
-				Msg("Waiting before reconnection attempt")
+			slog.Info("Waiting before reconnection attempt", "backoff", backoff, "attempt", attempt)
 
 			// Wait with exponential backoff
 			select {
 			case <-ctx.Done():
-				log.Info().Msg("Context cancelled during backoff wait")
+				slog.Info("Context cancelled during backoff wait")
 				return ctx.Err()
 			case <-time.After(backoff):
 			}
 
 			attempt++
 
-			log.Info().
-				Int("attempt", attempt).
-				Msg("Attempting to reconnect")
+			slog.Info("Attempting to reconnect", "attempt", attempt)
 
 			// Restore presence after reconnection
 			if restoreErr := p.restorePresence(); restoreErr != nil {
-				log.Warn().
-					Err(restoreErr).
-					Msg("Failed to restore presence after reconnection")
+				slog.Warn("Failed to restore presence after reconnection", "error", restoreErr)
 			}
 		} else {
 			// Sync completed without error (shouldn't normally happen)
-			log.Info().Msg("Sync completed without error")
+			slog.Info("Sync completed without error")
 			return nil
 		}
 	}

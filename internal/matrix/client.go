@@ -5,9 +5,9 @@ package matrix
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 
-	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/id"
@@ -49,11 +49,10 @@ func NewMatrixClient(cfg *config.MatrixConfig) (*MatrixClient, error) {
 	userID := id.UserID(cfg.UserID)
 	homeserver := cfg.Homeserver
 
-	log.Info().
-		Str("homeserver", homeserver).
-		Str("user_id", userID.String()).
-		Bool("token_auth", cfg.UseTokenAuth()).
-		Msg("Creating Matrix client")
+	slog.Info("Creating Matrix client",
+		"homeserver", homeserver,
+		"user_id", userID.String(),
+		"token_auth", cfg.UseTokenAuth())
 
 	var client *mautrix.Client
 	var err error
@@ -68,10 +67,9 @@ func NewMatrixClient(cfg *config.MatrixConfig) (*MatrixClient, error) {
 			client.DeviceID = id.DeviceID(cfg.DeviceID)
 		}
 
-		log.Info().
-			Str("user_id", userID.String()).
-			Str("device_id", cfg.DeviceID).
-			Msg("Matrix client created with access token")
+		slog.Info("Matrix client created with access token",
+			"user_id", userID.String(),
+			"device_id", cfg.DeviceID)
 	} else {
 		client, err = mautrix.NewClient(homeserver, userID, "")
 		if err != nil {
@@ -82,10 +80,9 @@ func NewMatrixClient(cfg *config.MatrixConfig) (*MatrixClient, error) {
 			client.DeviceID = id.DeviceID(cfg.DeviceID)
 		}
 
-		log.Info().
-			Str("user_id", userID.String()).
-			Str("device_id", cfg.DeviceID).
-			Msg("Matrix client created, ready for password login")
+		slog.Info("Matrix client created, ready for password login",
+			"user_id", userID.String(),
+			"device_id", cfg.DeviceID)
 	}
 
 	return &MatrixClient{
@@ -108,10 +105,9 @@ func (m *MatrixClient) Login(ctx context.Context) error {
 		deviceName = "Saber Bot"
 	}
 
-	log.Info().
-		Str("user_id", userID.String()).
-		Str("device_name", deviceName).
-		Msg("Attempting Matrix password login")
+	slog.Info("Attempting Matrix password login",
+		"user_id", userID.String(),
+		"device_name", deviceName)
 
 	loginReq := &mautrix.ReqLogin{
 		Type: mautrix.AuthTypePassword,
@@ -132,10 +128,9 @@ func (m *MatrixClient) Login(ctx context.Context) error {
 	m.client.AccessToken = resp.AccessToken
 	m.client.DeviceID = resp.DeviceID
 
-	log.Info().
-		Str("user_id", resp.UserID.String()).
-		Str("device_id", resp.DeviceID.String()).
-		Msg("Matrix login successful")
+	slog.Info("Matrix login successful",
+		"user_id", resp.UserID.String(),
+		"device_id", resp.DeviceID.String())
 
 	return nil
 }
@@ -167,10 +162,9 @@ func (m *MatrixClient) SaveSession(path string) error {
 		return fmt.Errorf("failed to write session file: %w", err)
 	}
 
-	log.Info().
-		Str("path", path).
-		Str("user_id", session.UserID).
-		Msg("Session saved successfully")
+	slog.Info("Session saved successfully",
+		"path", path,
+		"user_id", session.UserID)
 
 	return nil
 }
@@ -202,11 +196,10 @@ func (m *MatrixClient) LoadSession(path string) error {
 	m.client.DeviceID = id.DeviceID(session.DeviceID)
 	m.client.UserID = id.UserID(session.UserID)
 
-	log.Info().
-		Str("path", path).
-		Str("user_id", session.UserID).
-		Str("device_id", session.DeviceID).
-		Msg("Session loaded successfully")
+	slog.Info("Session loaded successfully",
+		"path", path,
+		"user_id", session.UserID,
+		"device_id", session.DeviceID)
 
 	return nil
 }
@@ -218,19 +211,17 @@ func (m *MatrixClient) VerifyLogin(ctx context.Context) error {
 		return fmt.Errorf("cannot verify login: no access token set")
 	}
 
-	log.Info().
-		Str("user_id", m.client.UserID.String()).
-		Msg("Verifying Matrix login status")
+	slog.Info("Verifying Matrix login status",
+		"user_id", m.client.UserID.String())
 
 	resp, err := m.client.Whoami(ctx)
 	if err != nil {
 		return fmt.Errorf("login verification failed: %w", err)
 	}
 
-	log.Info().
-		Str("user_id", resp.UserID.String()).
-		Str("device_id", resp.DeviceID.String()).
-		Msg("Matrix login verified successfully")
+	slog.Info("Matrix login verified successfully",
+		"user_id", resp.UserID.String(),
+		"device_id", resp.DeviceID.String())
 
 	return nil
 }

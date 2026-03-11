@@ -6,10 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
@@ -27,13 +26,13 @@ type RoomInfo struct {
 
 type RoomService struct {
 	client *MatrixClient
-	log    zerolog.Logger
+	logger *slog.Logger
 }
 
 func NewRoomService(client *MatrixClient) *RoomService {
 	return &RoomService{
 		client: client,
-		log:    log.With().Str("component", "room_service").Logger(),
+		logger: slog.With("component", "room_service"),
 	}
 }
 
@@ -42,7 +41,7 @@ func (rs *RoomService) JoinRoom(ctx context.Context, roomIDOrAlias string) (*Roo
 		return nil, errors.New("room ID or alias cannot be empty")
 	}
 
-	rs.log.Info().Str("room", roomIDOrAlias).Msg("Joining room")
+	rs.logger.Info("Joining room", "room", roomIDOrAlias)
 
 	var alias string
 	if strings.HasPrefix(roomIDOrAlias, "!") {
@@ -55,12 +54,12 @@ func (rs *RoomService) JoinRoom(ctx context.Context, roomIDOrAlias string) (*Roo
 	joinReq := &mautrix.ReqJoinRoom{}
 	joinedRoom, err := rs.client.GetClient().JoinRoom(ctx, roomIDOrAlias, joinReq)
 	if err != nil {
-		rs.log.Error().Err(err).Str("room", roomIDOrAlias).Msg("Failed to join room")
+		rs.logger.Error("Failed to join room", "room", roomIDOrAlias, "error", err)
 		return nil, fmt.Errorf("failed to join room %s: %w", roomIDOrAlias, err)
 	}
 
 	roomID := joinedRoom.RoomID
-	rs.log.Info().Str("room_id", roomID.String()).Str("alias", alias).Msg("Successfully joined room")
+	rs.logger.Info("Successfully joined room", "room_id", roomID.String(), "alias", alias)
 
 	info, err := rs.GetRoomInfo(ctx, roomID.String())
 	if err != nil {
@@ -79,16 +78,16 @@ func (rs *RoomService) LeaveRoom(ctx context.Context, roomID string) error {
 		return errors.New("room ID cannot be empty")
 	}
 
-	rs.log.Info().Str("room_id", roomID).Msg("Leaving room")
+	rs.logger.Info("Leaving room", "room_id", roomID)
 
 	leaveReq := &mautrix.ReqLeave{}
 	_, err := rs.client.GetClient().LeaveRoom(ctx, id.RoomID(roomID), leaveReq)
 	if err != nil {
-		rs.log.Error().Err(err).Str("room_id", roomID).Msg("Failed to leave room")
+		rs.logger.Error("Failed to leave room", "room_id", roomID, "error", err)
 		return fmt.Errorf("failed to leave room %s: %w", roomID, err)
 	}
 
-	rs.log.Info().Str("room_id", roomID).Msg("Successfully left room")
+	rs.logger.Info("Successfully left room", "room_id", roomID)
 	return nil
 }
 
@@ -100,15 +99,15 @@ func (rs *RoomService) SendMessage(ctx context.Context, roomID, text string) (id
 		return "", errors.New("message text cannot be empty")
 	}
 
-	rs.log.Debug().Str("room_id", roomID).Int("text_len", len(text)).Msg("Sending text message")
+	rs.logger.Debug("Sending text message", "room_id", roomID, "text_len", len(text))
 
 	resp, err := rs.client.GetClient().SendText(ctx, id.RoomID(roomID), text)
 	if err != nil {
-		rs.log.Error().Err(err).Str("room_id", roomID).Msg("Failed to send message")
+		rs.logger.Error("Failed to send message", "room_id", roomID, "error", err)
 		return "", fmt.Errorf("failed to send message to room %s: %w", roomID, err)
 	}
 
-	rs.log.Info().Str("room_id", roomID).Str("event_id", resp.EventID.String()).Msg("Message sent successfully")
+	rs.logger.Info("Message sent successfully", "room_id", roomID, "event_id", resp.EventID.String())
 	return resp.EventID, nil
 }
 
@@ -123,7 +122,7 @@ func (rs *RoomService) SendFormattedMessage(ctx context.Context, roomID, html, p
 		return "", errors.New("plain text content cannot be empty")
 	}
 
-	rs.log.Debug().Str("room_id", roomID).Int("html_len", len(html)).Int("plain_len", len(plain)).Msg("Sending formatted message")
+	rs.logger.Debug("Sending formatted message", "room_id", roomID, "html_len", len(html), "plain_len", len(plain))
 
 	content := &event.MessageEventContent{
 		MsgType:       event.MsgText,
@@ -134,11 +133,11 @@ func (rs *RoomService) SendFormattedMessage(ctx context.Context, roomID, html, p
 
 	resp, err := rs.client.GetClient().SendMessageEvent(ctx, id.RoomID(roomID), event.EventMessage, content)
 	if err != nil {
-		rs.log.Error().Err(err).Str("room_id", roomID).Msg("Failed to send formatted message")
+		rs.logger.Error("Failed to send formatted message", "room_id", roomID, "error", err)
 		return "", fmt.Errorf("failed to send formatted message to room %s: %w", roomID, err)
 	}
 
-	rs.log.Info().Str("room_id", roomID).Str("event_id", resp.EventID.String()).Msg("Formatted message sent successfully")
+	rs.logger.Info("Formatted message sent successfully", "room_id", roomID, "event_id", resp.EventID.String())
 	return resp.EventID, nil
 }
 
@@ -150,24 +149,24 @@ func (rs *RoomService) SendNotice(ctx context.Context, roomID, text string) (id.
 		return "", errors.New("notice text cannot be empty")
 	}
 
-	rs.log.Debug().Str("room_id", roomID).Int("text_len", len(text)).Msg("Sending notice message")
+	rs.logger.Debug("Sending notice message", "room_id", roomID, "text_len", len(text))
 
 	resp, err := rs.client.GetClient().SendNotice(ctx, id.RoomID(roomID), text)
 	if err != nil {
-		rs.log.Error().Err(err).Str("room_id", roomID).Msg("Failed to send notice")
+		rs.logger.Error("Failed to send notice", "room_id", roomID, "error", err)
 		return "", fmt.Errorf("failed to send notice to room %s: %w", roomID, err)
 	}
 
-	rs.log.Info().Str("room_id", roomID).Str("event_id", resp.EventID.String()).Msg("Notice sent successfully")
+	rs.logger.Info("Notice sent successfully", "room_id", roomID, "event_id", resp.EventID.String())
 	return resp.EventID, nil
 }
 
 func (rs *RoomService) GetJoinedRooms(ctx context.Context) ([]RoomInfo, error) {
-	rs.log.Debug().Msg("Fetching joined rooms")
+	rs.logger.Debug("Fetching joined rooms")
 
 	resp, err := rs.client.GetClient().JoinedRooms(ctx)
 	if err != nil {
-		rs.log.Error().Err(err).Msg("Failed to get joined rooms")
+		rs.logger.Error("Failed to get joined rooms", "error", err)
 		return nil, fmt.Errorf("failed to get joined rooms: %w", err)
 	}
 
@@ -175,14 +174,14 @@ func (rs *RoomService) GetJoinedRooms(ctx context.Context) ([]RoomInfo, error) {
 	for _, roomID := range resp.JoinedRooms {
 		info, err := rs.GetRoomInfo(ctx, roomID.String())
 		if err != nil {
-			rs.log.Warn().Err(err).Str("room_id", roomID.String()).Msg("Failed to get room info, using basic info")
+			rs.logger.Warn("Failed to get room info, using basic info", "room_id", roomID.String(), "error", err)
 			rooms = append(rooms, RoomInfo{ID: roomID})
 			continue
 		}
 		rooms = append(rooms, *info)
 	}
 
-	rs.log.Info().Int("count", len(rooms)).Msg("Retrieved joined rooms")
+	rs.logger.Info("Retrieved joined rooms", "count", len(rooms))
 	return rooms, nil
 }
 
@@ -191,7 +190,7 @@ func (rs *RoomService) GetRoomInfo(ctx context.Context, roomID string) (*RoomInf
 		return nil, errors.New("room ID cannot be empty")
 	}
 
-	rs.log.Debug().Str("room_id", roomID).Msg("Fetching room info")
+	rs.logger.Debug("Fetching room info", "room_id", roomID)
 
 	info := &RoomInfo{ID: id.RoomID(roomID)}
 	client := rs.client.GetClient()
@@ -248,17 +247,11 @@ func (rs *RoomService) GetRoomInfo(ctx context.Context, roomID string) (*RoomInf
 		}
 	}
 
-	rs.log.Debug().
-		Str("room_id", roomID).
-		Str("name", info.Name).
-		Str("alias", info.Alias).
-		Int("members", info.MemberCount).
-		Bool("encrypted", info.IsEncrypted).
-		Msg("Room info retrieved")
+	rs.logger.Debug("Room info retrieved", "room_id", roomID, "name", info.Name, "alias", info.Alias, "members", info.MemberCount, "encrypted", info.IsEncrypted)
 
 	return info, nil
 }
 
-func (rs *RoomService) SetLogger(logger zerolog.Logger) {
-	rs.log = logger
+func (rs *RoomService) SetLogger(logger *slog.Logger) {
+	rs.logger = logger
 }

@@ -4,11 +4,10 @@ package matrix
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
@@ -66,10 +65,9 @@ func (s *CommandService) RegisterCommandWithDesc(cmd, desc string, handler Comma
 		Handler:     handler,
 	}
 
-	log.Debug().
-		Str("command", cmd).
-		Str("description", desc).
-		Msg("Registered command")
+	slog.Debug("Registered command",
+		"command", cmd,
+		"description", desc)
 }
 
 // UnregisterCommand removes a command from the registry.
@@ -188,7 +186,7 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 
 	// Ignore edits
 	if content.RelatesTo != nil && content.RelatesTo.Type == event.RelReplace {
-		log.Debug().Str("event_id", evt.ID.String()).Msg("Ignoring edited message")
+		slog.Debug("Ignoring edited message", "event_id", evt.ID.String())
 		return nil
 	}
 
@@ -201,12 +199,11 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 	roomID := evt.RoomID
 
 	// Log received message
-	log.Info().
-		Str("sender", sender.String()).
-		Str("room", roomID.String()).
-		Str("event_id", evt.ID.String()).
-		Str("body", content.Body).
-		Msg("Received message")
+	slog.Info("Received message",
+		"sender", sender.String(),
+		"room", roomID.String(),
+		"event_id", evt.ID.String(),
+		"body", content.Body)
 
 	// Parse command
 	parsed := s.ParseCommand(content.Body)
@@ -217,28 +214,24 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 	// Look up command
 	cmdInfo, ok := s.GetCommand(parsed.Command)
 	if !ok {
-		log.Debug().
-			Str("command", parsed.Command).
-			Msg("Unknown command")
+		slog.Debug("Unknown command", "command", parsed.Command)
 		return nil
 	}
 
 	// Log command execution
-	log.Info().
-		Str("command", parsed.Command).
-		Str("sender", sender.String()).
-		Str("room", roomID.String()).
-		Strs("args", parsed.Args).
-		Msg("Executing command")
+	slog.Info("Executing command",
+		"command", parsed.Command,
+		"sender", sender.String(),
+		"room", roomID.String(),
+		"args", parsed.Args)
 
 	// Execute command
 	err := cmdInfo.Handler.Handle(ctx, sender, roomID, parsed.Args)
 	if err != nil {
-		log.Error().
-			Err(err).
-			Str("command", parsed.Command).
-			Str("sender", sender.String()).
-			Msg("Command execution failed")
+		slog.Error("Command execution failed",
+			"command", parsed.Command,
+			"sender", sender.String(),
+			"error", err)
 
 		// Report error to room
 		return s.reportError(ctx, roomID, parsed.Command, err)
@@ -261,10 +254,9 @@ func (s *CommandService) reportError(ctx context.Context, roomID id.RoomID, cmd 
 	)
 
 	if sendErr != nil {
-		log.Error().
-			Err(sendErr).
-			Str("room", roomID.String()).
-			Msg("Failed to send error message to room")
+		slog.Error("Failed to send error message to room",
+			"room", roomID.String(),
+			"error", sendErr)
 		return fmt.Errorf("command error: %v, send error: %w", err, sendErr)
 	}
 
@@ -284,10 +276,9 @@ func (s *CommandService) SendText(ctx context.Context, roomID id.RoomID, body st
 	)
 
 	if err != nil {
-		log.Error().
-			Err(err).
-			Str("room", roomID.String()).
-			Msg("Failed to send message")
+		slog.Error("Failed to send message",
+			"room", roomID.String(),
+			"error", err)
 	}
 
 	return err
@@ -296,30 +287,29 @@ func (s *CommandService) SendText(ctx context.Context, roomID id.RoomID, body st
 // EventHandler wraps CommandService and implements mautrix event handling.
 type EventHandler struct {
 	service *CommandService
-	logger  zerolog.Logger
+	logger  *slog.Logger
 }
 
 // NewEventHandler creates a new event handler.
 func NewEventHandler(service *CommandService) *EventHandler {
 	return &EventHandler{
 		service: service,
-		logger:  log.With().Str("component", "event_handler").Logger(),
+		logger:  slog.With("component", "event_handler"),
 	}
 }
 
 // OnMessage handles incoming message events.
 // This is designed to be used as the Syncer.OnEvent callback.
 func (h *EventHandler) OnMessage(ctx context.Context, evt *event.Event) {
-	logger := h.logger.With().
-		Str("event_id", evt.ID.String()).
-		Str("type", evt.Type.String()).
-		Str("sender", evt.Sender.String()).
-		Logger()
+	logger := h.logger.With(
+		"event_id", evt.ID.String(),
+		"type", evt.Type.String(),
+		"sender", evt.Sender.String())
 
-	logger.Debug().Msg("Processing event")
+	logger.Debug("Processing event")
 
 	if err := h.service.HandleEvent(ctx, evt); err != nil {
-		logger.Error().Err(err).Msg("Event handling failed")
+		logger.Error("Event handling failed", "error", err)
 	}
 }
 
@@ -329,9 +319,7 @@ func (h *EventHandler) OnEvent(ctx context.Context, evt *event.Event) {
 	case event.EventMessage:
 		h.OnMessage(ctx, evt)
 	default:
-		h.logger.Debug().
-			Str("type", evt.Type.String()).
-			Msg("Ignoring non-message event")
+		h.logger.Debug("Ignoring non-message event", "type", evt.Type.String())
 	}
 }
 

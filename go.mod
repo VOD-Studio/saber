@@ -3,6 +3,11 @@ module rua.plus/saber
 go 1.26.1
 
 require (
+	gopkg.in/yaml.v3 v3.0.1
+	maunium.net/go/mautrix v0.26.3
+)
+
+require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -17,6 +22,4 @@ require (
 	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
-	maunium.net/go/mautrix v0.26.3 // indirect
 )
