@@ -312,11 +312,56 @@ func (h *EventHandler) OnMessage(ctx context.Context, evt *event.Event) {
 	}
 }
 
+// OnMember 处理成员事件（包括邀请）。
+func (h *EventHandler) OnMember(ctx context.Context, evt *event.Event) {
+	logger := h.logger.With(
+		"event_id", evt.ID.String(),
+		"room", evt.RoomID.String(),
+		"sender", evt.Sender.String())
+
+	// 解析成员事件内容
+	content, ok := evt.Content.Parsed.(*event.MemberEventContent)
+	if !ok {
+		logger.Debug("无法解析成员事件内容")
+		return
+	}
+
+	// 只处理邀请事件
+	if content.Membership != event.MembershipInvite {
+		logger.Debug("忽略非邀请成员事件", "membership", content.Membership)
+		return
+	}
+
+	// 检查是否邀请机器人自己
+	if evt.StateKey == nil {
+		logger.Debug("成员事件没有 state key")
+		return
+	}
+
+	targetUserID := id.UserID(*evt.StateKey)
+	if targetUserID != h.service.botID {
+		logger.Debug("邀请目标不是本机器人", "target", targetUserID)
+		return
+	}
+
+	// 接受邀请
+	logger.Info("接受房间邀请", "inviter", evt.Sender.String())
+	_, err := h.service.client.JoinRoom(ctx, evt.RoomID.String(), nil)
+	if err != nil {
+		logger.Error("接受邀请失败", "error", err)
+		return
+	}
+
+	logger.Info("成功接受邀请")
+}
+
 // OnEvent 是通用事件处理器，分发到适当的处理器。
 func (h *EventHandler) OnEvent(ctx context.Context, evt *event.Event) {
 	switch evt.Type {
 	case event.EventMessage:
 		h.OnMessage(ctx, evt)
+	case event.StateMember:
+		h.OnMember(ctx, evt)
 	default:
 		h.logger.Debug("Ignoring non-message event", "type", evt.Type.String())
 	}

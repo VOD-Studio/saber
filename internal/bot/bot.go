@@ -102,6 +102,7 @@ func Run(version string) {
 	// Use OnEventType to register callback for specific event types
 	if syncer, ok := mautrixClient.Syncer.(*mautrix.DefaultSyncer); ok {
 		syncer.OnEventType(event.EventMessage, eventHandler.OnMessage)
+		syncer.OnEventType(event.StateMember, eventHandler.OnMember)
 	} else {
 		slog.Warn("Client syncer is not DefaultSyncer, event handling may not work")
 	}
