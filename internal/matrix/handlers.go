@@ -1,4 +1,4 @@
-// Package matrix provides Matrix event handling and command processing.
+// Package matrix 提供 Matrix 事件处理和命令处理功能。
 package matrix
 
 import (
@@ -13,24 +13,24 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
-// CommandHandler defines the interface for handling bot commands.
+// CommandHandler 定义处理机器人命令的接口。
 type CommandHandler interface {
-	// Handle processes a command with the given arguments.
-	// ctx provides cancellation and timeout control.
-	// userID is the Matrix ID of the user who sent the command.
-	// roomID is the Matrix room ID where the command was sent.
-	// args are the parsed command arguments (excluding the command itself).
+	// Handle 处理带有给定参数的命令。
+	// ctx 提供取消和超时控制。
+	// userID 是发送命令用户的 Matrix ID。
+	// roomID 是发送命令的 Matrix 房间 ID。
+	// args 是解析后的命令参数（不包括命令本身）。
 	Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error
 }
 
-// CommandInfo contains metadata about a registered command.
+// CommandInfo 包含已注册命令的元数据。
 type CommandInfo struct {
 	Name        string
 	Description string
 	Handler     CommandHandler
 }
 
-// CommandService manages command registration and dispatch.
+// CommandService 管理命令注册和分发。
 type CommandService struct {
 	mu       sync.RWMutex
 	commands map[string]CommandInfo
@@ -38,7 +38,7 @@ type CommandService struct {
 	botID    id.UserID
 }
 
-// NewCommandService creates a new command service.
+// NewCommandService 创建一个新的命令服务。
 func NewCommandService(client *mautrix.Client, botID id.UserID) *CommandService {
 	return &CommandService{
 		commands: make(map[string]CommandInfo),
@@ -47,14 +47,14 @@ func NewCommandService(client *mautrix.Client, botID id.UserID) *CommandService 
 	}
 }
 
-// RegisterCommand registers a command handler without a description.
-// The command name should not include the prefix (!).
+// RegisterCommand 注册一个不带描述的命令处理器。
+// 命令名称不应包含前缀 (!)。
 func (s *CommandService) RegisterCommand(cmd string, handler CommandHandler) {
 	s.RegisterCommandWithDesc(cmd, "", handler)
 }
 
-// RegisterCommandWithDesc registers a command handler with a description.
-// The command name should not include the prefix (!).
+// RegisterCommandWithDesc 注册带有描述的命令处理器。
+// 命令名称不应包含前缀 (!)。
 func (s *CommandService) RegisterCommandWithDesc(cmd, desc string, handler CommandHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -70,7 +70,7 @@ func (s *CommandService) RegisterCommandWithDesc(cmd, desc string, handler Comma
 		"description", desc)
 }
 
-// UnregisterCommand removes a command from the registry.
+// UnregisterCommand 从注册表中移除一个命令。
 func (s *CommandService) UnregisterCommand(cmd string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -78,7 +78,7 @@ func (s *CommandService) UnregisterCommand(cmd string) {
 	delete(s.commands, strings.ToLower(cmd))
 }
 
-// GetCommand retrieves command info by name.
+// GetCommand 按名称检索命令信息。
 func (s *CommandService) GetCommand(cmd string) (CommandInfo, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -87,7 +87,7 @@ func (s *CommandService) GetCommand(cmd string) (CommandInfo, bool) {
 	return info, ok
 }
 
-// ListCommands returns all registered commands.
+// ListCommands 返回所有已注册的命令。
 func (s *CommandService) ListCommands() []CommandInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -99,15 +99,15 @@ func (s *CommandService) ListCommands() []CommandInfo {
 	return list
 }
 
-// ParsedCommand represents a parsed command from a message.
+// ParsedCommand 表示从消息中解析的命令。
 type ParsedCommand struct {
 	Command string
 	Args    []string
 }
 
-// ParseCommand extracts a command and arguments from a message body.
-// Supports prefix-based commands (!command args) and mentions (@bot:command args).
-// Returns nil if the message is not a valid command.
+// ParseCommand 从消息体中提取命令和参数。
+// 支持基于前缀的命令 (!command args) 和提及 (@bot:command args)。
+// 如果消息不是有效命令则返回 nil。
 func (s *CommandService) ParseCommand(body string) *ParsedCommand {
 	body = strings.TrimSpace(body)
 	if body == "" {
@@ -170,8 +170,8 @@ func (s *CommandService) parseMentionCommand(body string) *ParsedCommand {
 	}
 }
 
-// HandleEvent processes a Matrix event and dispatches commands.
-// It only handles message events and ignores events from the bot itself.
+// HandleEvent 处理 Matrix 事件并分发命令。
+// 它只处理消息事件，忽略来自机器人自身的事件。
 func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) error {
 	// Only handle room messages
 	if evt.Type != event.EventMessage {
@@ -184,13 +184,13 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 		return nil
 	}
 
-	// Ignore edits
+	// 忽略编辑消息
 	if content.RelatesTo != nil && content.RelatesTo.Type == event.RelReplace {
 		slog.Debug("Ignoring edited message", "event_id", evt.ID.String())
 		return nil
 	}
 
-	// Ignore own messages
+	// 忽略自身消息
 	sender := evt.Sender
 	if sender == s.botID {
 		return nil
@@ -198,34 +198,34 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 
 	roomID := evt.RoomID
 
-	// Log received message
+	// 记录接收到的消息
 	slog.Info("Received message",
 		"sender", sender.String(),
 		"room", roomID.String(),
 		"event_id", evt.ID.String(),
 		"body", content.Body)
 
-	// Parse command
+	// 解析命令
 	parsed := s.ParseCommand(content.Body)
 	if parsed == nil {
 		return nil
 	}
 
-	// Look up command
+	// 查找命令
 	cmdInfo, ok := s.GetCommand(parsed.Command)
 	if !ok {
 		slog.Debug("Unknown command", "command", parsed.Command)
 		return nil
 	}
 
-	// Log command execution
+	// 记录命令执行
 	slog.Info("Executing command",
 		"command", parsed.Command,
 		"sender", sender.String(),
 		"room", roomID.String(),
 		"args", parsed.Args)
 
-	// Execute command
+	// 执行命令
 	err := cmdInfo.Handler.Handle(ctx, sender, roomID, parsed.Args)
 	if err != nil {
 		slog.Error("Command execution failed",
@@ -233,7 +233,7 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 			"sender", sender.String(),
 			"error", err)
 
-		// Report error to room
+		// 向房间报告错误
 		return s.reportError(ctx, roomID, parsed.Command, err)
 	}
 
@@ -263,7 +263,7 @@ func (s *CommandService) reportError(ctx context.Context, roomID id.RoomID, cmd 
 	return err
 }
 
-// SendText sends a text message to a room.
+// SendText 向房间发送文本消息。
 func (s *CommandService) SendText(ctx context.Context, roomID id.RoomID, body string) error {
 	_, err := s.client.SendMessageEvent(
 		ctx,
@@ -274,7 +274,6 @@ func (s *CommandService) SendText(ctx context.Context, roomID id.RoomID, body st
 			Body:    body,
 		},
 	)
-
 	if err != nil {
 		slog.Error("Failed to send message",
 			"room", roomID.String(),
@@ -284,13 +283,13 @@ func (s *CommandService) SendText(ctx context.Context, roomID id.RoomID, body st
 	return err
 }
 
-// EventHandler wraps CommandService and implements mautrix event handling.
+// EventHandler 封装 CommandService 并实现 mautrix 事件处理。
 type EventHandler struct {
 	service *CommandService
 	logger  *slog.Logger
 }
 
-// NewEventHandler creates a new event handler.
+// NewEventHandler 创建一个新的事件处理器。
 func NewEventHandler(service *CommandService) *EventHandler {
 	return &EventHandler{
 		service: service,
@@ -298,8 +297,8 @@ func NewEventHandler(service *CommandService) *EventHandler {
 	}
 }
 
-// OnMessage handles incoming message events.
-// This is designed to be used as the Syncer.OnEvent callback.
+// OnMessage 处理传入的消息事件。
+// 这设计用于作为 Syncer.OnEvent 回调使用。
 func (h *EventHandler) OnMessage(ctx context.Context, evt *event.Event) {
 	logger := h.logger.With(
 		"event_id", evt.ID.String(),
@@ -313,7 +312,7 @@ func (h *EventHandler) OnMessage(ctx context.Context, evt *event.Event) {
 	}
 }
 
-// OnEvent is a generic event handler that dispatches to appropriate handlers.
+// OnEvent 是通用事件处理器，分发到适当的处理器。
 func (h *EventHandler) OnEvent(ctx context.Context, evt *event.Event) {
 	switch evt.Type {
 	case event.EventMessage:
@@ -323,39 +322,39 @@ func (h *EventHandler) OnEvent(ctx context.Context, evt *event.Event) {
 	}
 }
 
-// Service returns the underlying CommandService.
+// Service 返回底层的 CommandService。
 func (h *EventHandler) Service() *CommandService {
 	return h.service
 }
 
-// Built-in commands
+// 内置命令
 
-// PingCommand responds with "Pong!".
+// PingCommand 响应 "Pong!"。
 type PingCommand struct {
 	service *CommandService
 }
 
-// NewPingCommand creates a new ping command handler.
+// NewPingCommand 创建一个新的 ping 命令处理器。
 func NewPingCommand(service *CommandService) *PingCommand {
 	return &PingCommand{service: service}
 }
 
-// Handle implements CommandHandler.
+// Handle 实现 CommandHandler。
 func (c *PingCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
 	return c.service.SendText(ctx, roomID, "Pong!")
 }
 
-// HelpCommand lists available commands.
+// HelpCommand 列出可用命令。
 type HelpCommand struct {
 	service *CommandService
 }
 
-// NewHelpCommand creates a new help command handler.
+// NewHelpCommand 创建一个新的帮助命令处理器。
 func NewHelpCommand(service *CommandService) *HelpCommand {
 	return &HelpCommand{service: service}
 }
 
-// Handle implements CommandHandler.
+// Handle 实现 CommandHandler。
 func (c *HelpCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
 	commands := c.service.ListCommands()
 
@@ -367,9 +366,9 @@ func (c *HelpCommand) Handle(ctx context.Context, userID id.UserID, roomID id.Ro
 	sb.WriteString("Available commands:\n")
 
 	for _, cmd := range commands {
-		sb.WriteString(fmt.Sprintf("  !%s", cmd.Name))
+		fmt.Fprintf(&sb, "  !%s", cmd.Name)
 		if cmd.Description != "" {
-			sb.WriteString(fmt.Sprintf(" - %s", cmd.Description))
+			fmt.Fprintf(&sb, " - %s", cmd.Description)
 		}
 		sb.WriteString("\n")
 	}
@@ -377,7 +376,7 @@ func (c *HelpCommand) Handle(ctx context.Context, userID id.UserID, roomID id.Ro
 	return c.service.SendText(ctx, roomID, sb.String())
 }
 
-// RegisterBuiltinCommands registers the default commands (!ping, !help).
+// RegisterBuiltinCommands 注册默认命令（!ping, !help）。
 func RegisterBuiltinCommands(service *CommandService) {
 	service.RegisterCommandWithDesc("ping", "Check if bot is alive", NewPingCommand(service))
 	service.RegisterCommandWithDesc("help", "List available commands", NewHelpCommand(service))

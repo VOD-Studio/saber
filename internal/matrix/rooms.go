@@ -1,5 +1,5 @@
-// Package matrix provides Matrix client functionality for the Saber bot.
-// This file contains room operations: join, leave, send messages, and room info.
+// Package matrix 提供 Saber 机器人的 Matrix 客户端功能。
+// 本文件包含房间操作：加入、离开、发送消息和房间信息。
 package matrix
 
 import (
@@ -36,6 +36,8 @@ func NewRoomService(client *MatrixClient) *RoomService {
 	}
 }
 
+// JoinRoom 加入指定的房间。
+// roomIDOrAlias 可以是房间 ID（!xxx:server.org）或房间别名（#room:server.org）。
 func (rs *RoomService) JoinRoom(ctx context.Context, roomIDOrAlias string) (*RoomInfo, error) {
 	if roomIDOrAlias == "" {
 		return nil, errors.New("room ID or alias cannot be empty")
@@ -45,6 +47,7 @@ func (rs *RoomService) JoinRoom(ctx context.Context, roomIDOrAlias string) (*Roo
 
 	var alias string
 	if strings.HasPrefix(roomIDOrAlias, "!") {
+		// 已经是房间 ID，直接使用
 	} else if strings.HasPrefix(roomIDOrAlias, "#") {
 		alias = roomIDOrAlias
 	} else {
@@ -73,6 +76,7 @@ func (rs *RoomService) JoinRoom(ctx context.Context, roomIDOrAlias string) (*Roo
 	return info, nil
 }
 
+// LeaveRoom 离开指定的房间。
 func (rs *RoomService) LeaveRoom(ctx context.Context, roomID string) error {
 	if roomID == "" {
 		return errors.New("room ID cannot be empty")
@@ -91,6 +95,7 @@ func (rs *RoomService) LeaveRoom(ctx context.Context, roomID string) error {
 	return nil
 }
 
+// SendMessage 向房间发送文本消息。
 func (rs *RoomService) SendMessage(ctx context.Context, roomID, text string) (id.EventID, error) {
 	if roomID == "" {
 		return "", errors.New("room ID cannot be empty")
@@ -111,6 +116,7 @@ func (rs *RoomService) SendMessage(ctx context.Context, roomID, text string) (id
 	return resp.EventID, nil
 }
 
+// SendFormattedMessage 向房间发送格式化消息（支持 HTML）。
 func (rs *RoomService) SendFormattedMessage(ctx context.Context, roomID, html, plain string) (id.EventID, error) {
 	if roomID == "" {
 		return "", errors.New("room ID cannot be empty")
@@ -141,6 +147,7 @@ func (rs *RoomService) SendFormattedMessage(ctx context.Context, roomID, html, p
 	return resp.EventID, nil
 }
 
+// SendNotice 向房间发送通知消息。
 func (rs *RoomService) SendNotice(ctx context.Context, roomID, text string) (id.EventID, error) {
 	if roomID == "" {
 		return "", errors.New("room ID cannot be empty")
@@ -161,6 +168,7 @@ func (rs *RoomService) SendNotice(ctx context.Context, roomID, text string) (id.
 	return resp.EventID, nil
 }
 
+// GetJoinedRooms 获取所有已加入的房间列表。
 func (rs *RoomService) GetJoinedRooms(ctx context.Context) ([]RoomInfo, error) {
 	rs.logger.Debug("Fetching joined rooms")
 
@@ -185,6 +193,7 @@ func (rs *RoomService) GetJoinedRooms(ctx context.Context) ([]RoomInfo, error) {
 	return rooms, nil
 }
 
+// GetRoomInfo 获取房间的详细信息。
 func (rs *RoomService) GetRoomInfo(ctx context.Context, roomID string) (*RoomInfo, error) {
 	if roomID == "" {
 		return nil, errors.New("room ID cannot be empty")
@@ -196,40 +205,40 @@ func (rs *RoomService) GetRoomInfo(ctx context.Context, roomID string) (*RoomInf
 	client := rs.client.GetClient()
 	roomIDTyped := id.RoomID(roomID)
 
-	// Get room name
+	// 获取房间名称
 	if nameEv, err := client.FullStateEvent(ctx, roomIDTyped, event.StateRoomName, ""); err == nil {
 		if nameContent, ok := nameEv.Content.Parsed.(*event.RoomNameEventContent); ok {
 			info.Name = nameContent.Name
 		}
 	}
 
-	// Get room topic
+	// 获取房间主题
 	if topicEv, err := client.FullStateEvent(ctx, roomIDTyped, event.StateTopic, ""); err == nil {
 		if topicContent, ok := topicEv.Content.Parsed.(*event.TopicEventContent); ok {
 			info.Topic = topicContent.Topic
 		}
 	}
 
-	// Get canonical alias
+	// 获取规范别名
 	if aliasEv, err := client.FullStateEvent(ctx, roomIDTyped, event.StateCanonicalAlias, ""); err == nil {
 		if aliasContent, ok := aliasEv.Content.Parsed.(*event.CanonicalAliasEventContent); ok {
 			info.Alias = aliasContent.Alias.String()
 		}
 	}
 
-	// Get avatar URL
+	// 获取头像 URL
 	if avatarEv, err := client.FullStateEvent(ctx, roomIDTyped, event.StateRoomAvatar, ""); err == nil {
 		if avatarContent, ok := avatarEv.Content.Parsed.(*event.RoomAvatarEventContent); ok {
 			info.AvatarURL = avatarContent.URL
 		}
 	}
 
-	// Get encryption status
+	// 获取加密状态
 	if _, err := client.FullStateEvent(ctx, roomIDTyped, event.StateEncryption, ""); err == nil {
 		info.IsEncrypted = true
 	}
 
-	// Get member count from state
+	// 从状态获取成员数量
 	stateMap, err := client.State(ctx, roomIDTyped)
 	if err == nil {
 		if memberEvents, ok := stateMap[event.StateMember]; ok {

@@ -4,11 +4,11 @@ import (
 	"flag"
 )
 
-// Version can be set at build time with:
+// Version 可在构建时使用以下命令设置：
 // go build -ldflags="-X 'saber/internal/cli.Version=1.0.0'"
 var Version = "dev"
 
-// Flags holds parsed command-line flags.
+// Flags 包含已解析的命令行标志。
 type Flags struct {
 	ConfigPath     string
 	Verbose        bool
@@ -16,7 +16,7 @@ type Flags struct {
 	GenerateConfig bool
 }
 
-// Parse parses command-line flags and returns *Flags.
+// Parse 解析命令行标志并返回 *Flags。
 func Parse() *Flags {
 	f := &Flags{}
 

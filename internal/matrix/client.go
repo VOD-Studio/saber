@@ -1,5 +1,5 @@
-// Package matrix provides a Matrix client wrapper using mautrix-go.
-// It handles connection, authentication, and session management.
+// Package matrix 提供基于 mautrix-go 的 Matrix 客户端封装。
+// 它处理连接、认证和会话管理。
 package matrix
 
 import (
@@ -14,16 +14,15 @@ import (
 	"rua.plus/saber/internal/config"
 )
 
-// MatrixClient wraps mautrix.Client with session management capabilities.
-// It stores configuration and provides methods for login, session persistence,
-// and connection verification.
+// MatrixClient 封装了 mautrix.Client，提供会话管理能力。
+// 它存储配置并提供登录、会话持久化和连接验证的方法。
 type MatrixClient struct {
 	client *mautrix.Client
 	config *config.MatrixConfig
 }
 
-// Session represents the persisted authentication state.
-// WARNING: Never commit session files containing access tokens to version control.
+// Session 表示持久化的认证状态。
+// 警告：切勿将包含访问令牌的会话文件提交到版本控制。
 type Session struct {
 	UserID      string `yaml:"user_id"`
 	DeviceID    string `yaml:"device_id"`
@@ -31,12 +30,11 @@ type Session struct {
 	Homeserver  string `yaml:"homeserver"`
 }
 
-// NewMatrixClient creates a new Matrix client wrapper.
-// It validates the configuration and initializes the client with either
-// an existing access token or prepares for password-based login.
+// NewMatrixClient 创建一个新的 Matrix 客户端封装。
+// 它验证配置并使用现有的访问令牌初始化客户端，或准备进行基于密码的登录。
 //
-// If AccessToken is provided in config, it creates a client with that token.
-// If only Password is provided, the client is created but requires Login() to be called.
+// 如果配置中提供了 AccessToken，它使用令牌创建客户端。
+// 如果只提供 Password，客户端会被创建但需要调用 Login() 进行登录。
 func NewMatrixClient(cfg *config.MatrixConfig) (*MatrixClient, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("matrix config cannot be nil")
@@ -91,9 +89,9 @@ func NewMatrixClient(cfg *config.MatrixConfig) (*MatrixClient, error) {
 	}, nil
 }
 
-// Login performs password-based authentication against the Matrix homeserver.
-// This method should only be called when UsePasswordAuth() returns true.
-// On successful login, the access token and device ID are stored in the client.
+// Login 执行针对 Matrix  homeserver 的基于密码的认证。
+// 此方法应仅在 UsePasswordAuth() 返回 true 时调用。
+// 登录成功后，访问令牌和设备 ID 会存储在客户端中。
 func (m *MatrixClient) Login(ctx context.Context) error {
 	if !m.config.UsePasswordAuth() {
 		return fmt.Errorf("password authentication not configured: either access token is set or password is empty")
@@ -135,11 +133,11 @@ func (m *MatrixClient) Login(ctx context.Context) error {
 	return nil
 }
 
-// SaveSession persists the current session credentials to a YAML file.
-// The session includes user ID, device ID, access token, and homeserver.
+// SaveSession 将当前会话凭据持久化到 YAML 文件。
+// 会话包括用户 ID、设备 ID、访问令牌和 homeserver。
 //
-// WARNING: The session file contains sensitive credentials.
-// Never commit session files to version control.
+// 警告：会话文件包含敏感凭据。
+// 切勿将会话文件提交到版本控制。
 func (m *MatrixClient) SaveSession(path string) error {
 	if m.client.AccessToken == "" {
 		return fmt.Errorf("cannot save session: no access token available")
@@ -157,7 +155,7 @@ func (m *MatrixClient) SaveSession(path string) error {
 		return fmt.Errorf("failed to marshal session data: %w", err)
 	}
 
-	// Write with restricted permissions (0600 = owner read/write only)
+	// 以受限权限写入（0600 = 仅所有者读写）
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write session file: %w", err)
 	}
@@ -169,8 +167,8 @@ func (m *MatrixClient) SaveSession(path string) error {
 	return nil
 }
 
-// LoadSession restores session credentials from a YAML file.
-// This allows reusing an existing authenticated session without re-login.
+// LoadSession 从 YAML 文件恢复会话凭据。
+// 这允许重用现有的已认证会话而无需重新登录。
 func (m *MatrixClient) LoadSession(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -204,8 +202,8 @@ func (m *MatrixClient) LoadSession(path string) error {
 	return nil
 }
 
-// VerifyLogin checks if the current session is valid by querying the homeserver.
-// This uses the Whoami API endpoint to verify the access token is still valid.
+// VerifyLogin 通过查询 homeserver 检查当前会话是否有效。
+// 这使用 Whoami API 端点验证访问令牌是否仍然有效。
 func (m *MatrixClient) VerifyLogin(ctx context.Context) error {
 	if m.client.AccessToken == "" {
 		return fmt.Errorf("cannot verify login: no access token set")
@@ -226,28 +224,28 @@ func (m *MatrixClient) VerifyLogin(ctx context.Context) error {
 	return nil
 }
 
-// GetClient returns the underlying mautrix.Client for advanced operations.
-// Use this to access room operations, message sending, and other Matrix APIs.
+// GetClient 返回底层的 mautrix.Client 以进行高级操作。
+// 使用此方法可以访问房间操作、消息发送和其他 Matrix API。
 func (m *MatrixClient) GetClient() *mautrix.Client {
 	return m.client
 }
 
-// GetConfig returns the current configuration.
+// GetConfig 返回当前配置。
 func (m *MatrixClient) GetConfig() *config.MatrixConfig {
 	return m.config
 }
 
-// GetUserID returns the current authenticated user ID.
+// GetUserID 返回当前认证用户 ID。
 func (m *MatrixClient) GetUserID() id.UserID {
 	return m.client.UserID
 }
 
-// GetDeviceID returns the current device ID.
+// GetDeviceID 返回当前设备 ID。
 func (m *MatrixClient) GetDeviceID() id.DeviceID {
 	return m.client.DeviceID
 }
 
-// IsLoggedIn returns true if an access token is set.
+// IsLoggedIn 如果设置了访问令牌则返回 true。
 func (m *MatrixClient) IsLoggedIn() bool {
 	return m.client.AccessToken != ""
 }

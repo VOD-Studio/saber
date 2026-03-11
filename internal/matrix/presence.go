@@ -1,32 +1,32 @@
-// Package matrix provides Matrix client functionality including presence tracking,
-// typing indicators, read receipts, and auto-reconnection support.
+// Package matrix 提供 Matrix 客户端功能，包括在线状态跟踪、
+// 输入指示器、已读回执和自动重连支持。
 package matrix
 
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
 
-	"log/slog"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 )
 
-// PresenceState represents a user's presence status.
+// PresenceState 表示用户的在线状态。
 type PresenceState string
 
 const (
-	// PresenceOnline indicates the user is online.
+	// PresenceOnline 表示用户在线。
 	PresenceOnline PresenceState = "online"
-	// PresenceOffline indicates the user is offline.
+	// PresenceOffline 表示用户离线。
 	PresenceOffline PresenceState = "offline"
-	// PresenceUnavailable indicates the user is unavailable (away).
+	// PresenceUnavailable 表示用户不可用（离开）。
 	PresenceUnavailable PresenceState = "unavailable"
 )
 
-// PresenceInfo contains presence information for a user.
+// PresenceInfo 包含用户的在线状态信息。
 type PresenceInfo struct {
 	UserID          id.UserID
 	Presence        PresenceState
@@ -35,24 +35,24 @@ type PresenceInfo struct {
 	CurrentlyActive bool
 }
 
-// ReconnectConfig holds configuration for auto-reconnection.
+// ReconnectConfig 保存自动重连的配置。
 type ReconnectConfig struct {
-	// MaxRetries is the maximum number of reconnection attempts.
-	// Set to 0 for unlimited retries (not recommended).
+	// MaxRetries 是最大重连尝试次数。
+	// 设置为 0 表示无限重试（不推荐）。
 	MaxRetries int
 
-	// InitialDelay is the initial backoff delay before the first retry.
+	// InitialDelay 是首次重试前的初始退避延迟。
 	InitialDelay time.Duration
 
-	// MaxDelay is the maximum backoff delay between retries.
+	// MaxDelay 是重试之间的最大退避延迟。
 	MaxDelay time.Duration
 
-	// Multiplier is the exponential backoff multiplier.
+	// Multiplier 是指数退避乘数。
 	// delay = min(initialDelay * multiplier^attempt, maxDelay)
 	Multiplier float64
 }
 
-// DefaultReconnectConfig returns a ReconnectConfig with sensible defaults.
+// DefaultReconnectConfig 返回带有合理默认值的 ReconnectConfig。
 func DefaultReconnectConfig() *ReconnectConfig {
 	return &ReconnectConfig{
 		MaxRetries:   10,
@@ -62,13 +62,13 @@ func DefaultReconnectConfig() *ReconnectConfig {
 	}
 }
 
-// PresenceEventHandler is a callback function type for handling Matrix events.
+// PresenceEventHandler 是处理 Matrix 事件的回调函数类型。
 type PresenceEventHandler func(ctx context.Context, evt *event.Event)
 
-// SessionSaver is a callback function type for saving session state on disconnect.
+// SessionSaver 是断开连接时保存会话状态的回调函数类型。
 type SessionSaver func(path string) error
 
-// PresenceService provides presence tracking, typing indicators, and auto-reconnection.
+// PresenceService 提供在线状态跟踪、输入指示器和自动重连功能。
 type PresenceService struct {
 	client        *mautrix.Client
 	reconnectCfg  *ReconnectConfig
@@ -78,7 +78,7 @@ type PresenceService struct {
 	lastStatusMsg string
 }
 
-// NewPresenceService creates a new PresenceService with the given Matrix client.
+// NewPresenceService 使用给定的 Matrix 客户端创建一个新的 PresenceService。
 func NewPresenceService(client *mautrix.Client) *PresenceService {
 	return &PresenceService{
 		client:       client,
@@ -86,24 +86,24 @@ func NewPresenceService(client *mautrix.Client) *PresenceService {
 	}
 }
 
-// SetReconnectConfig sets a custom reconnection configuration.
+// SetReconnectConfig 设置自定义的重连配置。
 func (p *PresenceService) SetReconnectConfig(cfg *ReconnectConfig) {
 	p.reconnectCfg = cfg
 }
 
-// SetSessionSaver sets the session saver callback and path for session persistence.
+// SetSessionSaver 设置会话保存回调和路径以进行会话持久化。
 func (p *PresenceService) SetSessionSaver(saver SessionSaver, path string) {
 	p.sessionSaver = saver
 	p.sessionPath = path
 }
 
-// SetPresence sets the user's presence state with an optional status message.
+// SetPresence 设置用户的在线状态和可选的状态消息。
 func (p *PresenceService) SetPresence(state PresenceState, statusMsg string) error {
 	ctx := context.Background()
 	return p.SetPresenceWithContext(ctx, state, statusMsg)
 }
 
-// SetPresenceWithContext sets the user's presence state with context support.
+// SetPresenceWithContext 设置用户的在线状态，支持上下文。
 func (p *PresenceService) SetPresenceWithContext(ctx context.Context, state PresenceState, statusMsg string) error {
 	slog.Info("Setting presence state", "presence", string(state), "status_msg", statusMsg)
 
@@ -126,13 +126,13 @@ func (p *PresenceService) SetPresenceWithContext(ctx context.Context, state Pres
 	return nil
 }
 
-// GetPresence retrieves the presence information for a given user.
+// GetPresence 检索给定用户的在线信息。
 func (p *PresenceService) GetPresence(userID string) (*PresenceInfo, error) {
 	ctx := context.Background()
 	return p.GetPresenceWithContext(ctx, userID)
 }
 
-// GetPresenceWithContext retrieves the presence information for a given user with context support.
+// GetPresenceWithContext 检索给定用户的在线信息，支持上下文。
 func (p *PresenceService) GetPresenceWithContext(ctx context.Context, userID string) (*PresenceInfo, error) {
 	slog.Debug("Getting presence for user", "user_id", userID)
 
@@ -155,14 +155,14 @@ func (p *PresenceService) GetPresenceWithContext(ctx context.Context, userID str
 	return info, nil
 }
 
-// StartTyping sends a typing indicator to a room for a specified timeout in milliseconds.
-// The timeout parameter is in milliseconds (default 30000ms = 30s).
+// StartTyping 向房间发送输入指示器，超时时间以毫秒为单位。
+// timeout 参数以毫秒为单位（默认 30000ms = 30 秒）。
 func (p *PresenceService) StartTyping(roomID string, timeout int) error {
 	ctx := context.Background()
 	return p.StartTypingWithContext(ctx, roomID, time.Duration(timeout)*time.Millisecond)
 }
 
-// StartTypingWithContext sends a typing indicator with context support.
+// StartTypingWithContext 发送输入指示器，支持上下文。
 func (p *PresenceService) StartTypingWithContext(ctx context.Context, roomID string, timeout time.Duration) error {
 	slog.Debug("Starting typing indicator", "room_id", roomID, "timeout", timeout)
 
@@ -177,13 +177,13 @@ func (p *PresenceService) StartTypingWithContext(ctx context.Context, roomID str
 	return nil
 }
 
-// StopTyping stops the typing indicator in a room.
+// StopTyping 停止房间中的输入指示器。
 func (p *PresenceService) StopTyping(roomID string) error {
 	ctx := context.Background()
 	return p.StopTypingWithContext(ctx, roomID)
 }
 
-// StopTypingWithContext stops the typing indicator with context support.
+// StopTypingWithContext 停止输入指示器，支持上下文。
 func (p *PresenceService) StopTypingWithContext(ctx context.Context, roomID string) error {
 	slog.Debug("Stopping typing indicator", "room_id", roomID)
 
@@ -198,13 +198,13 @@ func (p *PresenceService) StopTypingWithContext(ctx context.Context, roomID stri
 	return nil
 }
 
-// MarkAsRead sends a read receipt for a specific event in a room.
+// MarkAsRead 为房间中的特定事件发送已读回执。
 func (p *PresenceService) MarkAsRead(roomID string, eventID string) error {
 	ctx := context.Background()
 	return p.MarkAsReadWithContext(ctx, roomID, eventID)
 }
 
-// MarkAsReadWithContext sends a read receipt with context support.
+// MarkAsReadWithContext 发送已读回执，支持上下文。
 func (p *PresenceService) MarkAsReadWithContext(ctx context.Context, roomID string, eventID string) error {
 	slog.Debug("Marking message as read", "room_id", roomID, "event_id", eventID)
 
@@ -219,14 +219,14 @@ func (p *PresenceService) MarkAsReadWithContext(ctx context.Context, roomID stri
 	return nil
 }
 
-// SendReceipt sends a read receipt of a specific type for an event.
-// Common receipt types are event.ReceiptTypeRead and event.ReceiptTypeReadPrivate.
+// SendReceipt 为事件发送特定类型的已读回执。
+// 常见的回执类型是 event.ReceiptTypeRead 和 event.ReceiptTypeReadPrivate。
 func (p *PresenceService) SendReceipt(roomID string, eventID string, receiptType event.ReceiptType) error {
 	ctx := context.Background()
 	return p.SendReceiptWithContext(ctx, roomID, eventID, receiptType)
 }
 
-// SendReceiptWithContext sends a read receipt with context support.
+// SendReceiptWithContext 发送已读回执，支持上下文。
 func (p *PresenceService) SendReceiptWithContext(ctx context.Context, roomID string, eventID string, receiptType event.ReceiptType) error {
 	slog.Debug("Sending receipt", "room_id", roomID, "event_id", eventID, "receipt_type", string(receiptType))
 
@@ -241,7 +241,7 @@ func (p *PresenceService) SendReceiptWithContext(ctx context.Context, roomID str
 	return nil
 }
 
-// calculateBackoff calculates the backoff delay for a given retry attempt.
+// calculateBackoff 计算给定重试尝试的退避延迟。
 func (p *PresenceService) calculateBackoff(attempt int) time.Duration {
 	delay := float64(p.reconnectCfg.InitialDelay)
 	delay = delay * math.Pow(p.reconnectCfg.Multiplier, float64(attempt))
@@ -251,7 +251,7 @@ func (p *PresenceService) calculateBackoff(attempt int) time.Duration {
 	return result
 }
 
-// saveSessionOnDisconnect saves the session state if a saver is configured.
+// saveSessionOnDisconnect 如果配置了保存器，则保存会话状态。
 func (p *PresenceService) saveSessionOnDisconnect() {
 	if p.sessionSaver == nil || p.sessionPath == "" {
 		return
@@ -266,7 +266,7 @@ func (p *PresenceService) saveSessionOnDisconnect() {
 	}
 }
 
-// restorePresence restores the previous presence state after reconnection.
+// restorePresence 在重连后恢复之前的在线状态。
 func (p *PresenceService) restorePresence() error {
 	if p.lastPresence == "" {
 		// No previous presence set, default to online
@@ -276,11 +276,11 @@ func (p *PresenceService) restorePresence() error {
 	return p.SetPresence(p.lastPresence, p.lastStatusMsg)
 }
 
-// StartSyncWithReconnect starts syncing with automatic reconnection on disconnect.
-// It uses exponential backoff for reconnection attempts.
-// The syncer should be configured with event handlers before calling this method.
+// StartSyncWithReconnect 开始同步，断开时自动重连。
+// 它使用指数退避进行重连尝试。
+// 在调用此方法之前，应该为 syncer 配置事件处理器。
 //
-// Example:
+// 示例：
 //
 //	syncer := client.Syncer.(*mautrix.DefaultSyncer)
 //	syncer.OnEventType(event.EventMessage, handler)
@@ -353,17 +353,17 @@ func (p *PresenceService) StartSyncWithReconnect(ctx context.Context, cfg *Recon
 	}
 }
 
-// StartSyncWithReconnectSimple starts syncing with auto-reconnect using default configuration.
+// StartSyncWithReconnectSimple 使用默认配置开始同步并自动重连。
 func (p *PresenceService) StartSyncWithReconnectSimple(ctx context.Context) error {
 	return p.StartSyncWithReconnect(ctx, DefaultReconnectConfig())
 }
 
-// GetLastPresence returns the last set presence state.
+// GetLastPresence 返回最后设置的在线状态。
 func (p *PresenceService) GetLastPresence() (PresenceState, string) {
 	return p.lastPresence, p.lastStatusMsg
 }
 
-// RestoreLastPresence restores the last known presence state.
+// RestoreLastPresence 恢复最后已知的在线状态。
 func (p *PresenceService) RestoreLastPresence() error {
 	return p.restorePresence()
 }

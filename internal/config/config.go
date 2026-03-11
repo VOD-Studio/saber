@@ -123,9 +123,9 @@ func ExampleConfig() string {
   # password: "your-secure-password"
 
   # 启动时自动加入的房间列表（可选）
-  auto_join_rooms:
-    - "!roomid1:matrix.org"
-    - "#public-room:matrix.org"
+  # auto_join_rooms:
+  #   - "!roomid1:matrix.org"
+  #   - "#public-room:matrix.org"
 `
 }
 
