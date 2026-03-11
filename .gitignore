@@ -35,6 +35,7 @@ vendor/
 Thumbs.db
 config.toml
 config.example.yaml
+config.yaml.session
 
 # Credentials and sensitive config
 config.yaml
