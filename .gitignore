@@ -34,3 +34,8 @@ vendor/
 .DS_Store
 Thumbs.db
 config.toml
+
+# Credentials and sensitive config
+config.yaml
+*.credentials.yaml
+*.db

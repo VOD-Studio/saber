@@ -15,9 +15,37 @@ type Config struct {
 
 // MatrixConfig 存储 Matrix 连接配置
 type MatrixConfig struct {
-	Homeserver string `yaml:"homeserver"`
-	Username   string `yaml:"username"`
-	Password   string `yaml:"password"`
+	Homeserver    string   `yaml:"homeserver"`
+	UserID        string   `yaml:"user_id"`         // 完整的 Matrix ID，如 @user:matrix.org
+	DeviceID      string   `yaml:"device_id"`       // 设备标识符
+	DeviceName    string   `yaml:"device_name"`     // 设备显示名称
+	Password      string   `yaml:"password"`        // 密码登录（可选）
+	AccessToken   string   `yaml:"access_token"`    // Token 登录（可选，优先级高于密码）
+	AutoJoinRooms []string `yaml:"auto_join_rooms"` // 启动时自动加入的房间列表
+}
+
+// UseTokenAuth 检查是否使用 Token 认证
+func (m *MatrixConfig) UseTokenAuth() bool {
+	return m.AccessToken != ""
+}
+
+// UsePasswordAuth 检查是否使用密码认证
+func (m *MatrixConfig) UsePasswordAuth() bool {
+	return m.Password != "" && m.AccessToken == ""
+}
+
+// Validate 验证配置是否有效
+func (m *MatrixConfig) Validate() error {
+	if m.Homeserver == "" {
+		return fmt.Errorf("homeserver is required")
+	}
+	if m.UserID == "" {
+		return fmt.Errorf("user_id is required")
+	}
+	if !m.UseTokenAuth() && !m.UsePasswordAuth() {
+		return fmt.Errorf("either password or access_token must be provided")
+	}
+	return nil
 }
 
 // DefaultConfigPath 返回默认配置文件路径
@@ -62,9 +90,46 @@ func LoadOrDefault(path string) (*Config, error) {
 func DefaultConfig() *Config {
 	return &Config{
 		Matrix: MatrixConfig{
-			Homeserver: "https://matrix.org",
-			Username:   "",
-			Password:   "",
+			Homeserver:  "https://matrix.org",
+			UserID:      "",
+			DeviceID:    "",
+			DeviceName:  "Saber Bot",
+			Password:    "",
+			AccessToken: "",
 		},
 	}
+}
+
+// ExampleConfig returns the example configuration content.
+func ExampleConfig() string {
+	return `matrix:
+  # Matrix 服务器地址
+  homeserver: "https://matrix.org"
+
+  # 完整的 Matrix 用户 ID（格式：@username:server.org）
+  user_id: "@your-bot:matrix.org"
+
+  # 设备标识符（可选，留空则服务器自动生成）
+  device_id: "saber-bot-device"
+
+  # 设备显示名称（可选）
+  device_name: "Saber Bot"
+
+  # 认证方式（二选一，access_token 优先级更高）
+  # 方式 1: 使用 Access Token（推荐，更安全）
+  access_token: "syt_xxxxxxxxxxxxx_xxxxxxxxxxxx"
+
+  # 方式 2: 使用密码登录（首次登录使用）
+  # password: "your-secure-password"
+
+  # 启动时自动加入的房间列表（可选）
+  auto_join_rooms:
+    - "!roomid1:matrix.org"
+    - "#public-room:matrix.org"
+`
+}
+
+// GenerateExample writes the example configuration to a file.
+func GenerateExample(path string) error {
+	return os.WriteFile(path, []byte(ExampleConfig()), 0o644)
 }

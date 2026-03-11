@@ -1,4 +1,0 @@
-matrix:
-  homeserver: "https://matrix.org"
-  username: "@your-bot:matrix.org"
-  password: "your-password"

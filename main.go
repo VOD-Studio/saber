@@ -1,7 +1,11 @@
 package main
 
-import "fmt"
+import (
+	"rua.plus/saber/internal/bot"
+)
+
+var version = "dev"
 
 func main() {
-	fmt.Println("Hello World!")
+	bot.Run(version)
 }
