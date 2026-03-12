@@ -2,7 +2,7 @@
 
 APP_NAME := saber
 GIT_MSG := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-VERSION := 0.0.1
+VERSION := 0.0.2
 BUILD_DIR := bin
 MAIN_FILE := main.go
 
