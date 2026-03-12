@@ -4,6 +4,7 @@ package matrix
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"os"
@@ -17,8 +18,9 @@ import (
 // MatrixClient 封装了 mautrix.Client，提供会话管理能力。
 // 它存储配置并提供登录、会话持久化和连接验证的方法。
 type MatrixClient struct {
-	client *mautrix.Client
-	config *config.MatrixConfig
+	client        *mautrix.Client
+	config        *config.MatrixConfig
+	cryptoService CryptoService // 新增：加密服务
 }
 
 // Session 表示持久化的认证状态。
@@ -245,7 +247,36 @@ func (m *MatrixClient) GetDeviceID() id.DeviceID {
 	return m.client.DeviceID
 }
 
+// GetCryptoService 返回加密服务实例。
+func (m *MatrixClient) GetCryptoService() CryptoService {
+	return m.cryptoService
+}
+
 // IsLoggedIn 如果设置了访问令牌则返回 true。
 func (m *MatrixClient) IsLoggedIn() bool {
 	return m.client.AccessToken != ""
+}
+
+// InitCrypto 初始化加密服务。
+// 如果配置启用了 E2EE，则初始化 OlmCryptoService；否则使用 NoopCryptoService。
+func (m *MatrixClient) InitCrypto(ctx context.Context, pickleKey []byte) error {
+	if m.config.EnableE2EE {
+		svc := NewOlmCryptoService(m.client, m.config.E2EESessionPath, pickleKey)
+		if err := svc.Init(ctx); err != nil {
+			return fmt.Errorf("failed to initialize crypto: %w", err)
+		}
+		m.cryptoService = svc
+	} else {
+		m.cryptoService = NewNoopCryptoService()
+	}
+	return nil
+}
+
+// GeneratePickleKey 生成用于加密存储的安全随机密钥。
+func GeneratePickleKey() ([]byte, error) {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return nil, fmt.Errorf("failed to generate pickle key: %w", err)
+	}
+	return key, nil
 }
