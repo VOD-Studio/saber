@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -66,10 +67,14 @@ func NewClientWithModel(cfg *config.ModelConfig) (*Client, error) {
 		return nil, fmt.Errorf("model config is required")
 	}
 
-	// 创建 HTTP 客户端
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
 	}
+
+	slog.Debug("创建AI客户端",
+		"model", cfg.Model,
+		"provider", cfg.Provider,
+		"base_url", cfg.BaseURL)
 
 	// 创建 OpenAI 客户端配置
 	var clientConfig openai.ClientConfig
@@ -112,8 +117,14 @@ func NewClientWithModel(cfg *config.ModelConfig) (*Client, error) {
 //   - *ChatCompletionResponse: 聊天完成响应
 //   - error: 操作过程中发生的错误
 func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionRequest) (*ChatCompletionResponse, error) {
+	slog.Debug("开始AI请求",
+		"model", req.Model,
+		"stream", req.Stream,
+		"messages_count", len(req.Messages),
+		"max_tokens", req.MaxTokens,
+		"temperature", req.Temperature)
+
 	if !req.Stream {
-		// 非流式请求
 		resp, err := c.openaiClient.CreateChatCompletion(
 			ctx,
 			openai.ChatCompletionRequest{
@@ -124,12 +135,21 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 			},
 		)
 		if err != nil {
+			slog.Error("AI请求失败", "model", req.Model, "error", err)
 			return nil, fmt.Errorf("failed to create chat completion: %w", err)
 		}
 
 		if len(resp.Choices) == 0 {
+			slog.Error("AI响应无内容", "model", req.Model)
 			return nil, fmt.Errorf("no choices returned from API")
 		}
+
+		slog.Debug("AI响应成功",
+			"model", resp.Model,
+			"content_length", len(resp.Choices[0].Message.Content),
+			"prompt_tokens", resp.Usage.PromptTokens,
+			"completion_tokens", resp.Usage.CompletionTokens,
+			"total_tokens", resp.Usage.TotalTokens)
 
 		return &ChatCompletionResponse{
 			Content: resp.Choices[0].Message.Content,
@@ -138,7 +158,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 		}, nil
 	}
 
-	// 流式请求 - 收集所有内容
+	slog.Debug("开始流式AI请求", "model", req.Model)
 	stream, err := c.openaiClient.CreateChatCompletionStream(
 		ctx,
 		openai.ChatCompletionRequest{
@@ -150,6 +170,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 		},
 	)
 	if err != nil {
+		slog.Error("创建流式请求失败", "model", req.Model, "error", err)
 		return nil, fmt.Errorf("failed to create chat completion stream: %w", err)
 	}
 	defer stream.Close()
@@ -157,22 +178,23 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 	var fullContent string
 	var usage openai.Usage
 	var model string
+	var chunkCount int
 
 	for {
 		response, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
-			// 流完成
 			break
 		}
 		if err != nil {
+			slog.Error("流式响应错误", "model", req.Model, "error", err)
 			return nil, fmt.Errorf("error in stream: %w", err)
 		}
 
 		if len(response.Choices) > 0 {
 			fullContent += response.Choices[0].Delta.Content
+			chunkCount++
 		}
 
-		// 获取最后一条消息的使用统计和模型信息
 		if response.Usage != nil {
 			usage = *response.Usage
 		}
@@ -180,6 +202,14 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 			model = response.Model
 		}
 	}
+
+	slog.Debug("流式AI响应完成",
+		"model", model,
+		"content_length", len(fullContent),
+		"chunks", chunkCount,
+		"prompt_tokens", usage.PromptTokens,
+		"completion_tokens", usage.CompletionTokens,
+		"total_tokens", usage.TotalTokens)
 
 	return &ChatCompletionResponse{
 		Content: fullContent,
@@ -204,8 +234,13 @@ func (c *Client) CreateStreamingChatCompletion(
 	req ChatCompletionRequest,
 	handler StreamingChatCompletionHandler,
 ) error {
-	// 强制设置 Stream 为 true
 	req.Stream = true
+
+	slog.Debug("开始回调式流式AI请求",
+		"model", req.Model,
+		"messages_count", len(req.Messages),
+		"max_tokens", req.MaxTokens,
+		"temperature", req.Temperature)
 
 	stream, err := c.openaiClient.CreateChatCompletionStream(
 		ctx,
@@ -218,6 +253,7 @@ func (c *Client) CreateStreamingChatCompletion(
 		},
 	)
 	if err != nil {
+		slog.Error("创建回调式流式请求失败", "model", req.Model, "error", err)
 		handler.OnError(ctx, fmt.Errorf("failed to create chat completion stream: %w", err))
 		return err
 	}
@@ -226,15 +262,23 @@ func (c *Client) CreateStreamingChatCompletion(
 	var fullContent string
 	var usage openai.Usage
 	var model string
+	var chunkCount int
 
 	for {
 		response, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
-			// 流完成
+			slog.Debug("回调式流式AI响应完成",
+				"model", model,
+				"content_length", len(fullContent),
+				"chunks", chunkCount,
+				"prompt_tokens", usage.PromptTokens,
+				"completion_tokens", usage.CompletionTokens,
+				"total_tokens", usage.TotalTokens)
 			handler.OnComplete(ctx, fullContent, usage, model)
 			return nil
 		}
 		if err != nil {
+			slog.Error("回调式流式响应错误", "model", req.Model, "error", err)
 			handler.OnError(ctx, fmt.Errorf("error in stream: %w", err))
 			return err
 		}
@@ -242,10 +286,10 @@ func (c *Client) CreateStreamingChatCompletion(
 		if len(response.Choices) > 0 && response.Choices[0].Delta.Content != "" {
 			chunk := response.Choices[0].Delta.Content
 			fullContent += chunk
+			chunkCount++
 			handler.OnChunk(ctx, chunk)
 		}
 
-		// 获取最后一条消息的使用统计和模型信息
 		if response.Usage != nil {
 			usage = *response.Usage
 		}

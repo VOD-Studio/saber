@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -37,6 +38,7 @@ type StreamEditor struct {
 	editCount     int
 	config        config.StreamEditConfig
 	stopped       bool
+	finalSent     bool
 }
 
 // NewStreamEditor 创建一个新的流编辑器实例。
@@ -74,13 +76,25 @@ func (se *StreamEditor) Start(ctx context.Context) error {
 	se.mu.Lock()
 	defer se.mu.Unlock()
 
-	if se.config.Enabled {
-		eventID, err := se.matrixService.SendTextWithRelatesTo(ctx, se.roomID, se.initialMsg, nil)
-		if err != nil {
-			return fmt.Errorf("failed to send initial message: %w", err)
-		}
-		se.messageID = eventID
+	if !se.config.Enabled {
+		slog.Debug("流编辑未启用，跳过发送")
+		se.lastEditTime = time.Now()
+		return nil
 	}
+
+	initialContent := se.initialMsg
+	if initialContent == "" {
+		initialContent = "..."
+	}
+
+	slog.Debug("发送流式初始消息", "room", se.roomID, "content", initialContent)
+	eventID, err := se.matrixService.SendTextWithRelatesTo(ctx, se.roomID, initialContent, nil)
+	if err != nil {
+		slog.Error("发送初始消息失败", "room", se.roomID, "error", err)
+		return fmt.Errorf("failed to send initial message: %w", err)
+	}
+	se.messageID = eventID
+	slog.Debug("初始消息已发送", "event_id", eventID)
 
 	se.lastEditTime = time.Now()
 	return nil
@@ -101,44 +115,105 @@ func (se *StreamEditor) Update(ctx context.Context, content string) error {
 	se.mu.Lock()
 	defer se.mu.Unlock()
 
-	// 检查流是否已停止
-	if se.stopped {
-		return fmt.Errorf("stream editor is stopped")
+	if se.stopped || se.finalSent {
+		return nil
 	}
 
-	// 检查是否启用流编辑
 	if !se.config.Enabled {
+		slog.Debug("流编辑未启用，直接发送消息", "content", content)
+		return se.matrixService.SendText(ctx, se.roomID, content)
+	}
+
+	if se.messageID == "" {
+		slog.Debug("messageID为空，直接发送新消息", "content", content)
+		eventID, err := se.matrixService.SendTextWithRelatesTo(ctx, se.roomID, content, nil)
+		if err != nil {
+			slog.Error("发送消息失败", "room", se.roomID, "error", err)
+			return fmt.Errorf("failed to send message: %w", err)
+		}
+		se.messageID = eventID
+		se.editCount++
+		se.lastEditTime = time.Now()
+		slog.Debug("消息已发送", "event_id", eventID)
 		return nil
 	}
 
-	// 检查是否达到最大编辑次数
 	if se.editCount >= se.config.MaxEdits {
-		return fmt.Errorf("maximum edit limit reached: %d", se.config.MaxEdits)
-	}
-
-	// 检查编辑间隔
-	now := time.Now()
-	if now.Sub(se.lastEditTime).Milliseconds() < int64(se.config.EditIntervalMs) {
-		// 如果距离上次编辑时间太短，跳过本次编辑
+		slog.Debug("达到最大编辑次数，跳过更新，等待最终消息", "edit_count", se.editCount, "max_edits", se.config.MaxEdits)
 		return nil
 	}
 
-	// 创建关系对象
+	now := time.Now()
+	if se.editCount > 0 && now.Sub(se.lastEditTime).Milliseconds() < int64(se.config.EditIntervalMs) {
+		slog.Debug("编辑间隔太短，跳过", "elapsed_ms", now.Sub(se.lastEditTime).Milliseconds())
+		return nil
+	}
+
 	relatesTo := &event.RelatesTo{
 		Type:    event.RelReplace,
 		EventID: se.messageID,
 	}
 
-	// 发送编辑后的消息
+	slog.Debug("编辑消息", "event_id", se.messageID, "content", content)
 	_, err := se.matrixService.SendTextWithRelatesTo(ctx, se.roomID, content, relatesTo)
 	if err != nil {
+		slog.Error("编辑消息失败", "room", se.roomID, "event_id", se.messageID, "error", err)
 		return fmt.Errorf("failed to update message: %w", err)
 	}
 
-	// 更新统计信息
 	se.editCount++
 	se.lastEditTime = now
+	slog.Debug("消息编辑成功", "edit_count", se.editCount)
 
+	return nil
+}
+
+// SendFinal 发送最终消息内容。
+//
+// 如果已经有消息ID，则编辑该消息；否则发送新消息。
+// 此方法只会执行一次，后续调用将被忽略。
+//
+// 参数:
+//   - ctx: 上下文，用于取消操作
+//   - content: 最终的消息内容
+//
+// 返回值:
+//   - error: 操作过程中发生的错误
+func (se *StreamEditor) SendFinal(ctx context.Context, content string) error {
+	se.mu.Lock()
+	defer se.mu.Unlock()
+
+	if se.finalSent {
+		slog.Debug("最终消息已发送，跳过")
+		return nil
+	}
+
+	se.finalSent = true
+
+	if !se.config.Enabled {
+		slog.Debug("流编辑未启用，直接发送最终消息", "content", content)
+		return se.matrixService.SendText(ctx, se.roomID, content)
+	}
+
+	if se.messageID == "" {
+		slog.Debug("messageID为空，发送最终消息", "content", content)
+		_, err := se.matrixService.SendTextWithRelatesTo(ctx, se.roomID, content, nil)
+		return err
+	}
+
+	relatesTo := &event.RelatesTo{
+		Type:    event.RelReplace,
+		EventID: se.messageID,
+	}
+
+	slog.Debug("发送最终消息（编辑）", "event_id", se.messageID, "content", content)
+	_, err := se.matrixService.SendTextWithRelatesTo(ctx, se.roomID, content, relatesTo)
+	if err != nil {
+		slog.Error("发送最终消息失败", "room", se.roomID, "error", err)
+		return fmt.Errorf("failed to send final message: %w", err)
+	}
+
+	slog.Debug("最终消息发送成功")
 	return nil
 }
 

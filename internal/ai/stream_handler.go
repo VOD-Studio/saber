@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -12,12 +13,13 @@ import (
 //
 // 它根据配置的阈值决定何时开始编辑消息，并在后续接收到数据块时更新编辑内容。
 type SmartStreamHandler struct {
-	editor            *StreamEditor
-	charThreshold     int
-	timeThreshold     time.Duration
-	startTime         time.Time
-	hasStartedEditing bool
-	mu                sync.Mutex
+	editor             *StreamEditor
+	charThreshold      int
+	timeThreshold      time.Duration
+	startTime          time.Time
+	hasStartedEditing  bool
+	accumulatedContent string
+	mu                 sync.Mutex
 }
 
 // NewSmartStreamHandler 创建一个新的智能流处理器实例。
@@ -50,17 +52,22 @@ func (h *SmartStreamHandler) OnChunk(ctx context.Context, chunk string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	h.accumulatedContent += chunk
+
 	if !h.hasStartedEditing {
-		// 检查是否达到字符阈值或时间阈值
 		elapsed := time.Since(h.startTime)
-		if len(chunk) >= h.charThreshold || elapsed >= h.timeThreshold {
-			// 启动编辑
-			h.editor.Start(ctx)
+		if len(h.accumulatedContent) >= h.charThreshold || elapsed >= h.timeThreshold {
+			if err := h.editor.Start(ctx); err != nil {
+				slog.Error("启动流编辑失败", "error", err)
+				return
+			}
 			h.hasStartedEditing = true
+			slog.Debug("流编辑已启动", "accumulated_length", len(h.accumulatedContent), "elapsed_ms", elapsed.Milliseconds())
 		}
 	} else {
-		// 已经开始编辑，直接更新内容
-		h.editor.Update(ctx, chunk)
+		if err := h.editor.Update(ctx, h.accumulatedContent); err != nil {
+			slog.Debug("更新流编辑失败", "error", err)
+		}
 	}
 }
 
@@ -78,14 +85,21 @@ func (h *SmartStreamHandler) OnComplete(ctx context.Context, finalContent string
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	slog.Debug("流式响应完成", "content_length", len(finalContent), "has_started_editing", h.hasStartedEditing)
+
 	if !h.hasStartedEditing {
-		// 未开始编辑，直接发送最终内容
-		h.editor.Start(ctx)
+		if err := h.editor.Start(ctx); err != nil {
+			slog.Error("启动流编辑失败", "error", err)
+			return
+		}
 		h.hasStartedEditing = true
 	}
 
-	// 使用最终内容更新编辑
-	h.editor.Update(ctx, finalContent)
+	if err := h.editor.SendFinal(ctx, finalContent); err != nil {
+		slog.Error("发送最终内容失败", "error", err)
+	} else {
+		slog.Debug("最终消息发送成功")
+	}
 }
 
 // OnError 在发生错误时调用。
@@ -99,10 +113,11 @@ func (h *SmartStreamHandler) OnError(ctx context.Context, err error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// 停止编辑器
+	slog.Error("AI流式响应错误", "error", err)
 	h.editor.Stop()
 
-	// 发送错误消息（通过 MessageSender 接口）
 	errorMsg := "❌ AI 服务出错：" + err.Error()
-	h.editor.matrixService.SendText(ctx, h.editor.roomID, errorMsg)
+	if sendErr := h.editor.matrixService.SendText(ctx, h.editor.roomID, errorMsg); sendErr != nil {
+		slog.Error("发送错误消息失败", "error", sendErr)
+	}
 }

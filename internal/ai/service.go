@@ -129,6 +129,13 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 		Model:       modelName,
 	}
 
+	slog.Debug("AI请求准备完成",
+		"model", modelName,
+		"messages_count", len(messages),
+		"stream", s.globalConfig.StreamEnabled,
+		"max_tokens", s.globalConfig.MaxTokens,
+		"temperature", s.globalConfig.Temperature)
+
 	retryConfig := &RetryConfigWrapper{
 		MaxRetries:     s.globalConfig.Retry.MaxRetries,
 		InitialDelay:   time.Duration(s.globalConfig.Retry.InitialDelayMs) * time.Millisecond,
@@ -145,21 +152,39 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 	_, err := fallbackHandler.TryWithFallback(ctx, func(model string) (interface{}, error) {
 		client, clientErr := s.getClient(model)
 		if clientErr != nil {
+			slog.Error("创建AI客户端失败", "model", model, "error", clientErr)
 			return nil, clientErr
 		}
 
 		req.Model = model
+		slog.Debug("发送AI请求", "model", model, "base_url", s.globalConfig.BaseURL)
 
 		if s.globalConfig.StreamEnabled && s.globalConfig.StreamEdit.Enabled {
+			slog.Debug("使用流式响应模式", "char_threshold", s.globalConfig.StreamEdit.CharThreshold)
 			editor := NewStreamEditor(s.matrixService, roomID, "", s.globalConfig.StreamEdit)
 			handler := NewSmartStreamHandler(editor, s.globalConfig.StreamEdit.CharThreshold, s.globalConfig.StreamEdit.TimeThresholdMs)
 
-			return nil, client.CreateStreamingChatCompletion(ctx, req, handler)
+			streamErr := client.CreateStreamingChatCompletion(ctx, req, handler)
+			if streamErr != nil {
+				slog.Error("流式AI请求失败", "model", model, "error", streamErr)
+				return nil, streamErr
+			}
+
+			slog.Debug("流式AI请求完成", "model", model)
+			return nil, nil
 		} else {
 			resp, chatErr := client.CreateChatCompletion(ctx, req)
 			if chatErr != nil {
+				slog.Error("AI请求失败", "model", model, "error", chatErr)
 				return nil, chatErr
 			}
+
+			slog.Debug("AI响应成功",
+				"model", model,
+				"content_length", len(resp.Content),
+				"prompt_tokens", resp.Usage.PromptTokens,
+				"completion_tokens", resp.Usage.CompletionTokens,
+				"total_tokens", resp.Usage.TotalTokens)
 
 			if sendErr := s.matrixService.SendText(ctx, roomID, resp.Content); sendErr != nil {
 				slog.Error("发送AI响应失败", "error", sendErr)
@@ -173,6 +198,12 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 			return resp, nil
 		}
 	})
+
+	if err != nil {
+		slog.Error("AI命令执行失败", "error", err)
+	} else {
+		slog.Debug("AI命令执行成功")
+	}
 
 	return err
 }
@@ -312,4 +343,3 @@ func (c *ContextInfoCommand) Handle(ctx context.Context, userID id.UserID, roomI
 	response := fmt.Sprintf("📊 当前对话上下文信息:\n- 消息数量：%d\n- 估算令牌数：%d", msgCount, tokenCount)
 	return c.service.matrixService.SendText(ctx, roomID, response)
 }
-

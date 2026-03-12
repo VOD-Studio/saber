@@ -293,6 +293,12 @@ func (s *CommandService) SendTextWithRelatesTo(ctx context.Context, roomID id.Ro
 
 	if relatesTo != nil {
 		content.RelatesTo = relatesTo
+		if relatesTo.Type == event.RelReplace {
+			content.NewContent = &event.MessageEventContent{
+				MsgType: event.MsgText,
+				Body:    body,
+			}
+		}
 	}
 
 	resp, err := s.client.SendMessageEvent(
