@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
@@ -374,6 +375,51 @@ func (s *CommandService) SendTextWithRelatesTo(ctx context.Context, roomID id.Ro
 // BotID 返回机器人的用户 ID。
 func (s *CommandService) BotID() id.UserID {
 	return s.botID
+}
+
+// StartTyping 在房间中显示"正在输入"指示器。
+//
+// 参数:
+//   - ctx: 上下文
+//   - roomID: 房间 ID
+//   - timeout: 超时时间（毫秒），默认 30000ms
+//
+// 返回值:
+//   - error: 操作过程中发生的错误
+func (s *CommandService) StartTyping(ctx context.Context, roomID id.RoomID, timeout int) error {
+	if timeout <= 0 {
+		timeout = 30000
+	}
+
+	slog.Debug("Starting typing indicator", "room", roomID.String(), "timeout", timeout)
+
+	_, err := s.client.UserTyping(ctx, roomID, true, time.Duration(timeout)*time.Millisecond)
+	if err != nil {
+		slog.Error("Failed to start typing indicator", "room", roomID.String(), "error", err)
+		return fmt.Errorf("failed to start typing: %w", err)
+	}
+
+	return nil
+}
+
+// StopTyping 停止房间中的"正在输入"指示器。
+//
+// 参数:
+//   - ctx: 上下文
+//   - roomID: 房间 ID
+//
+// 返回值:
+//   - error: 操作过程中发生的错误
+func (s *CommandService) StopTyping(ctx context.Context, roomID id.RoomID) error {
+	slog.Debug("Stopping typing indicator", "room", roomID.String())
+
+	_, err := s.client.UserTyping(ctx, roomID, false, 0)
+	if err != nil {
+		slog.Error("Failed to stop typing indicator", "room", roomID.String(), "error", err)
+		return fmt.Errorf("failed to stop typing: %w", err)
+	}
+
+	return nil
 }
 
 // EventHandler 封装 CommandService 并实现 mautrix 事件处理。

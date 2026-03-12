@@ -173,7 +173,18 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 			slog.Debug("流式AI请求完成", "model", model)
 			return nil, nil
 		} else {
+			// 非流式编辑模式：显示 typing indicator
+			if err := s.matrixService.StartTyping(ctx, roomID, 30000); err != nil {
+				slog.Warn("无法启动 typing indicator", "error", err)
+			}
+
 			resp, chatErr := client.CreateChatCompletion(ctx, req)
+
+			// 停止 typing indicator
+			if stopErr := s.matrixService.StopTyping(ctx, roomID); stopErr != nil {
+				slog.Warn("无法停止 typing indicator", "error", stopErr)
+			}
+
 			if chatErr != nil {
 				slog.Error("AI请求失败", "model", model, "error", chatErr)
 				return nil, chatErr
