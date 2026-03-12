@@ -291,7 +291,7 @@ func DefaultConfig() *Config {
 	}
 }
 
-// ExampleConfig returns the example configuration content.
+// ExampleConfig 返回示例配置内容。
 func ExampleConfig() string {
 	return `matrix:
   # Matrix 服务器地址
@@ -390,7 +390,7 @@ ai:
 `
 }
 
-// GenerateExample writes the example configuration to a file.
+// GenerateExample 将示例配置写入文件。
 func GenerateExample(path string) error {
 	return os.WriteFile(path, []byte(ExampleConfig()), 0o644)
 }

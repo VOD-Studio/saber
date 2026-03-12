@@ -152,12 +152,12 @@ func (s *CommandService) ParseCommand(body string) *ParsedCommand {
 		return nil
 	}
 
-	// Check for prefix-based command (!command)
+	// 检查基于前缀的命令 (!command)
 	if strings.HasPrefix(body, "!") {
 		return s.parsePrefixedCommand(body[1:])
 	}
 
-	// Check for mention-based command (@bot:command)
+	// 检查基于提及的命令 (@bot:command)
 	if strings.HasPrefix(body, "@") {
 		return s.parseMentionCommand(body)
 	}
@@ -178,26 +178,26 @@ func (s *CommandService) parsePrefixedCommand(body string) *ParsedCommand {
 }
 
 func (s *CommandService) parseMentionCommand(body string) *ParsedCommand {
-	// Format: @bot:server.com command args
-	// or: @bot:server.com: command args
+	// 格式: @bot:server.com command args
+	// 或: @bot:server.com: command args
 	parts := strings.Fields(body)
 	if len(parts) == 0 {
 		return nil
 	}
 
-	// First part should be the mention
+	// 第一部分应该是提及
 	mention := parts[0]
 
-	// Verify it's a mention of our bot
+	// 验证是否是对本机器人的提及
 	expectedMention := string(s.botID)
 	if mention != expectedMention {
-		// Check for mention with trailing colon
+		// 检查带有尾随冒号的提及
 		if strings.TrimSuffix(mention, ":") != expectedMention {
 			return nil
 		}
 	}
 
-	// Remaining parts are the command and args
+	// 剩余部分是命令和参数
 	if len(parts) < 2 {
 		return nil
 	}
@@ -211,12 +211,12 @@ func (s *CommandService) parseMentionCommand(body string) *ParsedCommand {
 // HandleEvent 处理 Matrix 事件并分发命令。
 // 它只处理消息事件，忽略来自机器人自身的事件。
 func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) error {
-	// Only handle room messages
+	// 只处理房间消息
 	if evt.Type != event.EventMessage {
 		return nil
 	}
 
-	// Parse message content
+	// 解析消息内容
 	content, ok := evt.Content.Parsed.(*event.MessageEventContent)
 	if !ok {
 		return nil

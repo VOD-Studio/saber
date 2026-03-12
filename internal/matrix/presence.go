@@ -269,7 +269,7 @@ func (p *PresenceService) saveSessionOnDisconnect() {
 // restorePresence 在重连后恢复之前的在线状态。
 func (p *PresenceService) restorePresence() error {
 	if p.lastPresence == "" {
-		// No previous presence set, default to online
+		// 没有设置过在线状态，默认为在线
 		p.lastPresence = PresenceOnline
 	}
 
@@ -303,11 +303,11 @@ func (p *PresenceService) StartSyncWithReconnect(ctx context.Context, cfg *Recon
 
 		slog.Info("Starting sync", "attempt", attempt)
 
-		// Start sync - this blocks until disconnect or error
+		// 开始同步 - 此调用会阻塞直到断开连接或出错
 		err := p.client.SyncWithContext(ctx)
 
 		if err != nil {
-			// Check if context was cancelled
+			// 检查上下文是否已取消
 			if ctx.Err() != nil {
 				slog.Info("Sync stopped due to context cancellation")
 				return ctx.Err()
@@ -315,21 +315,21 @@ func (p *PresenceService) StartSyncWithReconnect(ctx context.Context, cfg *Recon
 
 			slog.Warn("Sync disconnected with error", "attempt", attempt, "error", err)
 
-			// Save session on disconnect
+			// 断开连接时保存会话
 			p.saveSessionOnDisconnect()
 
-			// Check retry limit
+			// 检查重试次数限制
 			if maxRetries > 0 && attempt >= maxRetries {
 				slog.Error("Maximum reconnection attempts reached", "max_retries", maxRetries)
 				return fmt.Errorf("maximum reconnection attempts (%d) reached: %w", maxRetries, err)
 			}
 
-			// Calculate backoff delay
+			// 计算退避延迟
 			backoff := p.calculateBackoff(attempt)
 
 			slog.Info("Waiting before reconnection attempt", "backoff", backoff, "attempt", attempt)
 
-			// Wait with exponential backoff
+			// 使用指数退避等待
 			select {
 			case <-ctx.Done():
 				slog.Info("Context cancelled during backoff wait")
@@ -341,12 +341,12 @@ func (p *PresenceService) StartSyncWithReconnect(ctx context.Context, cfg *Recon
 
 			slog.Info("Attempting to reconnect", "attempt", attempt)
 
-			// Restore presence after reconnection
+			// 重连后恢复在线状态
 			if restoreErr := p.restorePresence(); restoreErr != nil {
 				slog.Warn("Failed to restore presence after reconnection", "error", restoreErr)
 			}
 		} else {
-			// Sync completed without error (shouldn't normally happen)
+			// 同步完成且无错误（通常不应该发生）
 			slog.Info("Sync completed without error")
 			return nil
 		}
