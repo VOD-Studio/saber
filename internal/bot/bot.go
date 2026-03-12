@@ -91,13 +91,18 @@ func Run(version string) {
 
 	// 初始化端到端加密（E2EE）
 	if cfg.Matrix.EnableE2EE {
-		pickleKey, err := matrix.GeneratePickleKey()
+		pickleKeyPath := cfg.Matrix.PickleKeyPath
+		if pickleKeyPath == "" {
+			pickleKeyPath = cfg.Matrix.E2EESessionPath + ".key"
+		}
+
+		pickleKey, err := matrix.LoadOrGeneratePickleKey(pickleKeyPath)
 		if err != nil {
-			slog.Warn("Failed to generate pickle key, E2EE disabled", "error", err)
+			slog.Warn("Failed to load or generate pickle key, E2EE disabled", "error", err)
 		} else if err := client.InitCrypto(context.Background(), pickleKey); err != nil {
 			slog.Warn("E2EE initialization failed, continuing without encryption", "error", err)
 		} else {
-			slog.Info("E2EE initialized successfully")
+			slog.Info("E2EE initialized successfully", "pickle_key_path", pickleKeyPath)
 		}
 	} else {
 		// 初始化无操作的加密服务
@@ -227,6 +232,7 @@ func generateExampleConfig() error {
   # 端到端加密（E2EE）配置（可选）
   enable_e2ee: true  # 启用端到端加密
   e2ee_session_path: "./saber.session"  # 加密会话文件路径
+  # pickle_key_path: "./saber.session.key"  # pickle 密钥路径（可选，默认为 e2ee_session_path + ".key"）
 `
 
 	return os.WriteFile("config.example.yaml", []byte(exampleConfig), 0o644)

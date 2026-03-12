@@ -24,6 +24,7 @@ type MatrixConfig struct {
 	AutoJoinRooms   []string `yaml:"auto_join_rooms"`   // 启动时自动加入的房间列表
 	EnableE2EE      bool     `yaml:"enable_e2ee"`       // 启用端到端加密（可选）
 	E2EESessionPath string   `yaml:"e2ee_session_path"` // 端到端加密会话文件路径（可选）
+	PickleKeyPath   string   `yaml:"pickle_key_path"`   // E2EE pickle 密钥文件路径（可选，默认为 e2ee_session_path + ".key"）
 }
 
 // UseTokenAuth 检查是否使用 Token 认证
@@ -103,6 +104,7 @@ func DefaultConfig() *Config {
 			AccessToken:     "",
 			EnableE2EE:      false,
 			E2EESessionPath: "",
+			PickleKeyPath:   "",
 		},
 	}
 }
@@ -137,6 +139,7 @@ func ExampleConfig() string {
   # 端到端加密（E2EE）配置（可选）
   # enable_e2ee: true  # 启用端到端加密
   # e2ee_session_path: "./saber.session"  # 加密会话文件路径
+  # pickle_key_path: "./saber.session.key"  # pickle 密钥路径（可选，默认为 e2ee_session_path + ".key"）
 `
 }
 

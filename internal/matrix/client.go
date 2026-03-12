@@ -280,3 +280,30 @@ func GeneratePickleKey() ([]byte, error) {
 	}
 	return key, nil
 }
+
+// LoadOrGeneratePickleKey 从文件加载 pickle 密钥，如果文件不存在则生成并保存。
+// 这确保 E2EE 加密密钥在重启后保持一致，避免 "olm account is not marked as shared" 错误。
+func LoadOrGeneratePickleKey(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err == nil {
+		if len(data) != 32 {
+			return nil, fmt.Errorf("invalid pickle key file: expected 32 bytes, got %d", len(data))
+		}
+		return data, nil
+	}
+
+	if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to read pickle key file: %w", err)
+	}
+
+	key, err := GeneratePickleKey()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := os.WriteFile(path, key, 0o600); err != nil {
+		return nil, fmt.Errorf("failed to save pickle key: %w", err)
+	}
+
+	return key, nil
+}
