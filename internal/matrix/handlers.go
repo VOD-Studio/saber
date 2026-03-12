@@ -32,10 +32,11 @@ type CommandInfo struct {
 
 // CommandService 管理命令注册和分发。
 type CommandService struct {
-	mu       sync.RWMutex
-	commands map[string]CommandInfo
-	client   *mautrix.Client
-	botID    id.UserID
+	mu           sync.RWMutex
+	commands     map[string]CommandInfo
+	client       *mautrix.Client
+	botID        id.UserID
+	directChatAI CommandHandler
 }
 
 // NewCommandService 创建一个新的命令服务。
@@ -85,6 +86,42 @@ func (s *CommandService) GetCommand(cmd string) (CommandInfo, bool) {
 
 	info, ok := s.commands[strings.ToLower(cmd)]
 	return info, ok
+}
+
+// SetDirectChatAIHandler 设置私聊自动回复的 AI 处理器。
+func (s *CommandService) SetDirectChatAIHandler(handler CommandHandler) {
+	s.directChatAI = handler
+	slog.Debug("Set direct chat AI handler")
+}
+
+// isDirectChat 检查房间是否为私聊（只有2个成员）。
+func (s *CommandService) isDirectChat(ctx context.Context, roomID id.RoomID) bool {
+	stateMap, err := s.client.State(ctx, roomID)
+	if err != nil {
+		slog.Debug("Failed to get room state for direct chat check", "room", roomID, "error", err)
+		return false
+	}
+
+	memberEvents, ok := stateMap[event.StateMember]
+	if !ok {
+		return false
+	}
+
+	joinedCount := 0
+	for _, evt := range memberEvents {
+		if evt == nil {
+			continue
+		}
+		memberContent, ok := evt.Content.Parsed.(*event.MemberEventContent)
+		if !ok {
+			continue
+		}
+		if memberContent.Membership == event.MembershipJoin {
+			joinedCount++
+		}
+	}
+
+	return joinedCount == 2
 }
 
 // ListCommands 返回所有已注册的命令。
@@ -207,7 +244,24 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 
 	// 解析命令
 	parsed := s.ParseCommand(content.Body)
+
+	// 如果不是命令，检查是否需要私聊自动回复
 	if parsed == nil {
+		if s.directChatAI != nil && s.isDirectChat(ctx, roomID) {
+			slog.Info("Direct chat auto-reply triggered",
+				"sender", sender.String(),
+				"room", roomID.String())
+
+			args := []string{content.Body}
+			err := s.directChatAI.Handle(ctx, sender, roomID, args)
+			if err != nil {
+				slog.Error("Direct chat AI handler failed",
+					"sender", sender.String(),
+					"room", roomID.String(),
+					"error", err)
+				return s.reportError(ctx, roomID, "ai", err)
+			}
+		}
 		return nil
 	}
 

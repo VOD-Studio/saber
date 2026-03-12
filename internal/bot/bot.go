@@ -158,6 +158,12 @@ func Run(version string) {
 			commandService.RegisterCommandWithDesc(commandName, desc, ai.NewMultiModelAICommand(aiService, modelName))
 		}
 
+		// 启用私聊自动回复
+		if cfg.AI.DirectChatAutoReply {
+			commandService.SetDirectChatAIHandler(ai.NewAICommand(aiService))
+			slog.Info("私聊自动回复已启用")
+		}
+
 		slog.Info("AI命令注册完成")
 	}
 
