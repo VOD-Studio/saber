@@ -1,3 +1,4 @@
+// Package cli 提供命令行标志解析功能。
 package cli
 
 import (

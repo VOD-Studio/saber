@@ -238,8 +238,6 @@ func (c *Client) CreateStreamingChatCompletion(
 	req ChatCompletionRequest,
 	handler StreamingChatCompletionHandler,
 ) error {
-	req.Stream = true
-
 	slog.Debug("开始回调式流式AI请求",
 		"model", req.Model,
 		"messages_count", len(req.Messages),

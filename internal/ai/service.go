@@ -149,7 +149,7 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 		RetryConfig: retryConfig,
 	}
 
-	_, err := fallbackHandler.TryWithFallback(ctx, func(model string) (interface{}, error) {
+	_, err := fallbackHandler.TryWithFallback(ctx, func(model string) (any, error) {
 		client, clientErr := s.getClient(model)
 		if clientErr != nil {
 			slog.Error("创建AI客户端失败", "model", model, "error", clientErr)

@@ -32,8 +32,7 @@ func RetryableError(err error) bool {
 	}
 
 	// 检查网络错误
-	var netErr *net.OpError
-	if errors.As(err, &netErr) {
+	if errors.As(err, new(*net.OpError)) {
 		return true
 	}
 
@@ -96,7 +95,7 @@ type RetryConfigWrapper struct {
 // 返回:
 //   - interface{}: 操作结果
 //   - error: 操作错误
-func (rc *RetryConfigWrapper) WithRetry(ctx context.Context, operation func() (interface{}, error)) (interface{}, error) {
+func (rc *RetryConfigWrapper) WithRetry(ctx context.Context, operation func() (any, error)) (any, error) {
 	var lastErr error
 	delay := rc.InitialDelay
 
@@ -129,12 +128,7 @@ func (rc *RetryConfigWrapper) WithRetry(ctx context.Context, operation func() (i
 			}
 
 			// 计算下一次延迟（指数退避）
-			nextDelay := time.Duration(float64(delay) * rc.BackoffFactor)
-			if nextDelay > rc.MaxDelay {
-				delay = rc.MaxDelay
-			} else {
-				delay = nextDelay
-			}
+			delay = min(time.Duration(float64(delay)*rc.BackoffFactor), rc.MaxDelay)
 		} else {
 			// 错误不可重试或已达到最大重试次数
 			break
@@ -147,7 +141,7 @@ func (rc *RetryConfigWrapper) WithRetry(ctx context.Context, operation func() (i
 // FallbackModelHandler 处理模型故障转移逻辑。
 type FallbackModelHandler struct {
 	// Config AI 配置
-	Config interface{}
+	Config any
 
 	// MainModel 主要模型标识符
 	MainModel string
@@ -163,11 +157,11 @@ type FallbackModelHandler struct {
 //   - operation: 接受模型名称的操作函数
 //
 // 返回:
-//   - interface{}: 操作结果
+//   - any: 操作结果
 //   - error: 操作错误
-func (fmh *FallbackModelHandler) TryWithFallback(ctx context.Context, operation func(model string) (interface{}, error)) (interface{}, error) {
+func (fmh *FallbackModelHandler) TryWithFallback(ctx context.Context, operation func(model string) (any, error)) (any, error) {
 	// 首先尝试主模型
-	result, err := fmh.RetryConfig.WithRetry(ctx, func() (interface{}, error) {
+	result, err := fmh.RetryConfig.WithRetry(ctx, func() (any, error) {
 		return operation(fmh.MainModel)
 	})
 	if err == nil {
@@ -181,7 +175,7 @@ func (fmh *FallbackModelHandler) TryWithFallback(ctx context.Context, operation 
 		for _, fallbackModel := range fmh.RetryConfig.FallbackModels {
 			slog.Debug("Trying fallback model", "model", fallbackModel)
 
-			fallbackResult, fallbackErr := fmh.RetryConfig.WithRetry(ctx, func() (interface{}, error) {
+			fallbackResult, fallbackErr := fmh.RetryConfig.WithRetry(ctx, func() (any, error) {
 				return operation(fallbackModel)
 			})
 			if fallbackErr == nil {
