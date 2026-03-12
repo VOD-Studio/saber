@@ -13,6 +13,7 @@ import (
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 
+	"rua.plus/saber/internal/ai"
 	"rua.plus/saber/internal/cli"
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/matrix"
@@ -32,7 +33,7 @@ func Run(version string) {
 	}
 
 	if flags.GenerateConfig {
-		if err := generateExampleConfig(); err != nil {
+		if err := config.GenerateExample("config.example.yaml"); err != nil {
 			fmt.Fprintf(os.Stderr, "Error generating config: %v\n", err)
 			os.Exit(1)
 		}
@@ -118,6 +119,48 @@ func Run(version string) {
 	// Register built-in commands
 	matrix.RegisterBuiltinCommands(commandService)
 
+	// 初始化AI服务（如果启用）
+	var aiService *ai.Service
+	if cfg.AI.Enabled {
+		slog.Info("正在初始化AI服务...")
+
+		// 验证AI配置
+		if err := cfg.AI.Validate(); err != nil {
+			slog.Error("AI配置验证失败", "error", err)
+			os.Exit(1)
+		}
+
+		// 创建AI服务实例
+		aiService, err = ai.NewService(&cfg.AI, commandService)
+		if err != nil {
+			slog.Error("AI服务初始化失败", "error", err)
+			os.Exit(1)
+		}
+
+		slog.Info("AI服务初始化成功",
+			"provider", cfg.AI.Provider,
+			"default_model", cfg.AI.DefaultModel)
+	}
+
+	// 注册AI相关命令（如果AI服务已初始化）
+	if aiService != nil {
+		// 注册基础AI命令
+		commandService.RegisterCommandWithDesc("ai", "与AI对话", ai.NewAICommand(aiService))
+
+		// 注册上下文管理命令
+		commandService.RegisterCommandWithDesc("ai-clear", "清除AI对话上下文", ai.NewClearContextCommand(aiService))
+		commandService.RegisterCommandWithDesc("ai-context", "显示AI对话上下文信息", ai.NewContextInfoCommand(aiService))
+
+		// 注册多模型AI命令
+		for modelName := range cfg.AI.Models {
+			commandName := fmt.Sprintf("ai-%s", modelName)
+			desc := fmt.Sprintf("使用%s模型与AI对话", modelName)
+			commandService.RegisterCommandWithDesc(commandName, desc, ai.NewMultiModelAICommand(aiService, modelName))
+		}
+
+		slog.Info("AI命令注册完成")
+	}
+
 	// Setup event handler
 	eventHandler := matrix.NewEventHandler(commandService)
 
@@ -200,40 +243,4 @@ func setupLogging(verbose bool) {
 	if verbose {
 		slog.Debug("Debug logging enabled")
 	}
-}
-
-// generateExampleConfig creates an example configuration file.
-func generateExampleConfig() error {
-	exampleConfig := `matrix:
-  # Matrix 服务器地址
-  homeserver: "https://matrix.org"
-
-  # 完整的 Matrix 用户 ID（格式：@username:server.org）
-  user_id: "@your-bot:matrix.org"
-
-  # 设备标识符（可选，留空则服务器自动生成）
-  device_id: "saber-bot-device"
-
-  # 设备显示名称（可选）
-  device_name: "Saber Bot"
-
-  # 认证方式（二选一，access_token 优先级更高）
-  # 方式 1: 使用 Access Token（推荐，更安全）
-  access_token: "syt_xxxxxxxxxxxxx_xxxxxxxxxxxx"
-
-  # 方式 2: 使用密码登录（首次登录使用）
-  # password: "your-secure-password"
-
-  # 启动时自动加入的房间列表（可选）
-  # auto_join_rooms:
-  #   - "!roomid1:matrix.org"
-  #   - "#public-room:matrix.org"
-
-  # 端到端加密（E2EE）配置（可选）
-  enable_e2ee: true  # 启用端到端加密
-  e2ee_session_path: "./saber.session"  # 加密会话文件路径
-  # pickle_key_path: "./saber.session.key"  # pickle 密钥路径（可选，默认为 e2ee_session_path + ".key"）
-`
-
-	return os.WriteFile("config.example.yaml", []byte(exampleConfig), 0o644)
 }

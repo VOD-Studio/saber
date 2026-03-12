@@ -283,6 +283,39 @@ func (s *CommandService) SendText(ctx context.Context, roomID id.RoomID, body st
 	return err
 }
 
+// SendTextWithRelatesTo 向房间发送文本消息，并指定关系。
+// 返回发送的消息事件 ID 和错误。
+func (s *CommandService) SendTextWithRelatesTo(ctx context.Context, roomID id.RoomID, body string, relatesTo *event.RelatesTo) (id.EventID, error) {
+	content := &event.MessageEventContent{
+		MsgType: event.MsgText,
+		Body:    body,
+	}
+
+	if relatesTo != nil {
+		content.RelatesTo = relatesTo
+	}
+
+	resp, err := s.client.SendMessageEvent(
+		ctx,
+		roomID,
+		event.EventMessage,
+		content,
+	)
+	if err != nil {
+		slog.Error("Failed to send message with relatesTo",
+			"room", roomID.String(),
+			"error", err)
+		return "", err
+	}
+
+	return resp.EventID, nil
+}
+
+// BotID 返回机器人的用户 ID。
+func (s *CommandService) BotID() id.UserID {
+	return s.botID
+}
+
 // EventHandler 封装 CommandService 并实现 mautrix 事件处理。
 type EventHandler struct {
 	service *CommandService

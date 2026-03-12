@@ -11,6 +11,7 @@ import (
 // Config 存储从 YAML 配置文件加载的应用程序配置
 type Config struct {
 	Matrix MatrixConfig `yaml:"matrix"`
+	AI     AIConfig     `yaml:"ai"`
 }
 
 // MatrixConfig 存储 Matrix 连接配置
@@ -24,7 +25,62 @@ type MatrixConfig struct {
 	AutoJoinRooms   []string `yaml:"auto_join_rooms"`   // 启动时自动加入的房间列表
 	EnableE2EE      bool     `yaml:"enable_e2ee"`       // 启用端到端加密（可选）
 	E2EESessionPath string   `yaml:"e2ee_session_path"` // 端到端加密会话文件路径（可选）
-	PickleKeyPath   string   `yaml:"pickle_key_path"`   // E2EE pickle 密钥文件路径（可选，默认为 e2ee_session_path + ".key"）
+	PickleKeyPath   string   `yaml:"pickle_key_path"`   // E2EE pickle 密钥文件路径（可选，默认为 e2ee_session_path + ".key")
+}
+
+// AIConfig 存储 AI 服务配置
+type AIConfig struct {
+	Enabled        bool                   `yaml:"enabled"`         // 是否启用 AI 功能
+	Provider       string                 `yaml:"provider"`        // AI 提供商名称（如 openai, anthropic）
+	BaseURL        string                 `yaml:"base_url"`        // API 基础 URL
+	APIKey         string                 `yaml:"api_key"`         // API 密钥
+	DefaultModel   string                 `yaml:"default_model"`   // 默认使用的模型
+	MaxTokens      int                    `yaml:"max_tokens"`      // 最大生成 token 数
+	Temperature    float64                `yaml:"temperature"`     // 生成温度（0-2）
+	Context        ContextConfig          `yaml:"context"`         // 上下文管理配置
+	StreamEnabled  bool                   `yaml:"stream_enabled"`  // 是否启用流式响应
+	StreamEdit     StreamEditConfig       `yaml:"stream_edit"`     // 流式编辑配置
+	Retry          RetryConfig            `yaml:"retry"`           // 重试配置
+	Models         map[string]ModelConfig `yaml:"models"`          // 模型特定配置
+	TimeoutSeconds int                    `yaml:"timeout_seconds"` // 请求超时时间（秒）
+}
+
+// ContextConfig 存储上下文管理配置
+type ContextConfig struct {
+	Enabled       bool `yaml:"enabled"`        // 是否启用上下文管理
+	MaxMessages   int  `yaml:"max_messages"`   // 最大保留消息数
+	MaxTokens     int  `yaml:"max_tokens"`     // 最大 token 数
+	ExpiryMinutes int  `yaml:"expiry_minutes"` // 上下文过期时间（分钟）
+}
+
+// StreamEditConfig 存储流式编辑配置
+type StreamEditConfig struct {
+	Enabled         bool `yaml:"enabled"`           // 是否启用流式编辑
+	CharThreshold   int  `yaml:"char_threshold"`    // 触发编辑的字符阈值
+	TimeThresholdMs int  `yaml:"time_threshold_ms"` // 触发编辑的时间阈值（毫秒）
+	EditIntervalMs  int  `yaml:"edit_interval_ms"`  // 编辑间隔（毫秒）
+	MaxEdits        int  `yaml:"max_edits"`         // 最大编辑次数
+}
+
+// RetryConfig 存储重试配置
+type RetryConfig struct {
+	Enabled         bool     `yaml:"enabled"`          // 是否启用重试
+	MaxRetries      int      `yaml:"max_retries"`      // 最大重试次数
+	InitialDelayMs  int      `yaml:"initial_delay_ms"` // 初始延迟（毫秒）
+	MaxDelayMs      int      `yaml:"max_delay_ms"`     // 最大延迟（毫秒）
+	BackoffFactor   float64  `yaml:"backoff_factor"`   // 退避因子
+	FallbackEnabled bool     `yaml:"fallback_enabled"` // 是否启用降级
+	FallbackModels  []string `yaml:"fallback_models"`  // 降级模型列表
+}
+
+// ModelConfig 存储特定模型配置
+type ModelConfig struct {
+	Model       string  `yaml:"model"`       // 模型标识符
+	Provider    string  `yaml:"provider"`    // 提供商（覆盖全局）
+	BaseURL     string  `yaml:"base_url"`    // API URL（覆盖全局）
+	APIKey      string  `yaml:"api_key"`     // API 密钥（覆盖全局）
+	MaxTokens   int     `yaml:"max_tokens"`  // 最大 token 数（覆盖全局）
+	Temperature float64 `yaml:"temperature"` // 温度（覆盖全局）
 }
 
 // UseTokenAuth 检查是否使用 Token 认证
@@ -35,6 +91,59 @@ func (m *MatrixConfig) UseTokenAuth() bool {
 // UsePasswordAuth 检查是否使用密码认证
 func (m *MatrixConfig) UsePasswordAuth() bool {
 	return m.Password != "" && m.AccessToken == ""
+}
+
+// DefaultAIConfig 返回带有合理默认值的 AI 配置
+func DefaultAIConfig() AIConfig {
+	return AIConfig{
+		Enabled:        false,
+		Provider:       "",
+		BaseURL:        "",
+		APIKey:         "",
+		DefaultModel:   "",
+		MaxTokens:      4096,
+		Temperature:    0.7,
+		Context:        DefaultContextConfig(),
+		StreamEnabled:  false,
+		StreamEdit:     DefaultStreamEditConfig(),
+		Retry:          DefaultRetryConfig(),
+		Models:         make(map[string]ModelConfig),
+		TimeoutSeconds: 30,
+	}
+}
+
+// DefaultContextConfig 返回带有合理默认值的上下文配置
+func DefaultContextConfig() ContextConfig {
+	return ContextConfig{
+		Enabled:       true,
+		MaxMessages:   50,
+		MaxTokens:     8000,
+		ExpiryMinutes: 60,
+	}
+}
+
+// DefaultStreamEditConfig 返回带有合理默认值的流式编辑配置
+func DefaultStreamEditConfig() StreamEditConfig {
+	return StreamEditConfig{
+		Enabled:         true,
+		CharThreshold:   10,
+		TimeThresholdMs: 1000,
+		EditIntervalMs:  100,
+		MaxEdits:        5,
+	}
+}
+
+// DefaultRetryConfig 返回带有合理默认值的重试配置
+func DefaultRetryConfig() RetryConfig {
+	return RetryConfig{
+		Enabled:         true,
+		MaxRetries:      3,
+		InitialDelayMs:  1000,
+		MaxDelayMs:      30000,
+		BackoffFactor:   2.0,
+		FallbackEnabled: true,
+		FallbackModels:  []string{},
+	}
 }
 
 // Validate 验证配置是否有效
@@ -52,6 +161,75 @@ func (m *MatrixConfig) Validate() error {
 		return fmt.Errorf("e2ee_session_path is required when enable_e2ee is true")
 	}
 	return nil
+}
+
+// Validate 验证 AI 配置是否有效
+func (a *AIConfig) Validate() error {
+	if !a.Enabled {
+		return nil
+	}
+	if a.Provider == "" {
+		return fmt.Errorf("provider is required when AI is enabled")
+	}
+	if a.BaseURL == "" {
+		return fmt.Errorf("base_url is required when AI is enabled")
+	}
+	if a.APIKey == "" {
+		return fmt.Errorf("api_key is required when AI is enabled")
+	}
+	if a.DefaultModel == "" {
+		return fmt.Errorf("default_model is required when AI is enabled")
+	}
+	if a.Temperature < 0 || a.Temperature > 2 {
+		return fmt.Errorf("temperature must be between 0 and 2")
+	}
+	if a.TimeoutSeconds <= 0 {
+		return fmt.Errorf("timeout_seconds must be positive")
+	}
+	return nil
+}
+
+// GetModelConfig 获取指定模型的配置
+//
+// 它首先查找模型特定配置，如果找到则返回继承全局配置后的模型配置。
+// 如果未找到特定配置，则返回基于全局配置的默认模型配置。
+//
+// 参数:
+//   - modelID: 模型标识符
+//
+// 返回值:
+//   - ModelConfig: 合并后的模型配置
+//   - bool: 是否找到了特定配置（false 表示使用默认配置）
+func (a *AIConfig) GetModelConfig(modelID string) (ModelConfig, bool) {
+	if config, ok := a.Models[modelID]; ok {
+		// 合并配置：特定配置优先，未设置的字段使用全局配置
+		if config.Provider == "" {
+			config.Provider = a.Provider
+		}
+		if config.BaseURL == "" {
+			config.BaseURL = a.BaseURL
+		}
+		if config.APIKey == "" {
+			config.APIKey = a.APIKey
+		}
+		if config.MaxTokens == 0 {
+			config.MaxTokens = a.MaxTokens
+		}
+		if config.Temperature == 0 {
+			config.Temperature = a.Temperature
+		}
+		return config, true
+	}
+
+	// 返回默认配置
+	return ModelConfig{
+		Model:       modelID,
+		Provider:    a.Provider,
+		BaseURL:     a.BaseURL,
+		APIKey:      a.APIKey,
+		MaxTokens:   a.MaxTokens,
+		Temperature: a.Temperature,
+	}, false
 }
 
 // DefaultConfigPath 返回默认配置文件路径
@@ -106,6 +284,7 @@ func DefaultConfig() *Config {
 			E2EESessionPath: "",
 			PickleKeyPath:   "",
 		},
+		AI: DefaultAIConfig(),
 	}
 }
 
@@ -140,6 +319,68 @@ func ExampleConfig() string {
   # enable_e2ee: true  # 启用端到端加密
   # e2ee_session_path: "./saber.session"  # 加密会话文件路径
   # pickle_key_path: "./saber.session.key"  # pickle 密钥路径（可选，默认为 e2ee_session_path + ".key"）
+
+ai:
+  # 启用 AI 功能
+  enabled: false
+
+  # AI 提供商（如 openai, azure, anthropic）
+  provider: "openai"
+
+  # API 基础 URL
+  base_url: "https://api.openai.com/v1"
+
+  # API 密钥
+  api_key: ""
+
+  # 默认使用的模型
+  default_model: "gpt-4o-mini"
+
+  # 最大生成 token 数
+  max_tokens: 4096
+
+  # 生成温度（0-2）
+  temperature: 0.7
+
+  # 上下文管理配置
+  context:
+    enabled: true
+    max_messages: 50
+    max_tokens: 8000
+    expiry_minutes: 60
+
+  # 是否启用流式响应
+  stream_enabled: true
+
+  # 流式编辑配置
+  stream_edit:
+    enabled: true
+    char_threshold: 10
+    time_threshold_ms: 1000
+    edit_interval_ms: 100
+    max_edits: 5
+
+  # 重试配置
+  retry:
+    enabled: true
+    max_retries: 3
+    initial_delay_ms: 1000
+    max_delay_ms: 30000
+    backoff_factor: 2.0
+    fallback_enabled: true
+    fallback_models: []
+
+  # 多模型配置示例
+  models: {}
+    # fast:
+    #   model: "gpt-4o-mini"
+    #   temperature: 0.3
+    # creative:
+    #   model: "gpt-4o"
+    #   temperature: 0.9
+
+  # 请求超时时间（秒）
+  timeout_seconds: 30
 `
 }
 
