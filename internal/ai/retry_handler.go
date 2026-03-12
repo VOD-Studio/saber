@@ -4,11 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"strings"
 	"time"
-
-	"log/slog"
 )
 
 // RetryableError 判断错误是否可重试。
@@ -196,19 +195,4 @@ func (fmh *FallbackModelHandler) TryWithFallback(ctx context.Context, operation 
 
 	return nil, fmt.Errorf("all models failed (main: %s, fallbacks: %v): %w",
 		fmh.MainModel, fmh.RetryConfig.FallbackModels, err)
-}
-
-// CreateRetryConfigFromAIConfig 从 AI 配置创建重试配置。
-//
-// 注意: 此函数需要根据实际的 AI 配置结构进行实现。
-// 目前返回一个默认配置作为占位符。
-func CreateRetryConfigFromAIConfig(aiConfig interface{}) *RetryConfigWrapper {
-	// TODO: 根据实际的 AI 配置结构实现此函数
-	return &RetryConfigWrapper{
-		MaxRetries:     3,
-		InitialDelay:   1 * time.Second,
-		MaxDelay:       30 * time.Second,
-		BackoffFactor:  2.0,
-		FallbackModels: []string{},
-	}
 }
