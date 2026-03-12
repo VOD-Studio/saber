@@ -1,3 +1,4 @@
+// Package config 提供 YAML 配置文件的加载、验证和默认值管理。
 package config
 
 import (

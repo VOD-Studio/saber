@@ -173,7 +173,11 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 		slog.Error("创建流式请求失败", "model", req.Model, "error", err)
 		return nil, fmt.Errorf("failed to create chat completion stream: %w", err)
 	}
-	defer stream.Close()
+	defer func() {
+		if closeErr := stream.Close(); closeErr != nil {
+			slog.Debug("Failed to close stream", "error", closeErr)
+		}
+	}()
 
 	var fullContent string
 	var usage openai.Usage
@@ -257,7 +261,11 @@ func (c *Client) CreateStreamingChatCompletion(
 		handler.OnError(ctx, fmt.Errorf("failed to create chat completion stream: %w", err))
 		return err
 	}
-	defer stream.Close()
+	defer func() {
+		if closeErr := stream.Close(); closeErr != nil {
+			slog.Debug("Failed to close stream", "error", closeErr)
+		}
+	}()
 
 	var fullContent string
 	var usage openai.Usage
