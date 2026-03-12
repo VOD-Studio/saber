@@ -41,3 +41,5 @@ config.yaml.session
 config.yaml
 *.credentials.yaml
 *.db
+
+.sisyphus/**/*
