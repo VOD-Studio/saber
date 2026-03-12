@@ -223,6 +223,10 @@ func generateExampleConfig() error {
   auto_join_rooms:
     - "!roomid1:matrix.org"
     - "#public-room:matrix.org"
+
+  # 端到端加密（E2EE）配置（可选）
+  # enable_e2ee: true  # 启用端到端加密
+  # e2ee_session_path: "./saber.session"  # 加密会话文件路径
 `
 
 	return os.WriteFile("config.example.yaml", []byte(exampleConfig), 0o644)
