@@ -3,6 +3,7 @@ module rua.plus/saber
 go 1.26.1
 
 require (
+	github.com/lmittmann/tint v1.0.7
 	gopkg.in/yaml.v3 v3.0.1
 	maunium.net/go/mautrix v0.26.3
 )

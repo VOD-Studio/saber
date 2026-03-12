@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/lmittmann/tint"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 
@@ -176,19 +177,18 @@ func Run(version string) {
 	slog.Info("Bot stopped")
 }
 
-// setupLogging configures the global logger based on verbose flag.
+// setupLogging 配置全局日志记录器。
+//
+// 使用 tint handler 提供彩色输出，根据 verbose 标志设置日志级别。
 func setupLogging(verbose bool) {
 	level := slog.LevelInfo
 	if verbose {
 		level = slog.LevelDebug
 	}
 
-	opts := &slog.HandlerOptions{
-		Level:     level,
-		AddSource: false,
-	}
-
-	handler := slog.NewJSONHandler(os.Stdout, opts)
+	handler := tint.NewHandler(os.Stdout, &tint.Options{
+		Level: level,
+	})
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
@@ -220,13 +220,13 @@ func generateExampleConfig() error {
   # password: "your-secure-password"
 
   # 启动时自动加入的房间列表（可选）
-  auto_join_rooms:
-    - "!roomid1:matrix.org"
-    - "#public-room:matrix.org"
+  # auto_join_rooms:
+  #   - "!roomid1:matrix.org"
+  #   - "#public-room:matrix.org"
 
   # 端到端加密（E2EE）配置（可选）
-  # enable_e2ee: true  # 启用端到端加密
-  # e2ee_session_path: "./saber.session"  # 加密会话文件路径
+  enable_e2ee: true  # 启用端到端加密
+  e2ee_session_path: "./saber.session"  # 加密会话文件路径
 `
 
 	return os.WriteFile("config.example.yaml", []byte(exampleConfig), 0o644)
