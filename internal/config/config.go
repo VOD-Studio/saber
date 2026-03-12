@@ -15,13 +15,15 @@ type Config struct {
 
 // MatrixConfig 存储 Matrix 连接配置
 type MatrixConfig struct {
-	Homeserver    string   `yaml:"homeserver"`
-	UserID        string   `yaml:"user_id"`         // 完整的 Matrix ID，如 @user:matrix.org
-	DeviceID      string   `yaml:"device_id"`       // 设备标识符
-	DeviceName    string   `yaml:"device_name"`     // 设备显示名称
-	Password      string   `yaml:"password"`        // 密码登录（可选）
-	AccessToken   string   `yaml:"access_token"`    // Token 登录（可选，优先级高于密码）
-	AutoJoinRooms []string `yaml:"auto_join_rooms"` // 启动时自动加入的房间列表
+	Homeserver      string   `yaml:"homeserver"`
+	UserID          string   `yaml:"user_id"`           // 完整的 Matrix ID，如 @user:matrix.org
+	DeviceID        string   `yaml:"device_id"`         // 设备标识符
+	DeviceName      string   `yaml:"device_name"`       // 设备显示名称
+	Password        string   `yaml:"password"`          // 密码登录（可选）
+	AccessToken     string   `yaml:"access_token"`      // Token 登录（可选，优先级高于密码）
+	AutoJoinRooms   []string `yaml:"auto_join_rooms"`   // 启动时自动加入的房间列表
+	EnableE2EE      bool     `yaml:"enable_e2ee"`       // 启用端到端加密（可选）
+	E2EESessionPath string   `yaml:"e2ee_session_path"` // 端到端加密会话文件路径（可选）
 }
 
 // UseTokenAuth 检查是否使用 Token 认证
@@ -44,6 +46,9 @@ func (m *MatrixConfig) Validate() error {
 	}
 	if !m.UseTokenAuth() && !m.UsePasswordAuth() {
 		return fmt.Errorf("either password or access_token must be provided")
+	}
+	if m.EnableE2EE && m.E2EESessionPath == "" {
+		return fmt.Errorf("e2ee_session_path is required when enable_e2ee is true")
 	}
 	return nil
 }
@@ -90,12 +95,14 @@ func LoadOrDefault(path string) (*Config, error) {
 func DefaultConfig() *Config {
 	return &Config{
 		Matrix: MatrixConfig{
-			Homeserver:  "https://matrix.org",
-			UserID:      "",
-			DeviceID:    "",
-			DeviceName:  "Saber Bot",
-			Password:    "",
-			AccessToken: "",
+			Homeserver:      "https://matrix.org",
+			UserID:          "",
+			DeviceID:        "",
+			DeviceName:      "Saber Bot",
+			Password:        "",
+			AccessToken:     "",
+			EnableE2EE:      false,
+			E2EESessionPath: "",
 		},
 	}
 }
@@ -126,6 +133,10 @@ func ExampleConfig() string {
   # auto_join_rooms:
   #   - "!roomid1:matrix.org"
   #   - "#public-room:matrix.org"
+
+  # 端到端加密（E2EE）配置（可选）
+  # enable_e2ee: true  # 启用端到端加密
+  # e2ee_session_path: "./saber.session"  # 加密会话文件路径
 `
 }
 
