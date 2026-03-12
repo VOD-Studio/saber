@@ -4,7 +4,10 @@ package matrix
 
 import (
 	"context"
+	"fmt"
 
+	"maunium.net/go/mautrix"
+	"maunium.net/go/mautrix/crypto/cryptohelper"
 	"maunium.net/go/mautrix/event"
 )
 
@@ -37,11 +40,39 @@ type CryptoService interface {
 // 零值 NoopCryptoService 是有效的。
 type NoopCryptoService struct{}
 
+// OlmCryptoService 是使用 mautrix CryptoHelper 的端到端加密实现。
+//
+// 它封装了 mautrix 的 cryptohelper.CryptoHelper，提供完整的 Matrix
+// 端到端加密功能，包括密钥管理、会话恢复和事件解密。
+type OlmCryptoService struct {
+	cryptoHelper *cryptohelper.CryptoHelper
+	client       *mautrix.Client
+	sessionPath  string
+	pickleKey    []byte
+}
+
 // NewNoopCryptoService 创建一个空加密服务实例。
 //
 // 此服务不会执行任何加密或解密操作，适用于 E2EE 禁用模式。
 func NewNoopCryptoService() *NoopCryptoService {
 	return &NoopCryptoService{}
+}
+
+// NewOlmCryptoService 创建一个新的端到端加密服务实例。
+//
+// 参数:
+//   - client: mautrix 客户端实例
+//   - sessionPath: 加密会话数据库文件路径（SQLite）
+//   - pickleKey: 用于加密存储密钥的密钥
+//
+// 注意：实际的加密初始化在 Init() 方法中进行，而不是在构造函数中。
+// 这允许延迟初始化并在适当的上下文中处理错误。
+func NewOlmCryptoService(client *mautrix.Client, sessionPath string, pickleKey []byte) *OlmCryptoService {
+	return &OlmCryptoService{
+		client:      client,
+		sessionPath: sessionPath,
+		pickleKey:   pickleKey,
+	}
 }
 
 // Init 实现 CryptoService 接口。
@@ -64,4 +95,45 @@ func (n *NoopCryptoService) Decrypt(ctx context.Context, evt *event.Event) (*eve
 // 此实现始终返回 false，表示加密功能未启用。
 func (n *NoopCryptoService) IsEnabled() bool {
 	return false
+}
+
+// Init 实现 CryptoService 接口。
+//
+// 此方法初始化 mautrix CryptoHelper，创建或加载 Olm 账户，
+// 并设置客户端的 Crypto 字段以自动处理加密/解密。
+// 它使用配置的会话路径和 pickle 密钥来管理加密存储。
+func (o *OlmCryptoService) Init(ctx context.Context) error {
+	helper, err := cryptohelper.NewCryptoHelper(o.client, o.pickleKey, o.sessionPath)
+	if err != nil {
+		return fmt.Errorf("failed to create crypto helper: %w", err)
+	}
+
+	if err := helper.Init(ctx); err != nil {
+		return fmt.Errorf("failed to initialize crypto helper: %w", err)
+	}
+
+	o.cryptoHelper = helper
+	o.client.Crypto = helper
+	return nil
+}
+
+// Decrypt 实现 CryptoService 接口。
+//
+// 此方法使用 CryptoHelper 解密加密事件。
+// 对于非加密事件，此方法的行为未定义，调用者应先检查事件类型。
+// 注意：当 CryptoHelper 已通过 client.Crypto 设置时，
+// 加密事件通常会自动解密，此方法主要用于手动解密场景。
+func (o *OlmCryptoService) Decrypt(ctx context.Context, evt *event.Event) (*event.Event, error) {
+	if o.cryptoHelper == nil {
+		return nil, fmt.Errorf("crypto helper not initialized")
+	}
+	return o.cryptoHelper.Decrypt(ctx, evt)
+}
+
+// IsEnabled 实现 CryptoService 接口。
+//
+// 此方法返回加密服务是否已成功初始化。
+// 当 cryptoHelper 字段不为 nil 时返回 true，表示服务已启用并可处理加密事件。
+func (o *OlmCryptoService) IsEnabled() bool {
+	return o.cryptoHelper != nil
 }
