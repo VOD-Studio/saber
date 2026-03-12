@@ -88,6 +88,23 @@ func Run(version string) {
 		"user_id", client.GetUserID().String(),
 		"device_id", client.GetDeviceID().String())
 
+	// 初始化端到端加密（E2EE）
+	if cfg.Matrix.EnableE2EE {
+		pickleKey, err := matrix.GeneratePickleKey()
+		if err != nil {
+			slog.Warn("Failed to generate pickle key, E2EE disabled", "error", err)
+		} else if err := client.InitCrypto(context.Background(), pickleKey); err != nil {
+			slog.Warn("E2EE initialization failed, continuing without encryption", "error", err)
+		} else {
+			slog.Info("E2EE initialized successfully")
+		}
+	} else {
+		// 初始化无操作的加密服务
+		if err := client.InitCrypto(context.Background(), nil); err != nil {
+			slog.Warn("Failed to initialize crypto service", "error", err)
+		}
+	}
+
 	// Setup command service
 	mautrixClient := client.GetClient()
 	commandService := matrix.NewCommandService(mautrixClient, client.GetUserID())
