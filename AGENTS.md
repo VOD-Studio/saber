@@ -16,6 +16,16 @@ Architecture:
 
 ## Build, Test, and Lint Commands
 
+### Build Tags
+
+本项目使用 `-tags goolm` 启用 Olm 加密支持（mautrix SDK 要求）。Makefile 已自动包含此标签，直接运行 `go build`/`go run` 时需要手动指定：
+
+```bash
+go build -tags goolm .
+go run -tags goolm main.go
+go vet -tags goolm ./...
+```
+
 ### Makefile Targets
 
 ```bash
