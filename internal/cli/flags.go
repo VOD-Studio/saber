@@ -4,10 +4,6 @@ import (
 	"flag"
 )
 
-// Version 可在构建时使用以下命令设置：
-// go build -ldflags="-X 'saber/internal/cli.Version=1.0.0'"
-var Version = "dev"
-
 // Flags 包含已解析的命令行标志。
 type Flags struct {
 	ConfigPath     string

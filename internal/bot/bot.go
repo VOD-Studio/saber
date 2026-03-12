@@ -21,14 +21,11 @@ import (
 
 // Run initializes and runs the bot.
 // It handles CLI flags, configuration, Matrix client setup, and graceful shutdown.
-func Run(version string) {
+func Run(version, gitMsg string) {
 	flags := cli.Parse()
 
-	// Set version for cli package
-	cli.Version = version
-
 	if flags.ShowVersion {
-		fmt.Printf("Saber Matrix Bot v%s\n", version)
+		fmt.Printf("Saber Matrix Bot v%s (%s)\n", version, gitMsg)
 		os.Exit(0)
 	}
 
@@ -43,6 +40,8 @@ func Run(version string) {
 
 	// Setup logging
 	setupLogging(flags.Verbose)
+
+	slog.Info("Starting Saber Matrix Bot", "version", version, "git", gitMsg)
 
 	// Load configuration
 	cfg, err := config.Load(flags.ConfigPath)
@@ -220,7 +219,8 @@ func Run(version string) {
 		}
 	}()
 
-	slog.Info("Saber Bot is running. Press Ctrl+C to exit.")
+	slog.Info("Saber Bot is running", "version", version, "git", gitMsg)
+	slog.Info("Press Ctrl+C to exit.")
 
 	// Wait for shutdown signal
 	sig := <-sigChan

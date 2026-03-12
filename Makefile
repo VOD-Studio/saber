@@ -1,13 +1,14 @@
 .PHONY: build clean test fmt lint run help
 
 APP_NAME := saber
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+GIT_MSG := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+VERSION := 0.0.1
 BUILD_DIR := bin
 MAIN_FILE := main.go
 
 build: ## Build the binary
 	@mkdir -p $(BUILD_DIR)
-	go build -tags goolm -o $(BUILD_DIR)/$(APP_NAME) .
+	go build -tags goolm -ldflags="-X 'main.version=$(VERSION)' -X 'main.gitMsg=$(GIT_MSG)'" -o $(BUILD_DIR)/$(APP_NAME) .
 
 clean: ## Remove build artifacts
 	rm -rf $(BUILD_DIR)

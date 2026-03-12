@@ -4,8 +4,11 @@ import (
 	"rua.plus/saber/internal/bot"
 )
 
-var version = "dev"
+var (
+	version = "dev"
+	gitMsg  = "unknown"
+)
 
 func main() {
-	bot.Run(version)
+	bot.Run(version, gitMsg)
 }
