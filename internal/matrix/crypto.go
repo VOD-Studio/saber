@@ -1,5 +1,10 @@
+//go:build goolm
+
 // Package matrix 提供 Saber 机器人的 Matrix 客户端功能。
 // 本文件包含端到端加密（E2EE）服务的接口定义。
+//
+// 使用 goolm（纯 Go 的 libolm 实现），无需 CGO 依赖。
+// 构建时请添加 -tags goolm 标志。
 package matrix
 
 import (

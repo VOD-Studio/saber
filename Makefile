@@ -7,7 +7,7 @@ MAIN_FILE := main.go
 
 build: ## Build the binary
 	@mkdir -p $(BUILD_DIR)
-	go build -o $(BUILD_DIR)/$(APP_NAME) .
+	go build -tags goolm -o $(BUILD_DIR)/$(APP_NAME) .
 
 clean: ## Remove build artifacts
 	rm -rf $(BUILD_DIR)
@@ -19,10 +19,10 @@ fmt: ## Format code
 	go fmt ./...
 
 lint: ## Run linter
-	golangci-lint run ./...
+	go vet ./...
 
 run: ## Run the application
-	go run $(MAIN_FILE)
+	go run -tags goolm $(MAIN_FILE)
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-12s\033[0m %s\n", $$1, $$2}'

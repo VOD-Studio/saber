@@ -1,3 +1,5 @@
+//go:build goolm
+
 // Package matrix_test 包含端到端加密服务的单元测试。
 package matrix
 
