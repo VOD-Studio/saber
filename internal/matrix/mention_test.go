@@ -177,9 +177,9 @@ func TestParseMention_HTMLPills(t *testing.T) {
 		{
 			name:        "non-HTML format",
 			body:        "@bot:example.com hello",
-			format:      event.FormatHTML,
+			format:      "",
 			formatted:   "",
-			wantMention: true, // This will be caught by user ID matching instead
+			wantMention: true,
 			wantMsg:     "hello",
 		},
 		{
