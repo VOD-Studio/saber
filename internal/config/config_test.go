@@ -307,8 +307,8 @@ ai:
 	t.Run("空路径使用默认", func(t *testing.T) {
 		originalWd, _ := os.Getwd()
 		tmpDir := t.TempDir()
-		os.Chdir(tmpDir)
-		defer os.Chdir(originalWd)
+		_ = os.Chdir(tmpDir)
+		defer func() { _ = os.Chdir(originalWd) }()
 
 		content := `matrix:
   homeserver: "https://test.matrix.org"

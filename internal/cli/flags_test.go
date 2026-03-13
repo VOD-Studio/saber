@@ -175,9 +175,9 @@ func TestParseReturnsNonNil(t *testing.T) {
 	defer func() { os.Args = originalArgs }()
 
 	os.Args = []string{"test-program"}
-	f := &Flags{}
+	f := Parse()
 
 	if f == nil {
-		t.Error("Flags 指针不应为 nil")
+		t.Error("Parse 应返回非 nil Flags 指针")
 	}
 }

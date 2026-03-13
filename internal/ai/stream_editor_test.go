@@ -451,10 +451,10 @@ func TestStreamEditor_MaxEdits(t *testing.T) {
 	editor := NewStreamEditor(mock, roomID, "", cfg)
 	ctx := context.Background()
 
-	editor.Start(ctx)
+	_ = editor.Start(ctx)
 
 	for range 10 {
-		editor.Update(ctx, "content %d")
+		_ = editor.Update(ctx, "content %d")
 	}
 
 	calls := mock.getSendTextWithRelatesToCalls()
@@ -477,12 +477,12 @@ func TestStreamEditor_EditInterval(t *testing.T) {
 	editor := NewStreamEditor(mock, roomID, "", cfg)
 	ctx := context.Background()
 
-	editor.Start(ctx)
+	_ = editor.Start(ctx)
 
-	editor.Update(ctx, "content 1")
+	_ = editor.Update(ctx, "content 1")
 	time.Sleep(150 * time.Millisecond)
-	editor.Update(ctx, "content 2")
-	editor.Update(ctx, "content 3")
+	_ = editor.Update(ctx, "content 2")
+	_ = editor.Update(ctx, "content 3")
 
 	calls := mock.getSendTextWithRelatesToCalls()
 	expectedCalls := 3 // start + 2 edits (third skipped due to interval)
@@ -504,7 +504,7 @@ func TestStreamEditor_Concurrency(t *testing.T) {
 	editor := NewStreamEditor(mock, roomID, "", cfg)
 	ctx := context.Background()
 
-	editor.Start(ctx)
+	_ = editor.Start(ctx)
 
 	const goroutines = 50
 	var wg sync.WaitGroup
@@ -513,7 +513,7 @@ func TestStreamEditor_Concurrency(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			editor.Update(ctx, "concurrent update")
+			_ = editor.Update(ctx, "concurrent update")
 		}()
 	}
 
@@ -521,7 +521,7 @@ func TestStreamEditor_Concurrency(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			editor.SendFinal(ctx, "final")
+			_ = editor.SendFinal(ctx, "final")
 		}()
 	}
 

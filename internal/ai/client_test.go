@@ -163,7 +163,7 @@ func TestClient_CreateChatCompletion_NonStreaming(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}
 
 	client, _ := setupMockServer(t, handler)
@@ -203,7 +203,7 @@ func TestClient_CreateChatCompletion_NoChoices(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}
 
 	client, _ := setupMockServer(t, handler)
@@ -225,7 +225,7 @@ func TestClient_CreateChatCompletion_NoChoices(t *testing.T) {
 func TestClient_CreateChatCompletion_APIError(t *testing.T) {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error": {"message": "internal server error"}}`))
+		_, _ = w.Write([]byte(`{"error": {"message": "internal server error"}}`))
 	}
 
 	client, _ := setupMockServer(t, handler)
@@ -278,11 +278,11 @@ func TestClient_CreateChatCompletion_Streaming(t *testing.T) {
 			}
 
 			jsonData, _ := json.Marshal(data)
-			fmt.Fprintf(w, "data: %s\n\n", jsonData)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", jsonData)
 			flusher.Flush()
 		}
 
-		w.Write([]byte("data: [DONE]\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
 	}
 
@@ -336,11 +336,11 @@ func TestClient_CreateStreamingChatCompletion(t *testing.T) {
 			}
 
 			jsonData, _ := json.Marshal(data)
-			fmt.Fprintf(w, "data: %s\n\n", jsonData)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", jsonData)
 			flusher.Flush()
 		}
 
-		w.Write([]byte("data: [DONE]\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
 	}
 
@@ -377,7 +377,7 @@ func TestClient_CreateStreamingChatCompletion(t *testing.T) {
 func TestClient_CreateStreamingChatCompletion_Error(t *testing.T) {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error": {"message": "rate limit exceeded"}}`))
+		_, _ = w.Write([]byte(`{"error": {"message": "rate limit exceeded"}}`))
 	}
 
 	client, _ := setupMockServer(t, handler)

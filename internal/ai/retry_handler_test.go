@@ -274,7 +274,7 @@ func TestRetryConfigWrapper_WithRetry_Backoff(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	rc.WithRetry(ctx, operation)
+	_, _ = rc.WithRetry(ctx, operation)
 
 	// 验证延迟大致符合指数退避（允许误差）
 	// 注意：这个测试可能因为系统调度而不精确

@@ -202,9 +202,22 @@ go run -tags goolm main.go
 go test -tags goolm ./...
 ```
 
+### 开发依赖
+
+```bash
+# 安装 goimports（格式化和自动导入管理）
+go install golang.org/x/tools/cmd/goimports@latest
+
+# 安装 golangci-lint（代码检查）
+# macOS/Linux
+curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
+# 或使用 go install
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+```
+
 ### 代码风格
 
-- 提交前运行 `make fmt`
+- 提交前运行 `make fmt`（使用 goimports 格式化代码并自动管理导入）
 - 遵循 [Effective Go](https://go.dev/doc/effective_go) 指南
 - 所有导出标识符的注释使用中文
 - 永远不要忽略错误

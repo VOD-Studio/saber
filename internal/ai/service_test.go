@@ -296,7 +296,7 @@ func TestService_Concurrency(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			service.getClient("gpt-4")
+			_, _ = service.getClient("gpt-4")
 		}()
 	}
 
