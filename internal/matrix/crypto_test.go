@@ -89,7 +89,7 @@ func TestNoopCryptoService(t *testing.T) {
 					RoomID: id.RoomID("!test:example.com"),
 					Sender: id.UserID("@alice:example.com"),
 					Content: event.Content{
-						Raw: map[string]interface{}{
+						Raw: map[string]any{
 							"algorithm": "m.megolm.v1.aes-sha2",
 						},
 					},
@@ -148,7 +148,7 @@ func TestNoopCryptoService(t *testing.T) {
 				svc := NewNoopCryptoService()
 				ctx := context.Background()
 
-				for i := 0; i < 5; i++ {
+				for i := range 5 {
 					err := svc.Init(ctx)
 					if err != nil {
 						t.Errorf("第 %d 次 Init 失败: %v", i+1, err)
@@ -244,7 +244,7 @@ func TestGeneratePickleKey(t *testing.T) {
 			test: func(t *testing.T) {
 				// 生成多个密钥并检查它们有足够的差异
 				keys := make([][]byte, 10)
-				for i := 0; i < 10; i++ {
+				for i := range 10 {
 					key, err := GeneratePickleKey()
 					if err != nil {
 						t.Fatalf("第 %d 次调用失败: %v", i+1, err)
@@ -253,10 +253,10 @@ func TestGeneratePickleKey(t *testing.T) {
 				}
 
 				// 检查每个密钥与其他密钥的差异
-				for i := 0; i < 10; i++ {
+				for i := range 10 {
 					for j := i + 1; j < 10; j++ {
 						diff := 0
-						for k := 0; k < 32; k++ {
+						for k := range 32 {
 							if keys[i][k] != keys[j][k] {
 								diff++
 							}
@@ -363,7 +363,7 @@ func TestNoopCryptoServiceConcurrency(t *testing.T) {
 	errChan := make(chan error, 100)
 
 	// 并发调用
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		go func() {
 			evt := &event.Event{
 				Type:   event.EventMessage,
@@ -384,7 +384,7 @@ func TestNoopCryptoServiceConcurrency(t *testing.T) {
 	}
 
 	// 收集结果
-	for i := 0; i < 150; i++ {
+	for range 150 {
 		if err := <-errChan; err != nil {
 			t.Errorf("并发调用失败: %v", err)
 		}
@@ -397,7 +397,7 @@ func TestGeneratePickleKeyConcurrent(t *testing.T) {
 	keys := make([][]byte, goroutines)
 	errChan := make(chan error, goroutines)
 
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(idx int) {
 			key, err := GeneratePickleKey()
 			if err != nil {
@@ -410,14 +410,14 @@ func TestGeneratePickleKeyConcurrent(t *testing.T) {
 	}
 
 	// 等待所有 goroutine 完成
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		if err := <-errChan; err != nil {
 			t.Errorf("并发生成密钥失败: %v", err)
 		}
 	}
 
 	// 验证所有密钥都不同
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		for j := i + 1; j < goroutines; j++ {
 			if string(keys[i]) == string(keys[j]) {
 				t.Errorf("并发生成的密钥 %d 和 %d 相同", i, j)
@@ -455,7 +455,7 @@ func TestNoopCryptoServiceContextHandling(t *testing.T) {
 // TestGeneratePickleKeyEdgeCases 测试 GeneratePickleKey 的边缘情况。
 func TestGeneratePickleKeyEdgeCases(t *testing.T) {
 	t.Run("生成的密钥长度正确", func(t *testing.T) {
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			key, err := GeneratePickleKey()
 			if err != nil {
 				t.Fatalf("调用 %d 失败: %v", i, err)

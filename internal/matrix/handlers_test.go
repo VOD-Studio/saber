@@ -67,17 +67,20 @@ func TestOnMember(t *testing.T) {
 	}{
 		{
 			name: "邀请机器人（正常路径）",
-			event: &event.Event{
-				Type:     event.StateMember,
-				RoomID:   roomID,
-				Sender:   senderID,
-				StateKey: stringPtr(string(botUserID)),
-				Content: event.Content{
-					Parsed: &event.MemberEventContent{
-						Membership: event.MembershipInvite,
+			event: func() *event.Event {
+				stateKey := string(botUserID)
+				return &event.Event{
+					Type:     event.StateMember,
+					RoomID:   roomID,
+					Sender:   senderID,
+					StateKey: &stateKey,
+					Content: event.Content{
+						Parsed: &event.MemberEventContent{
+							Membership: event.MembershipInvite,
+						},
 					},
-				},
-			},
+				}
+			}(),
 			botID: botUserID,
 			roundTripper: &mockRoundTripper{
 				responseBody: successBody,
@@ -86,17 +89,20 @@ func TestOnMember(t *testing.T) {
 		},
 		{
 			name: "邀请其他用户",
-			event: &event.Event{
-				Type:     event.StateMember,
-				RoomID:   roomID,
-				Sender:   senderID,
-				StateKey: stringPtr(string(otherUserID)),
-				Content: event.Content{
-					Parsed: &event.MemberEventContent{
-						Membership: event.MembershipInvite,
+			event: func() *event.Event {
+				stateKey := string(otherUserID)
+				return &event.Event{
+					Type:     event.StateMember,
+					RoomID:   roomID,
+					Sender:   senderID,
+					StateKey: &stateKey,
+					Content: event.Content{
+						Parsed: &event.MemberEventContent{
+							Membership: event.MembershipInvite,
+						},
 					},
-				},
-			},
+				}
+			}(),
 			botID: botUserID,
 			roundTripper: &mockRoundTripper{
 				responseBody: successBody,
@@ -105,17 +111,20 @@ func TestOnMember(t *testing.T) {
 		},
 		{
 			name: "非邀请成员事件（加入）",
-			event: &event.Event{
-				Type:     event.StateMember,
-				RoomID:   roomID,
-				Sender:   senderID,
-				StateKey: stringPtr(string(botUserID)),
-				Content: event.Content{
-					Parsed: &event.MemberEventContent{
-						Membership: event.MembershipJoin,
+			event: func() *event.Event {
+				stateKey := string(botUserID)
+				return &event.Event{
+					Type:     event.StateMember,
+					RoomID:   roomID,
+					Sender:   senderID,
+					StateKey: &stateKey,
+					Content: event.Content{
+						Parsed: &event.MemberEventContent{
+							Membership: event.MembershipJoin,
+						},
 					},
-				},
-			},
+				}
+			}(),
 			botID: botUserID,
 			roundTripper: &mockRoundTripper{
 				responseBody: successBody,
@@ -124,17 +133,20 @@ func TestOnMember(t *testing.T) {
 		},
 		{
 			name: "非邀请成员事件（离开）",
-			event: &event.Event{
-				Type:     event.StateMember,
-				RoomID:   roomID,
-				Sender:   senderID,
-				StateKey: stringPtr(string(botUserID)),
-				Content: event.Content{
-					Parsed: &event.MemberEventContent{
-						Membership: event.MembershipLeave,
+			event: func() *event.Event {
+				stateKey := string(botUserID)
+				return &event.Event{
+					Type:     event.StateMember,
+					RoomID:   roomID,
+					Sender:   senderID,
+					StateKey: &stateKey,
+					Content: event.Content{
+						Parsed: &event.MemberEventContent{
+							Membership: event.MembershipLeave,
+						},
 					},
-				},
-			},
+				}
+			}(),
 			botID: botUserID,
 			roundTripper: &mockRoundTripper{
 				responseBody: successBody,
@@ -143,17 +155,20 @@ func TestOnMember(t *testing.T) {
 		},
 		{
 			name: "非邀请成员事件（禁止）",
-			event: &event.Event{
-				Type:     event.StateMember,
-				RoomID:   roomID,
-				Sender:   senderID,
-				StateKey: stringPtr(string(botUserID)),
-				Content: event.Content{
-					Parsed: &event.MemberEventContent{
-						Membership: event.MembershipBan,
+			event: func() *event.Event {
+				stateKey := string(botUserID)
+				return &event.Event{
+					Type:     event.StateMember,
+					RoomID:   roomID,
+					Sender:   senderID,
+					StateKey: &stateKey,
+					Content: event.Content{
+						Parsed: &event.MemberEventContent{
+							Membership: event.MembershipBan,
+						},
 					},
-				},
-			},
+				}
+			}(),
 			botID: botUserID,
 			roundTripper: &mockRoundTripper{
 				responseBody: successBody,
@@ -181,15 +196,18 @@ func TestOnMember(t *testing.T) {
 		},
 		{
 			name: "无效内容类型",
-			event: &event.Event{
-				Type:     event.StateMember,
-				RoomID:   roomID,
-				Sender:   senderID,
-				StateKey: stringPtr(string(botUserID)),
-				Content: event.Content{
-					Parsed: "not a MemberEventContent", // invalid type
-				},
-			},
+			event: func() *event.Event {
+				stateKey := string(botUserID)
+				return &event.Event{
+					Type:     event.StateMember,
+					RoomID:   roomID,
+					Sender:   senderID,
+					StateKey: &stateKey,
+					Content: event.Content{
+						Parsed: "not a MemberEventContent", // invalid type
+					},
+				}
+			}(),
 			botID: botUserID,
 			roundTripper: &mockRoundTripper{
 				responseBody: successBody,
@@ -198,17 +216,20 @@ func TestOnMember(t *testing.T) {
 		},
 		{
 			name: "JoinRoom 错误",
-			event: &event.Event{
-				Type:     event.StateMember,
-				RoomID:   roomID,
-				Sender:   senderID,
-				StateKey: stringPtr(string(botUserID)),
-				Content: event.Content{
-					Parsed: &event.MemberEventContent{
-						Membership: event.MembershipInvite,
+			event: func() *event.Event {
+				stateKey := string(botUserID)
+				return &event.Event{
+					Type:     event.StateMember,
+					RoomID:   roomID,
+					Sender:   senderID,
+					StateKey: &stateKey,
+					Content: event.Content{
+						Parsed: &event.MemberEventContent{
+							Membership: event.MembershipInvite,
+						},
 					},
-				},
-			},
+				}
+			}(),
 			botID: botUserID,
 			roundTripper: &mockRoundTripper{
 				responseErr: errors.New("simulated join error"),
@@ -250,9 +271,4 @@ func TestOnMember(t *testing.T) {
 			}
 		})
 	}
-}
-
-// stringPtr 返回字符串指针的辅助函数。
-func stringPtr(s string) *string {
-	return &s
 }

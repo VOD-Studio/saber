@@ -415,7 +415,7 @@ func TestMentionService_Concurrency(t *testing.T) {
 	errChan := make(chan error, goroutines*3)
 
 	// 并发读取显示名称
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -428,7 +428,7 @@ func TestMentionService_Concurrency(t *testing.T) {
 	}
 
 	// 并发检查提及
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -441,7 +441,7 @@ func TestMentionService_Concurrency(t *testing.T) {
 	}
 
 	// 并发解析提及
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -458,7 +458,7 @@ func TestMentionService_Concurrency(t *testing.T) {
 
 	// 收集所有结果
 	totalTests := goroutines * 3
-	for i := 0; i < totalTests; i++ {
+	for range totalTests {
 		if err := <-errChan; err != nil {
 			t.Errorf("并发测试失败: %v", err)
 		}

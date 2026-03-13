@@ -295,11 +295,10 @@ func (s *MentionService) checkUserIDMention(msg string) bool {
 //   - 移除用户 ID 后的消息
 func (s *MentionService) stripUserIDMention(msg string) string {
 	botIDStr := s.botID.String()
-	idx := strings.Index(msg, botIDStr)
-	if idx == -1 {
+	before, after, found := strings.Cut(msg, botIDStr)
+	if !found {
 		return msg
 	}
 
-	result := msg[:idx] + msg[idx+len(botIDStr):]
-	return strings.TrimSpace(result)
+	return strings.TrimSpace(before + after)
 }
