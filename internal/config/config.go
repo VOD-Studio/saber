@@ -113,7 +113,7 @@ func DefaultAIConfig() AIConfig {
 		Models:                make(map[string]ModelConfig),
 		TimeoutSeconds:        30,
 		DirectChatAutoReply:   true,
-		GroupChatMentionReply: false,
+		GroupChatMentionReply: true,
 	}
 }
 
@@ -391,7 +391,7 @@ ai:
   direct_chat_auto_reply: true
 
   # 在群聊中 @mention 时自动回复（无需 !ai 前缀）
-  group_chat_mention_reply: false
+  group_chat_mention_reply: true
 `
 }
 
