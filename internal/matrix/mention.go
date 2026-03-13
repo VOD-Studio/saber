@@ -291,7 +291,7 @@ func (s *MentionService) checkDisplayNameMention(msg string) bool {
 
 // stripDisplayNameMention 从消息中移除显示名称提及。
 //
-// 该方法查找并移除显示名称的第一次出现。
+// 该方法查找并移除显示名称的第一次出现，并清理紧跟的分隔符。
 //
 // 参数:
 //   - msg: 包含显示名称的消息
@@ -314,11 +314,44 @@ func (s *MentionService) stripDisplayNameMention(msg string) string {
 
 	// 移除匹配的部分
 	result := msg[:idx] + msg[idx+len(displayName):]
+
+	// 清理紧跟在显示名称后的分隔符
+	result = stripMentionSeparators(result)
+
 	// 只在实际有内容时才修剪空白，避免将纯空白消息变成空字符串
 	if strings.TrimSpace(result) == "" {
 		return result
 	}
 	return strings.TrimSpace(result)
+}
+
+// stripMentionSeparators 清理消息开头的分隔符。
+//
+// 该方法移除常见的 mention 分隔符，包括：
+//   - 英文冒号 `:` 和全角冒号 `：`
+//   - 英文逗号 `,` 和全角逗号 `，`
+//   - 前导空白
+//
+// 参数:
+//   - msg: 原始消息
+//
+// 返回:
+//   - 清理分隔符后的消息
+func stripMentionSeparators(msg string) string {
+	msg = strings.TrimSpace(msg)
+
+	// 要移除的分隔符
+	separators := []string{":", "：", ",", "，"}
+
+	for _, sep := range separators {
+		if strings.HasPrefix(msg, sep) {
+			remaining := strings.TrimPrefix(msg, sep)
+			// 移除分隔符后可能紧跟的空白
+			return strings.TrimSpace(remaining)
+		}
+	}
+
+	return msg
 }
 
 // checkUserIDMention 检查消息是否包含机器人的用户 ID。

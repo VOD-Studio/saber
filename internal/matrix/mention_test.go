@@ -266,11 +266,18 @@ func TestParseMention_DisplayName(t *testing.T) {
 			wantMsg:     "Saber hello",
 		},
 		{
-			name:        "special characters",
+			name:        "special characters with colon separator",
 			displayName: "派蒙",
 			body:        "派蒙：你好！",
 			wantMention: true,
-			wantMsg:     "：你好！",
+			wantMsg:     "你好！",
+		},
+		{
+			name:        "special characters with space separator",
+			displayName: "派蒙",
+			body:        "派蒙 你好！",
+			wantMention: true,
+			wantMsg:     "你好！",
 		},
 		{
 			name:        "empty body",
@@ -292,6 +299,34 @@ func TestParseMention_DisplayName(t *testing.T) {
 			body:        "My Bot hello world",
 			wantMention: true,
 			wantMsg:     "hello world",
+		},
+		{
+			name:        "english colon separator",
+			displayName: "派蒙",
+			body:        "派蒙: 123",
+			wantMention: true,
+			wantMsg:     "123",
+		},
+		{
+			name:        "english comma separator",
+			displayName: "Bot",
+			body:        "Bot, hello world",
+			wantMention: true,
+			wantMsg:     "hello world",
+		},
+		{
+			name:        "fullwidth comma separator",
+			displayName: "机器人",
+			body:        "机器人，你好",
+			wantMention: true,
+			wantMsg:     "你好",
+		},
+		{
+			name:        "display name in middle with colon",
+			displayName: "派蒙",
+			body:        "你好 派蒙: 测试",
+			wantMention: true,
+			wantMsg:     "你好 : 测试",
 		},
 	}
 
