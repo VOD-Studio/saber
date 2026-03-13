@@ -31,20 +31,21 @@ type MatrixConfig struct {
 
 // AIConfig 存储 AI 服务配置
 type AIConfig struct {
-	Enabled             bool                   `yaml:"enabled"`                // 是否启用 AI 功能
-	Provider            string                 `yaml:"provider"`               // AI 提供商名称（如 openai, anthropic）
-	BaseURL             string                 `yaml:"base_url"`               // API 基础 URL
-	APIKey              string                 `yaml:"api_key"`                // API 密钥
-	DefaultModel        string                 `yaml:"default_model"`          // 默认使用的模型
-	MaxTokens           int                    `yaml:"max_tokens"`             // 最大生成 token 数
-	Temperature         float64                `yaml:"temperature"`            // 生成温度（0-2）
-	Context             ContextConfig          `yaml:"context"`                // 上下文管理配置
-	StreamEnabled       bool                   `yaml:"stream_enabled"`         // 是否启用流式响应
-	StreamEdit          StreamEditConfig       `yaml:"stream_edit"`            // 流式编辑配置
-	Retry               RetryConfig            `yaml:"retry"`                  // 重试配置
-	Models              map[string]ModelConfig `yaml:"models"`                 // 模型特定配置
-	TimeoutSeconds      int                    `yaml:"timeout_seconds"`        // 请求超时时间（秒）
-	DirectChatAutoReply bool                   `yaml:"direct_chat_auto_reply"` // 在私聊中自动回复（无需 !ai 前缀）
+	Enabled               bool                   `yaml:"enabled"`                  // 是否启用 AI 功能
+	Provider              string                 `yaml:"provider"`                 // AI 提供商名称（如 openai, anthropic）
+	BaseURL               string                 `yaml:"base_url"`                 // API 基础 URL
+	APIKey                string                 `yaml:"api_key"`                  // API 密钥
+	DefaultModel          string                 `yaml:"default_model"`            // 默认使用的模型
+	MaxTokens             int                    `yaml:"max_tokens"`               // 最大生成 token 数
+	Temperature           float64                `yaml:"temperature"`              // 生成温度（0-2）
+	Context               ContextConfig          `yaml:"context"`                  // 上下文管理配置
+	StreamEnabled         bool                   `yaml:"stream_enabled"`           // 是否启用流式响应
+	StreamEdit            StreamEditConfig       `yaml:"stream_edit"`              // 流式编辑配置
+	Retry                 RetryConfig            `yaml:"retry"`                    // 重试配置
+	Models                map[string]ModelConfig `yaml:"models"`                   // 模型特定配置
+	TimeoutSeconds        int                    `yaml:"timeout_seconds"`          // 请求超时时间（秒）
+	DirectChatAutoReply   bool                   `yaml:"direct_chat_auto_reply"`   // 在私聊中自动回复（无需 !ai 前缀）
+	GroupChatMentionReply bool                   `yaml:"group_chat_mention_reply"` // 在群聊中 @mention 时自动回复（无需 !ai 前缀）
 }
 
 // ContextConfig 存储上下文管理配置
@@ -98,20 +99,21 @@ func (m *MatrixConfig) UsePasswordAuth() bool {
 // DefaultAIConfig 返回带有合理默认值的 AI 配置
 func DefaultAIConfig() AIConfig {
 	return AIConfig{
-		Enabled:             false,
-		Provider:            "",
-		BaseURL:             "",
-		APIKey:              "",
-		DefaultModel:        "",
-		MaxTokens:           4096,
-		Temperature:         0.7,
-		Context:             DefaultContextConfig(),
-		StreamEnabled:       false,
-		StreamEdit:          DefaultStreamEditConfig(),
-		Retry:               DefaultRetryConfig(),
-		Models:              make(map[string]ModelConfig),
-		TimeoutSeconds:      30,
-		DirectChatAutoReply: true,
+		Enabled:               false,
+		Provider:              "",
+		BaseURL:               "",
+		APIKey:                "",
+		DefaultModel:          "",
+		MaxTokens:             4096,
+		Temperature:           0.7,
+		Context:               DefaultContextConfig(),
+		StreamEnabled:         false,
+		StreamEdit:            DefaultStreamEditConfig(),
+		Retry:                 DefaultRetryConfig(),
+		Models:                make(map[string]ModelConfig),
+		TimeoutSeconds:        30,
+		DirectChatAutoReply:   true,
+		GroupChatMentionReply: false,
 	}
 }
 
@@ -387,6 +389,9 @@ ai:
 
   # 在私聊中自动回复（无需 !ai 前缀）
   direct_chat_auto_reply: true
+
+  # 在群聊中 @mention 时自动回复（无需 !ai 前缀）
+  group_chat_mention_reply: false
 `
 }
 

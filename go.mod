@@ -4,6 +4,7 @@ go 1.26.1
 
 require (
 	github.com/lmittmann/tint v1.0.7
+	github.com/sashabaranov/go-openai v1.41.2
 	gopkg.in/yaml.v3 v3.0.1
 	maunium.net/go/mautrix v0.26.3
 )
@@ -15,7 +16,6 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.34 // indirect
 	github.com/petermattis/goid v0.0.0-20260113132338-7c7de50cc741 // indirect
 	github.com/rs/zerolog v1.34.0 // indirect
-	github.com/sashabaranov/go-openai v1.41.2 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
