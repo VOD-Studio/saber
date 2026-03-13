@@ -110,19 +110,69 @@ func (s *MentionService) IsMentioned(content string) bool {
 	return false
 }
 
-// ParseMentions 从消息中提取提及的用户列表（未来扩展用）。
+// ParseMentions 从 Matrix 事件中提取所有被提及的用户 ID。
 //
-// 该方法预留用于解析 MSC 3952 结构化 mentions 和 HTML pills。
-// 当前版本仅作为框架占位。
+// 该方法支持多种 mention 格式：
+//   - MSC 3952 结构化 mentions (evt.Content.Mentions)
+//   - HTML pills (format.HTMLToMarkdownFull)
 //
 // 参数:
 //   - evt: Matrix 房间消息事件
 //
 // 返回:
-//   - 提及的用户 ID 列表
-func (s *MentionService) ParseMentions(evt *event.Event) []id.UserID {
-	// TODO: 实现结构化 mention 解析
-	return []id.UserID{}
+//   - 提及信息结构体，包含用户 ID 列表和房间提及标志
+func (s *MentionService) ParseMentions(evt *event.Event) *event.Mentions {
+	result := &event.Mentions{}
+
+	if evt == nil {
+		return result
+	}
+
+	content, ok := evt.Content.Parsed.(*event.MessageEventContent)
+	if !ok || content == nil {
+		return result
+	}
+
+	// 1. MSC 3952 结构化 mentions
+	if content.Mentions != nil {
+		result = result.Merge(content.Mentions)
+	}
+
+	// 2. HTML pills mentions
+	if content.Format == event.FormatHTML && content.FormattedBody != "" {
+		_, mentions := format.HTMLToMarkdownFull(nil, content.FormattedBody)
+		if mentions != nil {
+			result = result.Merge(mentions)
+		}
+	}
+
+	// 去重 UserIDs
+	result.UserIDs = uniqueUserIDs(result.UserIDs)
+
+	return result
+}
+
+// uniqueUserIDs 去除重复的用户 ID。
+//
+// 参数:
+//   - userIDs: 可能包含重复的用户 ID 列表
+//
+// 返回:
+//   - 去重后的用户 ID 列表
+func uniqueUserIDs(userIDs []id.UserID) []id.UserID {
+	if len(userIDs) == 0 {
+		return []id.UserID{}
+	}
+
+	seen := make(map[id.UserID]bool, len(userIDs))
+	result := make([]id.UserID, 0, len(userIDs))
+	for _, uid := range userIDs {
+		if uid != "" && !seen[uid] {
+			seen[uid] = true
+			result = append(result, uid)
+		}
+	}
+	return result
 }
 
 // ParseMention 解析消息中的机器人提及并清理消息前缀。

@@ -662,3 +662,196 @@ func TestStripMentionPrefix(t *testing.T) {
 		})
 	}
 }
+
+// TestParseMentions 测试 ParseMentions 方法。
+//
+// 该测试覆盖以下场景：
+//   - nil 事件输入
+//   - MSC 3952 结构化 mentions 提取（包含用户）
+//   - MSC 3952 结构化 mentions 提取（包含 @room）
+//   - HTML pills mentions 提取
+//   - 两种格式的合并和去重
+//   - 空 mentions 和边界情况
+func TestParseMentions(t *testing.T) {
+	botID := id.UserID("@bot:example.com")
+	user1 := id.UserID("@user1:example.com")
+	user2 := id.UserID("@user2:example.com")
+
+	tests := []struct {
+		name        string
+		evt         *event.Event
+		wantUserIDs []id.UserID
+		wantRoom    bool
+	}{
+		{
+			name:        "nil event",
+			evt:         nil,
+			wantUserIDs: []id.UserID{},
+			wantRoom:    false,
+		},
+		{
+			name: "MSC 3952 with user mentions",
+			evt: &event.Event{
+				Content: event.Content{
+					Parsed: &event.MessageEventContent{
+						Mentions: &event.Mentions{
+							UserIDs: []id.UserID{user1, user2},
+						},
+					},
+				},
+			},
+			wantUserIDs: []id.UserID{user1, user2},
+			wantRoom:    false,
+		},
+		{
+			name: "MSC 3952 with @room",
+			evt: &event.Event{
+				Content: event.Content{
+					Parsed: &event.MessageEventContent{
+						Mentions: &event.Mentions{
+							Room: true,
+						},
+					},
+				},
+			},
+			wantUserIDs: []id.UserID{},
+			wantRoom:    true,
+		},
+		{
+			name: "MSC 3952 empty mentions",
+			evt: &event.Event{
+				Content: event.Content{
+					Parsed: &event.MessageEventContent{
+						Mentions: &event.Mentions{},
+					},
+				},
+			},
+			wantUserIDs: []id.UserID{},
+			wantRoom:    false,
+		},
+		{
+			name: "HTML pills mentions",
+			evt: &event.Event{
+				Content: event.Content{
+					Parsed: &event.MessageEventContent{
+						Format:        event.FormatHTML,
+						FormattedBody: `<a href="https://matrix.to/#/@user1:example.com">user1</a> hello <a href="https://matrix.to/#/@user2:example.com">user2</a>`,
+					},
+				},
+			},
+			wantUserIDs: []id.UserID{user1, user2},
+			wantRoom:    false,
+		},
+		{
+			name: "HTML pills empty formatted body",
+			evt: &event.Event{
+				Content: event.Content{
+					Parsed: &event.MessageEventContent{
+						Format:        event.FormatHTML,
+						FormattedBody: "",
+					},
+				},
+			},
+			wantUserIDs: []id.UserID{},
+			wantRoom:    false,
+		},
+		{
+			name: "non-HTML format",
+			evt: &event.Event{
+				Content: event.Content{
+					Parsed: &event.MessageEventContent{
+						Format:        "",
+						FormattedBody: `<a href="https://matrix.to/#/@user1:example.com">user1</a>`,
+					},
+				},
+			},
+			wantUserIDs: []id.UserID{},
+			wantRoom:    false,
+		},
+		{
+			name: "combined mentions with deduplication",
+			evt: &event.Event{
+				Content: event.Content{
+					Parsed: &event.MessageEventContent{
+						Mentions: &event.Mentions{
+							UserIDs: []id.UserID{user1},
+							Room:    true,
+						},
+						Format:        event.FormatHTML,
+						FormattedBody: `<a href="https://matrix.to/#/@user1:example.com">user1</a> and <a href="https://matrix.to/#/@user2:example.com">user2</a>`,
+					},
+				},
+			},
+			wantUserIDs: []id.UserID{user1, user2},
+			wantRoom:    true,
+		},
+		{
+			name: "combined mentions with duplicate users",
+			evt: &event.Event{
+				Content: event.Content{
+					Parsed: &event.MessageEventContent{
+						Mentions: &event.Mentions{
+							UserIDs: []id.UserID{user1, user2},
+						},
+						Format:        event.FormatHTML,
+						FormattedBody: `<a href="https://matrix.to/#/@user2:example.com">user2</a> and <a href="https://matrix.to/#/@user1:example.com">user1</a>`,
+					},
+				},
+			},
+			wantUserIDs: []id.UserID{user1, user2},
+			wantRoom:    false,
+		},
+		{
+			name: "invalid message content type",
+			evt: &event.Event{
+				Content: event.Content{
+					Parsed: "not a message event content",
+				},
+			},
+			wantUserIDs: []id.UserID{},
+			wantRoom:    false,
+		},
+		{
+			name: "nil content parsed",
+			evt: &event.Event{
+				Content: event.Content{
+					Parsed: nil,
+				},
+			},
+			wantUserIDs: []id.UserID{},
+			wantRoom:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewMentionService(&mautrix.Client{}, botID)
+			got := svc.ParseMentions(tt.evt)
+
+			// 检查 UserIDs
+			if len(got.UserIDs) != len(tt.wantUserIDs) {
+				t.Errorf("ParseMentions() UserIDs length = %d, want %d", len(got.UserIDs), len(tt.wantUserIDs))
+			} else {
+				// 检查每个 UserID 是否存在（顺序可能不同，因为 Merge 可能影响顺序）
+				wantMap := make(map[id.UserID]bool)
+				for _, uid := range tt.wantUserIDs {
+					wantMap[uid] = true
+				}
+				for _, uid := range got.UserIDs {
+					if !wantMap[uid] {
+						t.Errorf("ParseMentions() unexpected UserID: %s", uid)
+					}
+					delete(wantMap, uid)
+				}
+				if len(wantMap) > 0 {
+					t.Errorf("ParseMentions() missing UserIDs: %v", wantMap)
+				}
+			}
+
+			// 检查 Room 标志
+			if got.Room != tt.wantRoom {
+				t.Errorf("ParseMentions() Room = %v, want %v", got.Room, tt.wantRoom)
+			}
+		})
+	}
+}
