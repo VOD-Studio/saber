@@ -368,6 +368,37 @@ func (s *CommandService) SendText(ctx context.Context, roomID id.RoomID, body st
 	return err
 }
 
+// SendFormattedText 向房间发送格式化消息（支持 HTML）。
+//
+// 参数:
+//   - ctx: 上下文
+//   - roomID: 目标房间 ID
+//   - html: HTML 格式的消息内容
+//   - plain: 纯文本格式的消息内容（用于不支持 HTML 的客户端）
+//
+// 返回值:
+//   - error: 发送过程中发生的错误
+func (s *CommandService) SendFormattedText(ctx context.Context, roomID id.RoomID, html, plain string) error {
+	_, err := s.client.SendMessageEvent(
+		ctx,
+		roomID,
+		event.EventMessage,
+		&event.MessageEventContent{
+			MsgType:       event.MsgText,
+			Body:          plain,
+			Format:        event.FormatHTML,
+			FormattedBody: html,
+		},
+	)
+	if err != nil {
+		slog.Error("Failed to send formatted message",
+			"room", roomID.String(),
+			"error", err)
+	}
+
+	return err
+}
+
 // SendTextWithRelatesTo 向房间发送文本消息，并指定关系。
 // 返回发送的消息事件 ID 和错误。
 func (s *CommandService) SendTextWithRelatesTo(ctx context.Context, roomID id.RoomID, body string, relatesTo *event.RelatesTo) (id.EventID, error) {
@@ -555,7 +586,9 @@ func NewPingCommand(service *CommandService) *PingCommand {
 
 // Handle 实现 CommandHandler。
 func (c *PingCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
-	return c.service.SendText(ctx, roomID, "Pong!")
+	html := "<strong>🏓 Pong!</strong>"
+	plain := "🏓 Pong!"
+	return c.service.SendFormattedText(ctx, roomID, html, plain)
 }
 
 // HelpCommand 列出可用命令。
@@ -568,30 +601,43 @@ func NewHelpCommand(service *CommandService) *HelpCommand {
 	return &HelpCommand{service: service}
 }
 
-// Handle 实现 CommandHandler。
+// Handle 实现 CommandHandler，生成 HTML 表格格式的帮助信息。
 func (c *HelpCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
 	commands := c.service.ListCommands()
 
 	if len(commands) == 0 {
-		return c.service.SendText(ctx, roomID, "No commands available.")
+		return c.service.SendText(ctx, roomID, "暂无可用命令")
 	}
 
-	var sb strings.Builder
-	sb.WriteString("Available commands:\n")
-
+	var htmlBuilder strings.Builder
+	htmlBuilder.WriteString("<table>")
+	htmlBuilder.WriteString("<thead><tr><th>命令</th><th>描述</th></tr></thead>")
+	htmlBuilder.WriteString("<tbody>")
 	for _, cmd := range commands {
-		fmt.Fprintf(&sb, "  !%s", cmd.Name)
-		if cmd.Description != "" {
-			fmt.Fprintf(&sb, " - %s", cmd.Description)
+		desc := cmd.Description
+		if desc == "" {
+			desc = "-"
 		}
-		sb.WriteString("\n")
+		fmt.Fprintf(&htmlBuilder, "<tr><td><code>!%s</code></td><td>%s</td></tr>",
+			cmd.Name, desc)
+	}
+	htmlBuilder.WriteString("</tbody></table>")
+
+	var plainBuilder strings.Builder
+	plainBuilder.WriteString("可用命令：\n\n")
+	for _, cmd := range commands {
+		fmt.Fprintf(&plainBuilder, "  !%s", cmd.Name)
+		if cmd.Description != "" {
+			fmt.Fprintf(&plainBuilder, " - %s", cmd.Description)
+		}
+		plainBuilder.WriteString("\n")
 	}
 
-	return c.service.SendText(ctx, roomID, sb.String())
+	return c.service.SendFormattedText(ctx, roomID, htmlBuilder.String(), plainBuilder.String())
 }
 
 // RegisterBuiltinCommands 注册默认命令（!ping, !help）。
 func RegisterBuiltinCommands(service *CommandService) {
-	service.RegisterCommandWithDesc("ping", "Check if bot is alive", NewPingCommand(service))
-	service.RegisterCommandWithDesc("help", "List available commands", NewHelpCommand(service))
+	service.RegisterCommandWithDesc("ping", "检查机器人是否在线", NewPingCommand(service))
+	service.RegisterCommandWithDesc("help", "列出可用命令", NewHelpCommand(service))
 }

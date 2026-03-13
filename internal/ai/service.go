@@ -316,7 +316,10 @@ func (c *ClearContextCommand) Handle(ctx context.Context, userID id.UserID, room
 	}
 
 	c.service.contextManager.ClearContext(roomID)
-	return c.service.matrixService.SendText(ctx, roomID, "✅ 对话上下文已清除")
+
+	html := "<strong>✅ 对话上下文已清除</strong>"
+	plain := "✅ 对话上下文已清除"
+	return c.service.matrixService.SendFormattedText(ctx, roomID, html, plain)
 }
 
 // ContextInfoCommand 处理查询对话上下文信息的命令。
@@ -351,6 +354,15 @@ func (c *ContextInfoCommand) Handle(ctx context.Context, userID id.UserID, roomI
 	}
 
 	msgCount, tokenCount := c.service.contextManager.GetContextSize(roomID)
-	response := fmt.Sprintf("📊 当前对话上下文信息:\n- 消息数量：%d\n- 估算令牌数：%d", msgCount, tokenCount)
-	return c.service.matrixService.SendText(ctx, roomID, response)
+
+	html := fmt.Sprintf(`<table>
+<thead><tr><th colspan="2">📊 对话上下文信息</th></tr></thead>
+<tbody>
+<tr><td>消息数量</td><td><strong>%d</strong></td></tr>
+<tr><td>估算令牌数</td><td><strong>%d</strong></td></tr>
+</tbody></table>`, msgCount, tokenCount)
+
+	plain := fmt.Sprintf("📊 对话上下文信息\n- 消息数量：%d\n- 估算令牌数：%d", msgCount, tokenCount)
+
+	return c.service.matrixService.SendFormattedText(ctx, roomID, html, plain)
 }
