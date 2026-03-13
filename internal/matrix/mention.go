@@ -141,6 +141,11 @@ func (s *MentionService) ParseMentions(evt *event.Event) []id.UserID {
 //   - cleanedMsg: 清理后的消息内容（移除 mention 前缀）
 //   - isMentioned: 是否提及了机器人
 func (s *MentionService) ParseMention(body string, content *event.MessageEventContent) (cleanedMsg string, isMentioned bool) {
+	// 处理 nil content 的情况
+	if content == nil {
+		return body, false
+	}
+
 	// 1. MSC 3952 结构化 mentions 检测
 	if content.Mentions != nil && content.Mentions.Has(s.botID) {
 		return s.StripMentionPrefix(body), true
@@ -182,8 +187,13 @@ func (s *MentionService) StripMentionPrefix(msg string) string {
 		return msg
 	}
 
+	originalMsg := msg // 保存原始消息用于返回
+
 	// 移除开头的空格
 	msg = strings.TrimSpace(msg)
+	if len(msg) == 0 {
+		return originalMsg // 如果只有空白，返回原始消息
+	}
 
 	// 尝试移除显示名称前缀
 	if displayName := s.GetDisplayName(); displayName != "" {
@@ -254,6 +264,10 @@ func (s *MentionService) stripDisplayNameMention(msg string) string {
 
 	// 移除匹配的部分
 	result := msg[:idx] + msg[idx+len(displayName):]
+	// 只在实际有内容时才修剪空白，避免将纯空白消息变成空字符串
+	if strings.TrimSpace(result) == "" {
+		return result
+	}
 	return strings.TrimSpace(result)
 }
 
