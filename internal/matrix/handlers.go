@@ -33,11 +33,13 @@ type CommandInfo struct {
 
 // CommandService 管理命令注册和分发。
 type CommandService struct {
-	mu           sync.RWMutex
-	commands     map[string]CommandInfo
-	client       *mautrix.Client
-	botID        id.UserID
-	directChatAI CommandHandler
+	mu             sync.RWMutex
+	commands       map[string]CommandInfo
+	client         *mautrix.Client
+	botID          id.UserID
+	directChatAI   CommandHandler
+	mentionAI      CommandHandler  // 群聊 mention AI 处理器
+	mentionService *MentionService // Mention 服务
 }
 
 // NewCommandService 创建一个新的命令服务。
@@ -93,6 +95,18 @@ func (s *CommandService) GetCommand(cmd string) (CommandInfo, bool) {
 func (s *CommandService) SetDirectChatAIHandler(handler CommandHandler) {
 	s.directChatAI = handler
 	slog.Debug("Set direct chat AI handler")
+}
+
+// SetMentionAIHandler 设置群聊 mention 的 AI 处理器。
+func (s *CommandService) SetMentionAIHandler(handler CommandHandler) {
+	s.mentionAI = handler
+	slog.Debug("Set mention AI handler")
+}
+
+// SetMentionService 设置 mention 服务。
+func (s *CommandService) SetMentionService(service *MentionService) {
+	s.mentionService = service
+	slog.Debug("Set mention service")
 }
 
 // isDirectChat 检查房间是否为私聊（只有2个成员）。
@@ -261,6 +275,22 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 					"room", roomID.String(),
 					"error", err)
 				return s.reportError(ctx, roomID, "ai", err)
+			}
+		}
+
+		// 群聊 mention 响应
+		if s.mentionAI != nil && s.mentionService != nil && !s.isDirectChat(ctx, roomID) {
+			if msg, ok := s.mentionService.ParseMention(content.Body, content); ok {
+				slog.Info("群聊 mention 触发 AI 回复",
+					"sender", sender.String(),
+					"room", roomID.String(),
+					"message", msg)
+
+				args := []string{msg}
+				if err := s.mentionAI.Handle(ctx, sender, roomID, args); err != nil {
+					slog.Error("群聊 mention 处理失败", "error", err)
+					return s.reportError(ctx, roomID, "ai", err)
+				}
 			}
 		}
 		return nil
