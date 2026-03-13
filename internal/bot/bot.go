@@ -164,7 +164,20 @@ func Run(version, gitMsg string) {
 			slog.Info("私聊自动回复已启用")
 		}
 
-		slog.Info("AI命令注册完成")
+		// 启用群聊 mention 自动回复
+		if cfg.AI.GroupChatMentionReply {
+			mentionService := matrix.NewMentionService(mautrixClient, client.GetUserID())
+			if err := mentionService.Init(context.Background()); err != nil {
+				slog.Warn("获取机器人显示名称失败，mention 功能可能受限", "error", err)
+			}
+			commandService.SetMentionService(mentionService)
+			commandService.SetMentionAIHandler(ai.NewAICommand(aiService))
+			slog.Info("群聊 mention 响应已启用",
+				"bot_id", client.GetUserID().String(),
+				"display_name", mentionService.GetDisplayName())
+		}
+
+		slog.Info("AI 命令注册完成")
 	}
 
 	// 设置事件处理器
