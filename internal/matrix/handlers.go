@@ -40,6 +40,7 @@ type CommandService struct {
 	botID          id.UserID
 	directChatAI   CommandHandler
 	mentionAI      CommandHandler  // 群聊 mention AI 处理器
+	replyAI        CommandHandler  // 回复消息 AI 处理器
 	mentionService *MentionService // Mention 服务
 }
 
@@ -102,6 +103,12 @@ func (s *CommandService) SetDirectChatAIHandler(handler CommandHandler) {
 func (s *CommandService) SetMentionAIHandler(handler CommandHandler) {
 	s.mentionAI = handler
 	slog.Debug("Set mention AI handler")
+}
+
+// SetReplyAIHandler 设置回复消息的 AI 处理器。
+func (s *CommandService) SetReplyAIHandler(handler CommandHandler) {
+	s.replyAI = handler
+	slog.Debug("Set reply AI handler")
 }
 
 // SetMentionService 设置 mention 服务。
@@ -301,6 +308,25 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 				args := []string{msg}
 				if err := s.mentionAI.Handle(ctx, sender, roomID, args); err != nil {
 					slog.Error("群聊 mention 处理失败", "error", err)
+					return s.reportError(ctx, roomID, "ai", err)
+				}
+			}
+		}
+
+		// 回复消息响应
+		if s.replyAI != nil && content.RelatesTo != nil && content.RelatesTo.GetReplyTo() != "" {
+			replyToEventID := content.RelatesTo.GetReplyTo()
+			if s.isReplyToBot(ctx, roomID, replyToEventID) {
+				cleanedBody := event.TrimReplyFallbackText(content.Body)
+				slog.Info("回复消息触发 AI 回复",
+					"sender", sender.String(),
+					"room", roomID.String(),
+					"reply_to", replyToEventID.String(),
+					"message", cleanedBody)
+
+				args := []string{cleanedBody}
+				if err := s.replyAI.Handle(ctx, sender, roomID, args); err != nil {
+					slog.Error("回复消息处理失败", "error", err)
 					return s.reportError(ctx, roomID, "ai", err)
 				}
 			}
