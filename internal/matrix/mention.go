@@ -226,6 +226,7 @@ func (s *MentionService) ParseMention(body string, content *event.MessageEventCo
 // StripMentionPrefix 移除消息开头的标准 mention 前缀。
 //
 // 该方法处理常见的 mention 前缀格式，如 "@bot hello" -> "hello"。
+// 也支持不带 @ 的显示名称前缀（如 Element mention pill 发送的格式）。
 //
 // 参数:
 //   - msg: 原始消息内容
@@ -245,11 +246,25 @@ func (s *MentionService) StripMentionPrefix(msg string) string {
 		return originalMsg // 如果只有空白，返回原始消息
 	}
 
-	// 尝试移除显示名称前缀
-	if displayName := s.GetDisplayName(); displayName != "" {
+	displayName := s.GetDisplayName()
+
+	// 尝试移除显示名称前缀（带 @ 前缀）
+	if displayName != "" {
 		prefix := "@" + displayName
 		if len(msg) >= len(prefix) && strings.EqualFold(msg[:len(prefix)], prefix) {
 			remaining := strings.TrimSpace(msg[len(prefix):])
+			if len(remaining) > 0 {
+				return remaining
+			}
+		}
+	}
+
+	// 尝试移除显示名称前缀（不带 @ 前缀，Element mention pill 格式）
+	if displayName != "" {
+		if len(msg) >= len(displayName) && strings.EqualFold(msg[:len(displayName)], displayName) {
+			remaining := msg[len(displayName):]
+			// 清理紧跟在显示名称后的分隔符
+			remaining = stripMentionSeparators(remaining)
 			if len(remaining) > 0 {
 				return remaining
 			}

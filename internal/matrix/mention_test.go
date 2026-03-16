@@ -681,6 +681,24 @@ func TestStripMentionPrefix(t *testing.T) {
 			msg:         "@testbot hello", // lowercase
 			want:        "hello",
 		},
+		{
+			name:        "display name without @ prefix with colon",
+			displayName: "派蒙",
+			msg:         "派蒙: 44",
+			want:        "44",
+		},
+		{
+			name:        "display name without @ prefix with fullwidth colon",
+			displayName: "派蒙",
+			msg:         "派蒙：hello",
+			want:        "hello",
+		},
+		{
+			name:        "display name without @ prefix with space",
+			displayName: "TestBot",
+			msg:         "TestBot hello world",
+			want:        "hello world",
+		},
 	}
 
 	for _, tt := range tests {

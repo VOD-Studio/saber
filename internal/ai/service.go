@@ -132,6 +132,7 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 	slog.Debug("AI请求准备完成",
 		"model", modelName,
 		"messages_count", len(messages),
+		"messages", messages,
 		"stream", s.globalConfig.StreamEnabled,
 		"max_tokens", s.globalConfig.MaxTokens,
 		"temperature", s.globalConfig.Temperature)
@@ -193,9 +194,12 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 			slog.Debug("AI响应成功",
 				"model", model,
 				"content_length", len(resp.Content),
+				"content", resp.Content,
 				"prompt_tokens", resp.Usage.PromptTokens,
 				"completion_tokens", resp.Usage.CompletionTokens,
 				"total_tokens", resp.Usage.TotalTokens)
+
+			slog.Info("AI响应", "model", model, "content", resp.Content)
 
 			if sendErr := s.matrixService.SendText(ctx, roomID, resp.Content); sendErr != nil {
 				slog.Error("发送AI响应失败", "error", sendErr)
