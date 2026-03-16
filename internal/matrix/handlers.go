@@ -297,23 +297,7 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 			}
 		}
 
-		// 群聊 mention 响应
-		if s.mentionAI != nil && s.mentionService != nil && !s.isDirectChat(ctx, roomID) {
-			if msg, ok := s.mentionService.ParseMention(content.Body, content); ok {
-				slog.Info("群聊 mention 触发 AI 回复",
-					"sender", sender.String(),
-					"room", roomID.String(),
-					"message", msg)
-
-				args := []string{msg}
-				if err := s.mentionAI.Handle(ctx, sender, roomID, args); err != nil {
-					slog.Error("群聊 mention 处理失败", "error", err)
-					return s.reportError(ctx, roomID, "ai", err)
-				}
-			}
-		}
-
-		// 回复消息响应
+		// 回复消息响应（优先于 mention 检测，避免回复引用中的 mention 误触发）
 		if s.replyAI != nil && content.RelatesTo != nil && content.RelatesTo.GetReplyTo() != "" {
 			replyToEventID := content.RelatesTo.GetReplyTo()
 			if s.isReplyToBot(ctx, roomID, replyToEventID) {
@@ -327,6 +311,23 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 				args := []string{cleanedBody}
 				if err := s.replyAI.Handle(ctx, sender, roomID, args); err != nil {
 					slog.Error("回复消息处理失败", "error", err)
+					return s.reportError(ctx, roomID, "ai", err)
+				}
+				return nil
+			}
+		}
+
+		// 群聊 mention 响应
+		if s.mentionAI != nil && s.mentionService != nil && !s.isDirectChat(ctx, roomID) {
+			if msg, ok := s.mentionService.ParseMention(content.Body, content); ok {
+				slog.Info("群聊 mention 触发 AI 回复",
+					"sender", sender.String(),
+					"room", roomID.String(),
+					"message", msg)
+
+				args := []string{msg}
+				if err := s.mentionAI.Handle(ctx, sender, roomID, args); err != nil {
+					slog.Error("群聊 mention 处理失败", "error", err)
 					return s.reportError(ctx, roomID, "ai", err)
 				}
 			}

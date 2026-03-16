@@ -1267,13 +1267,14 @@ func TestHandleEvent_ReplyIntegration(t *testing.T) {
 		mentionCalled := mentionHandlerCalled
 		mu.Unlock()
 
-		// 在当前实现中，reply 处理会先检查，但由于消息内容包含 mention，
-		// mention 处理也会被触发。两者应该都被调用。
+		// 在当前实现中，reply 处理优先于 mention 检测。
+		// 如果消息是回复给 bot 的，则只触发 reply 处理，不再触发 mention 处理。
+		// 这避免了同一条消息触发两次 AI 响应。
 		if !replyCalled {
 			t.Error("回复给 bot 的消息应该触发 replyAI 处理器")
 		}
-		if !mentionCalled {
-			t.Error("包含 mention 的消息应该触发 mentionAI 处理器")
+		if mentionCalled {
+			t.Error("回复给 bot 的消息不应再触发 mentionAI 处理器（避免重复响应）")
 		}
 	})
 

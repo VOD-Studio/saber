@@ -183,6 +183,9 @@ func uniqueUserIDs(userIDs []id.UserID) []id.UserID {
 //  3. 显示名称文本匹配
 //  4. 用户 ID 文本匹配
 //
+// 注意：如果消息是回复消息，则只在实际消息内容中检测 mention，
+// 忽略回复引用部分，避免误匹配。
+//
 // 参数:
 //   - body: 消息的纯文本内容
 //   - content: 消息的完整内容对象
@@ -209,13 +212,24 @@ func (s *MentionService) ParseMention(body string, content *event.MessageEventCo
 		}
 	}
 
+	// 对于文本匹配（显示名称和用户 ID），只在实际消息内容中检测，
+	// 排除回复引用部分，避免误匹配。
+	// 例如，回复消息格式为：
+	//   > <@bot:server> Bot's message
+	//   User's reply
+	// 我们只应该在 "User's reply" 部分检测 mention。
+	actualContent := body
+	if content.RelatesTo != nil && content.RelatesTo.GetReplyTo() != "" {
+		actualContent = event.TrimReplyFallbackText(body)
+	}
+
 	// 3. 显示名称文本匹配
-	if s.checkDisplayNameMention(body) {
+	if s.checkDisplayNameMention(actualContent) {
 		return s.stripDisplayNameMention(body), true
 	}
 
 	// 4. 用户 ID 文本匹配
-	if s.checkUserIDMention(body) {
+	if s.checkUserIDMention(actualContent) {
 		return s.stripUserIDMention(body), true
 	}
 
