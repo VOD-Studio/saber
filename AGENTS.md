@@ -2,290 +2,187 @@
 
 ## Project Overview
 
-**Saber** is a Matrix bot built with Go 1.26.1 using the mautrix SDK (`maunium.net/go/mautrix`).
+**Saber** 是一个集成 AI 功能的 Matrix 机器人，使用 Go 1.26.1 和 mautrix SDK 构建。
 Module path: `rua.plus/saber`
 
-Architecture:
-- `main.go` — Entry point, delegates to `internal/bot`
-- `internal/bot/` — Bot initialization, lifecycle, shutdown
-- `internal/matrix/` — Matrix client wrapper, session management, event handlers
-- `internal/config/` — YAML configuration loading and validation
-- `internal/cli/` — Command-line flag parsing
+**架构**: `main.go` → `internal/bot` → `internal/{matrix,ai,config,cli}`
+
+**关键依赖**: `maunium.net/go/mautrix` (Matrix), `github.com/sashabaranov/go-openai` (AI), `log/slog` (日志)
 
 ---
 
-## Build, Test, and Lint Commands
+## Build, Test, Lint Commands
 
-### Build Tags
-
-本项目使用 `-tags goolm` 启用 Olm 加密支持（mautrix SDK 要求）。Makefile 已自动包含此标签，直接运行 `go build`/`go run` 时需要手动指定：
+**Build Tag (E2EE 必需)**: `-tags goolm`
 
 ```bash
-go build -tags goolm .
-go run -tags goolm main.go
-go vet -tags goolm ./...
-```
+# 构建
+make build                              # → bin/saber
+go build -tags goolm -ldflags="..." .   # 手动构建
 
-### Makefile Targets
+# 测试
+make test                               # 全部测试
+go test -v -tags goolm ./internal/ai -run TestService  # 单个测试
+go test -cover -race -tags goolm ./...  # 覆盖率 + 竞态检测
 
-```bash
-make build     # Build binary to bin/saber
-make run       # Run: go run main.go
-make test      # Run all tests: go test -v ./...
-make fmt       # Format: go fmt ./...
-make lint      # Lint: golangci-lint run ./...
-make clean     # Remove build artifacts
-```
-
-### Running Single Tests
-
-```bash
-go test -v ./internal/package -run TestFunctionName  # Specific test
-go test -cover ./internal/package                     # With coverage
-go test -race ./...                                   # Race detector
+# 代码质量
+make fmt                                # goimports 格式化
+make lint                               # golangci-lint
+golangci-lint run --fix --build-tags goolm ./...
 ```
 
 ---
 
 ## Code Style Guidelines
 
-### Formatting
+### 格式化与导入
 
-- **Indentation**: Tabs (`\t`), 4 spaces visual width (`.editorconfig`)
-- **Line endings**: LF (`\n`), UTF-8, final newline required
-- Run `make fmt` before committing — `gofmt` is authoritative
-
-### Imports
+- **缩进**: Tab，4 空格视觉宽度 (`.editorconfig`)
+- **换行**: LF，UTF-8，文件末尾空行
+- **导入顺序**: 标准库 → 外部库 → 内部包（组间空行分隔）
 
 ```go
 import (
     "context"
     "fmt"
 
-    "gopkg.in/yaml.v3"
     "maunium.net/go/mautrix"
 
     "rua.plus/saber/internal/config"
 )
 ```
 
-Order: Standard library → External → Internal (blank lines between groups).
+### 命名规范
 
-### Naming Conventions
+| 元素 | 规则 | 示例 |
+|------|------|------|
+| 包名 | 小写单词 | `bot`, `matrix`, `ai` |
+| 导出类型/函数 | PascalCase | `MatrixClient`, `NewService` |
+| 非导出函数 | camelCase | `setupLogging`, `handleMessage` |
+| 错误变量 | `Err` 前缀 | `ErrNotFound`, `ErrInvalidConfig` |
 
-- **Packages**: Lowercase single word (`bot`, `matrix`, `config`)
-- **Types**: PascalCase (`MatrixClient`, `EventHandler`)
-- **Functions**: PascalCase exported, camelCase unexported (`Run`, `setupLogging`)
-- **Variables**: camelCase, descriptive (`cfg`, `userID`)
-- **Errors**: Prefix with `Err` (`ErrNotFound`, `ErrInvalidConfig`)
-
-### Error Handling
-
-- **Never ignore errors** — use `_` only with explicit justification
-- **Wrap errors** with context: `fmt.Errorf("failed to load: %w", err)`
-- **Check immediately** after the call
-- **Return up the stack**; handle at boundaries
+### 错误处理
 
 ```go
+// ✅ 正确：立即检查，包装上下文
 if err != nil {
     return fmt.Errorf("failed to load config: %w", err)
 }
+
+// ❌ 禁止：忽略错误
+result, _ := doSomething()  // 仅在明确安全时使用
 ```
 
-### Logging
+### 日志规范
 
-- Use `log/slog` (standard library)
-- Structured: `slog.Info("Loaded", "path", cfgPath, "user", userID)`
-- **Never log sensitive data** (tokens, passwords)
+- 使用 `log/slog` 结构化日志
+- 格式: `slog.Info("消息", "key1", value1, "key2", value2)`
+- **禁止记录敏感数据** (tokens, passwords, API keys)
 
-### Comments and Documentation
+### 注释规范
 
-**所有注释必须使用中文**（除专有名词、API 名称外）。详见 [`docs/comments.md`](docs/comments.md)。
-
-#### 基本规则
-
-- **所有导出标识符必须有注释**（linter 强制检查）
-- 注释以标识符名称开头：`// Run 初始化并运行机器人`
-- 解释**为什么**，而非**是什么**
-- 使用 godoc 格式：空行分隔段落
-- 非导出标识符可根据需要添加注释
-
-#### 包注释
+**所有注释必须使用中文**（除专有名词、API 名称外）。详细规范见 [`docs/comments.md`](docs/comments.md)。
 
 ```go
-// Package bot 封装了所有机器人初始化和运行逻辑。
+// Package bot 封装所有机器人初始化和运行逻辑。
 package bot
-```
 
-- 写在 `package` 语句之前，紧邻无空行
-- 以 `// Package <包名>` 开头
-- 第一句完整句子概括包的功能
-
-#### 函数/方法注释
-
-```go
 // Run 初始化并运行机器人。
 //
 // 它处理 CLI 标志、配置加载、Matrix 客户端设置和优雅关闭。
-//
-// 参数:
-//   - version: 版本号，用于日志和版本信息
-func Run(version string) {
-    // ...
-}
-```
+func Run(version, gitMsg string) { ... }
 
-- 简单函数可只写一行注释
-- 复杂函数应说明：参数含义、返回值、可能的错误条件
-
-#### 类型注释
-
-```go
 // Config 存储应用程序配置。
-//
-// 零值 Config 是有效的，所有字段使用默认值。
 type Config struct {
     // Name 是应用程序实例名称（默认："saber"）
     Name string
 }
 ```
 
-#### 特殊注释
+**规则**: 所有导出标识符必须有注释 → 注释以标识符名称开头 → 解释"为什么"而非"是什么"
 
-```go
-// TODO(用户名): 优化大输入处理（>10MB）
-// FIXME: 此处未正确处理 nil 情况
-// Deprecated: 请使用 NewFunc 替代。
-```
+### Context 与并发
 
-#### godoc 格式
-
-```go
-// 段落之间使用空行分隔。
-//
-// 缩进代码行会格式化为预格式化文本：
-//
-//	if err := doSomething(); err != nil {
-//	    return err
-//	}
-//
-// 列表格式：
-//   - 项目 1
-//   - 项目 2
-//   - 项目 3
-```
-
-### Context and Concurrency
-
-- Use `context.Context` for all I/O and long-running operations
-- Pass context first: `func(ctx context.Context, ...)`
-- Protect shared state with `sync.Mutex` or channels
+- 所有 I/O 和长时间操作必须使用 `context.Context`
+- 参数顺序: `func(ctx context.Context, ...)`
+- 共享状态使用 `sync.Mutex` 或 channel 保护
 
 ---
 
 ## Testing Guidelines
 
-- File naming: `<name>_test.go`
-- Function naming: `Test<FunctionName>`
-- Use table-driven tests for multiple cases
-- Test success and failure paths
-
 ```go
-func TestLoadConfig(t *testing.T) {
+// 文件命名: <name>_test.go | 函数命名: Test<FunctionName>
+func TestValidate(t *testing.T) {
     tests := []struct {
         name    string
-        path    string
+        config  Config
         wantErr bool
     }{
-        {"valid", "testdata/valid.yaml", false},
-        {"missing", "nonexistent.yaml", true},
+        {"valid", Config{URL: "https://example.com"}, false},
+        {"missing URL", Config{}, true},
     }
-
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            // test logic
+            err := tt.config.Validate()
+            if (err != nil) != tt.wantErr {
+                t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+            }
         })
     }
 }
 ```
 
+**要求**: 成功和失败路径都要覆盖 | 使用 `t.TempDir()` 创建临时文件
+
 ---
 
 ## Linting
 
-Project uses `golangci-lint` with default configuration.
+项目使用 `golangci-lint` 默认配置。常见错误修复:
+
+| 错误 | 修复方法 |
+|------|----------|
+| exported function missing comment | 添加 `// FunctionName ...` 注释 |
+| error not checked | 添加 `if err != nil` 检查 |
+| shadow declaration | 重命名变量避免遮蔽 |
+
+---
+
+## 敏感数据与安全
+
+**禁止提交**: `config.yaml` | `*.session` | `*.credentials.yaml` | `*.db` | `*.key`
+
+**认证方式优先级**: access_token (推荐) > password (仅首次登录后保存 session)
+
+**Session 文件权限**: `0600`
+
+---
+
+## 开发工作流
 
 ```bash
-make lint                     # Run linter
-golangci-lint run --fix ./... # Auto-fix issues
+git checkout -b feature/description
+# ... 编码 ...
+make lint && make test && make fmt
+git commit -m "feat(scope): 描述"
 ```
 
-### Common Lint Errors
-
-- **exported function missing comment**: Add `// FunctionName does...`
-- **error not checked**: Add `if err != nil` check
-- **shadow declaration**: Rename variable
+**Commit 格式**: `<type>(<scope>): <subject>` (feat/fix/docs/style/refactor/test/chore)
 
 ---
 
-## Sensitive Data and Security
-
-### Never Commit
-
-- `config.yaml` (gitignored)
-- `*.session` files (access tokens)
-- `*.credentials.yaml`, `*.db` files
-
-### Session Files
-
-- Generated on password login, used for passwordless startups
-- Permissions: `0600` (owner read/write only)
-- **Never** commit to version control
-
-### Auth Methods
-
-- **Token auth** (recommended): Use `access_token` in config
-- **Password auth**: Use `password` for initial login, then save session
-
----
-
-## Development Workflow
-
-1. **Create branch**: `git checkout -b feature/description`
-2. **Make changes** following code style
-3. **Run linter**: `make lint` (must pass)
-4. **Run tests**: `make test` (all must pass)
-5. **Format**: `make fmt`
-6. **Commit** with descriptive message
-
-### Commit Message Format
-
-```
-<type>(<scope>): <subject>
-
-<body (optional)>
-```
-
-Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
-
----
-
-## Troubleshooting
+## 常见问题
 
 ```bash
-# Clean rebuild
-make clean && make build
-
-# Tidy dependencies
-go mod tidy
-
-# Check Go version (must be 1.26.1+)
-go version
+make clean && make build   # 干净重建
+go mod tidy                # 整理依赖
+go version                 # 确认 >= 1.26.1
 ```
 
 ---
 
-## External Resources
+## 参考资源
 
 - [Effective Go](https://go.dev/doc/effective_go)
 - [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)
