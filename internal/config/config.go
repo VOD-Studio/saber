@@ -46,6 +46,7 @@ type AIConfig struct {
 	TimeoutSeconds        int                    `yaml:"timeout_seconds"`          // 请求超时时间（秒）
 	DirectChatAutoReply   bool                   `yaml:"direct_chat_auto_reply"`   // 在私聊中自动回复（无需 !ai 前缀）
 	GroupChatMentionReply bool                   `yaml:"group_chat_mention_reply"` // 在群聊中 @mention 时自动回复（无需 !ai 前缀）
+	ReplyToBotReply       bool                   `yaml:"reply_to_bot_reply"`       // 回复机器人自己的回复（用于连续对话）
 }
 
 // ContextConfig 存储上下文管理配置
