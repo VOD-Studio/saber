@@ -140,6 +140,17 @@ func (s *CommandService) isDirectChat(ctx context.Context, roomID id.RoomID) boo
 	return joinedCount == 2
 }
 
+// isReplyToBot 检查回复的目标消息是否是 bot 发送的。
+func (s *CommandService) isReplyToBot(ctx context.Context, roomID id.RoomID, eventID id.EventID) bool {
+	evt, err := s.client.GetEvent(ctx, roomID, eventID)
+	if err != nil {
+		slog.Debug("Failed to get event for reply check", "room", roomID, "event_id", eventID, "error", err)
+		return false
+	}
+
+	return evt.Sender == s.botID
+}
+
 // ListCommands 返回所有已注册的命令。
 func (s *CommandService) ListCommands() []CommandInfo {
 	s.mu.RLock()
