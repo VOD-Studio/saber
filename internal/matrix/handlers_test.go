@@ -792,3 +792,664 @@ func mustMarshalEvent(sender id.UserID, eventID id.EventID) []byte {
 	}
 	return data
 }
+
+// TestHandleEvent_ReplyToBot 测试 HandleEvent 中回复消息的处理逻辑。
+//
+// 该测试覆盖以下情况：
+//   - 回复 bot 消息时触发 AI 处理器
+//   - 回复非 bot 消息时不触发 AI 处理器
+//   - replyAI 为 nil 时不崩溃
+//   - 普通消息（非回复）不触发 AI 处理器
+func TestHandleEvent_ReplyToBot(t *testing.T) {
+	botUserID := id.UserID("@saber:example.com")
+	otherUserID := id.UserID("@other:example.com")
+	senderID := id.UserID("@sender:example.com")
+	roomID := id.RoomID("!test:example.com")
+	replyToEventID := id.EventID("$original_event:example.com")
+
+	tests := []struct {
+		name                string
+		event               *event.Event
+		setupReplyAI        bool
+		replyToSender       id.UserID // 回复目标消息的发送者
+		expectHandlerCalled bool
+	}{
+		{
+			name: "回复 bot 消息触发 AI 处理器",
+			event: &event.Event{
+				Type:   event.EventMessage,
+				RoomID: roomID,
+				Sender: senderID,
+				ID:     id.EventID("$reply_event:example.com"),
+				Content: event.Content{
+					Parsed: &event.MessageEventContent{
+						MsgType: event.MsgText,
+						Body:    "> <@saber:example.com> Original message\n\nReply content",
+						RelatesTo: &event.RelatesTo{
+							InReplyTo: &event.InReplyTo{
+								EventID: replyToEventID,
+							},
+						},
+					},
+				},
+			},
+			setupReplyAI:        true,
+			replyToSender:       botUserID,
+			expectHandlerCalled: true,
+		},
+		{
+			name: "回复非 bot 消息不触发 AI 处理器",
+			event: &event.Event{
+				Type:   event.EventMessage,
+				RoomID: roomID,
+				Sender: senderID,
+				ID:     id.EventID("$reply_event:example.com"),
+				Content: event.Content{
+					Parsed: &event.MessageEventContent{
+						MsgType: event.MsgText,
+						Body:    "> <@other:example.com> Original message\n\nReply content",
+						RelatesTo: &event.RelatesTo{
+							InReplyTo: &event.InReplyTo{
+								EventID: replyToEventID,
+							},
+						},
+					},
+				},
+			},
+			setupReplyAI:        true,
+			replyToSender:       otherUserID,
+			expectHandlerCalled: false,
+		},
+		{
+			name: "replyAI 为 nil 时不崩溃",
+			event: &event.Event{
+				Type:   event.EventMessage,
+				RoomID: roomID,
+				Sender: senderID,
+				ID:     id.EventID("$reply_event:example.com"),
+				Content: event.Content{
+					Parsed: &event.MessageEventContent{
+						MsgType: event.MsgText,
+						Body:    "> <@saber:example.com> Original message\n\nReply content",
+						RelatesTo: &event.RelatesTo{
+							InReplyTo: &event.InReplyTo{
+								EventID: replyToEventID,
+							},
+						},
+					},
+				},
+			},
+			setupReplyAI:        false,
+			replyToSender:       botUserID,
+			expectHandlerCalled: false,
+		},
+		{
+			name: "普通消息（非回复）不触发 AI 处理器",
+			event: &event.Event{
+				Type:   event.EventMessage,
+				RoomID: roomID,
+				Sender: senderID,
+				ID:     id.EventID("$normal_event:example.com"),
+				Content: event.Content{
+					Parsed: &event.MessageEventContent{
+						MsgType: event.MsgText,
+						Body:    "Just a normal message",
+					},
+				},
+			},
+			setupReplyAI:        true,
+			replyToSender:       botUserID,
+			expectHandlerCalled: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var handlerCalled bool
+			var receivedArgs []string
+			var mu sync.Mutex
+
+			// 创建模拟的 replyAI 处理器
+			mockReplyHandler := &mockCommandHandler{
+				handleFunc: func(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
+					mu.Lock()
+					defer mu.Unlock()
+					handlerCalled = true
+					receivedArgs = args
+					return nil
+				},
+			}
+
+			// 创建模拟的 HTTP 传输层
+			// 根据请求路径返回不同的响应
+			roundTripper := &mockRoundTripper{
+				responseBody: mustMarshalEvent(tt.replyToSender, replyToEventID),
+			}
+
+			homeserverURL, _ := url.Parse("https://example.com")
+			httpClient := &http.Client{
+				Transport: roundTripper,
+			}
+			client := &mautrix.Client{
+				UserID:        botUserID,
+				Client:        httpClient,
+				HomeserverURL: homeserverURL,
+			}
+
+			service := NewCommandService(client, botUserID)
+
+			// 设置 replyAI 处理器
+			if tt.setupReplyAI {
+				service.SetReplyAIHandler(mockReplyHandler)
+			}
+
+			// 调用 HandleEvent
+			ctx := context.Background()
+			err := service.HandleEvent(ctx, tt.event)
+
+			if err != nil {
+				t.Errorf("HandleEvent() returned unexpected error: %v", err)
+			}
+
+			// 验证处理器是否被调用
+			mu.Lock()
+			wasCalled := handlerCalled
+			args := receivedArgs
+			mu.Unlock()
+
+			if wasCalled != tt.expectHandlerCalled {
+				t.Errorf("Handler called = %v, want %v", wasCalled, tt.expectHandlerCalled)
+			}
+
+			// 如果处理器被调用，验证参数是否正确（应该包含清理后的回复内容）
+			if tt.expectHandlerCalled && wasCalled {
+				expectedContent := "Reply content" // TrimReplyFallbackText 应该去除回复前缀
+				if len(args) == 0 || args[0] != expectedContent {
+					t.Errorf("Handler received args = %v, want [%s]", args, expectedContent)
+				}
+			}
+		})
+	}
+}
+
+// TestHandleEvent_ReplyIntegration 测试回复消息的端到端集成流程。
+//
+// 该测试覆盖以下集成场景：
+//   - 完整流程：接收回复 → 检测是回复给 bot → 提取内容 → 调用 AI 处理器
+//   - 配置交互（replyAI 设置与否）
+//   - 上下文管理集成
+//   - 跨功能交互（回复 + mention 同时存在）
+func TestHandleEvent_ReplyIntegration(t *testing.T) {
+	botUserID := id.UserID("@saber:example.com")
+	otherUserID := id.UserID("@other:example.com")
+	senderID := id.UserID("@sender:example.com")
+	roomID := id.RoomID("!test:example.com")
+	botMessageEventID := id.EventID("$bot_message:example.com")
+	otherMessageEventID := id.EventID("$other_message:example.com")
+
+	t.Run("完整回复流程", func(t *testing.T) {
+		var (
+			handlerCalled bool
+			receivedArgs  []string
+			receivedCtx   context.Context
+			receivedUser  id.UserID
+			receivedRoom  id.RoomID
+			mu            sync.Mutex
+		)
+
+		// 创建模拟的 replyAI 处理器，记录所有调用参数
+		mockReplyHandler := &mockCommandHandler{
+			handleFunc: func(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
+				mu.Lock()
+				defer mu.Unlock()
+				handlerCalled = true
+				receivedArgs = args
+				receivedCtx = ctx
+				receivedUser = userID
+				receivedRoom = roomID
+				return nil
+			},
+		}
+
+		// 模拟 GetEvent 返回 bot 发送的消息
+		roundTripper := &mockRoundTripper{
+			responseBody: mustMarshalEvent(botUserID, botMessageEventID),
+		}
+
+		homeserverURL, _ := url.Parse("https://example.com")
+		httpClient := &http.Client{Transport: roundTripper}
+		client := &mautrix.Client{
+			UserID:        botUserID,
+			Client:        httpClient,
+			HomeserverURL: homeserverURL,
+		}
+
+		service := NewCommandService(client, botUserID)
+		service.SetReplyAIHandler(mockReplyHandler)
+
+		// 创建真实的 Matrix 回复事件结构
+		replyEvent := &event.Event{
+			Type:   event.EventMessage,
+			RoomID: roomID,
+			Sender: senderID,
+			ID:     id.EventID("$reply_event:example.com"),
+			Content: event.Content{
+				Parsed: &event.MessageEventContent{
+					MsgType: event.MsgText,
+					Body:    "> <@saber:example.com> 你好，有什么可以帮助你的？\n\n请帮我写一段代码",
+					RelatesTo: &event.RelatesTo{
+						InReplyTo: &event.InReplyTo{
+							EventID: botMessageEventID,
+						},
+					},
+				},
+			},
+		}
+
+		// 调用 HandleEvent
+		ctx := context.WithValue(context.Background(), mautrix.SyncTokenContextKey, "test_token_123")
+		err := service.HandleEvent(ctx, replyEvent)
+
+		if err != nil {
+			t.Fatalf("HandleEvent() returned error: %v", err)
+		}
+
+		// 验证处理器被调用
+		mu.Lock()
+		wasCalled := handlerCalled
+		args := receivedArgs
+		rCtx := receivedCtx
+		rUser := receivedUser
+		rRoom := receivedRoom
+		mu.Unlock()
+
+		if !wasCalled {
+			t.Error("期望 replyAI 处理器被调用，但未被调用")
+		}
+
+		// 验证清理后的内容（去除回复前缀）
+		expectedContent := "请帮我写一段代码"
+		if len(args) == 0 || args[0] != expectedContent {
+			t.Errorf("处理器收到 args = %v，期望 [%s]", args, expectedContent)
+		}
+
+		// 验证用户和房间信息正确传递
+		if rUser != senderID {
+			t.Errorf("处理器收到 userID = %v，期望 %v", rUser, senderID)
+		}
+		if rRoom != roomID {
+			t.Errorf("处理器收到 roomID = %v，期望 %v", rRoom, roomID)
+		}
+
+		// 验证上下文被正确传递（SyncToken 应该在上下文中）
+		if rCtx != nil {
+			token := rCtx.Value(mautrix.SyncTokenContextKey)
+			if token != "test_token_123" {
+				t.Errorf("上下文中 SyncToken = %v，期望 'test_token_123'", token)
+			}
+		}
+	})
+
+	t.Run("回复非 bot 消息不触发处理器", func(t *testing.T) {
+		var handlerCalled bool
+		var mu sync.Mutex
+
+		mockReplyHandler := &mockCommandHandler{
+			handleFunc: func(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
+				mu.Lock()
+				defer mu.Unlock()
+				handlerCalled = true
+				return nil
+			},
+		}
+
+		// 模拟 GetEvent 返回其他用户发送的消息
+		roundTripper := &mockRoundTripper{
+			responseBody: mustMarshalEvent(otherUserID, otherMessageEventID),
+		}
+
+		homeserverURL, _ := url.Parse("https://example.com")
+		httpClient := &http.Client{Transport: roundTripper}
+		client := &mautrix.Client{
+			UserID:        botUserID,
+			Client:        httpClient,
+			HomeserverURL: homeserverURL,
+		}
+
+		service := NewCommandService(client, botUserID)
+		service.SetReplyAIHandler(mockReplyHandler)
+
+		replyEvent := &event.Event{
+			Type:   event.EventMessage,
+			RoomID: roomID,
+			Sender: senderID,
+			ID:     id.EventID("$reply_to_other:example.com"),
+			Content: event.Content{
+				Parsed: &event.MessageEventContent{
+					MsgType: event.MsgText,
+					Body:    "> <@other:example.com> 别人的消息\n\n我的回复",
+					RelatesTo: &event.RelatesTo{
+						InReplyTo: &event.InReplyTo{
+							EventID: otherMessageEventID,
+						},
+					},
+				},
+			},
+		}
+
+		err := service.HandleEvent(context.Background(), replyEvent)
+		if err != nil {
+			t.Fatalf("HandleEvent() returned error: %v", err)
+		}
+
+		mu.Lock()
+		wasCalled := handlerCalled
+		mu.Unlock()
+
+		if wasCalled {
+			t.Error("回复非 bot 消息不应该触发 replyAI 处理器")
+		}
+	})
+
+	t.Run("replyAI 未设置时不崩溃", func(t *testing.T) {
+		roundTripper := &mockRoundTripper{
+			responseBody: mustMarshalEvent(botUserID, botMessageEventID),
+		}
+
+		homeserverURL, _ := url.Parse("https://example.com")
+		httpClient := &http.Client{Transport: roundTripper}
+		client := &mautrix.Client{
+			UserID:        botUserID,
+			Client:        httpClient,
+			HomeserverURL: homeserverURL,
+		}
+
+		service := NewCommandService(client, botUserID)
+		// 不设置 replyAI 处理器
+
+		replyEvent := &event.Event{
+			Type:   event.EventMessage,
+			RoomID: roomID,
+			Sender: senderID,
+			ID:     id.EventID("$reply_no_handler:example.com"),
+			Content: event.Content{
+				Parsed: &event.MessageEventContent{
+					MsgType: event.MsgText,
+					Body:    "> <@saber:example.com> Bot 消息\n\n回复内容",
+					RelatesTo: &event.RelatesTo{
+						InReplyTo: &event.InReplyTo{
+							EventID: botMessageEventID,
+						},
+					},
+				},
+			},
+		}
+
+		// 应该不崩溃且不返回错误
+		err := service.HandleEvent(context.Background(), replyEvent)
+		if err != nil {
+			t.Errorf("未设置 replyAI 时不应返回错误，但返回: %v", err)
+		}
+	})
+
+	t.Run("回复 + mention 同时存在", func(t *testing.T) {
+		var (
+			replyHandlerCalled   bool
+			mentionHandlerCalled bool
+			mu                   sync.Mutex
+		)
+
+		mockReplyHandler := &mockCommandHandler{
+			handleFunc: func(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
+				mu.Lock()
+				defer mu.Unlock()
+				replyHandlerCalled = true
+				return nil
+			},
+		}
+
+		mockMentionHandler := &mockCommandHandler{
+			handleFunc: func(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
+				mu.Lock()
+				defer mu.Unlock()
+				mentionHandlerCalled = true
+				return nil
+			},
+		}
+
+		roundTripper := &mockRoundTripper{
+			responseBody: mustMarshalEvent(botUserID, botMessageEventID),
+		}
+
+		homeserverURL, _ := url.Parse("https://example.com")
+		httpClient := &http.Client{Transport: roundTripper}
+		client := &mautrix.Client{
+			UserID:        botUserID,
+			Client:        httpClient,
+			HomeserverURL: homeserverURL,
+		}
+
+		service := NewCommandService(client, botUserID)
+		service.SetReplyAIHandler(mockReplyHandler)
+		service.SetMentionAIHandler(mockMentionHandler)
+
+		// 设置 MentionService
+		mentionService := NewMentionService(client, botUserID)
+		mentionService.displayName = "saber" // 设置显示名称
+		service.SetMentionService(mentionService)
+
+		// 创建一个既是回复给 bot 又包含 mention 的消息
+		replyAndMentionEvent := &event.Event{
+			Type:   event.EventMessage,
+			RoomID: roomID,
+			Sender: senderID,
+			ID:     id.EventID("$reply_mention:example.com"),
+			Content: event.Content{
+				Parsed: &event.MessageEventContent{
+					MsgType: event.MsgText,
+					Body:    "> <@saber:example.com> Bot 的消息\n\n@saber:example.com 帮我分析一下",
+					RelatesTo: &event.RelatesTo{
+						InReplyTo: &event.InReplyTo{
+							EventID: botMessageEventID,
+						},
+					},
+				},
+			},
+		}
+
+		err := service.HandleEvent(context.Background(), replyAndMentionEvent)
+		if err != nil {
+			t.Fatalf("HandleEvent() returned error: %v", err)
+		}
+
+		mu.Lock()
+		replyCalled := replyHandlerCalled
+		mentionCalled := mentionHandlerCalled
+		mu.Unlock()
+
+		// 在当前实现中，reply 处理会先检查，但由于消息内容包含 mention，
+		// mention 处理也会被触发。两者应该都被调用。
+		if !replyCalled {
+			t.Error("回复给 bot 的消息应该触发 replyAI 处理器")
+		}
+		if !mentionCalled {
+			t.Error("包含 mention 的消息应该触发 mentionAI 处理器")
+		}
+	})
+
+	t.Run("处理器返回错误时正确报告", func(t *testing.T) {
+		mockReplyHandler := &mockCommandHandler{
+			handleFunc: func(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
+				return errors.New("模拟 AI 处理失败")
+			},
+		}
+
+		roundTripper := &mockRoundTripper{
+			responseBody: mustMarshalEvent(botUserID, botMessageEventID),
+		}
+
+		homeserverURL, _ := url.Parse("https://example.com")
+		httpClient := &http.Client{Transport: roundTripper}
+		client := &mautrix.Client{
+			UserID:        botUserID,
+			Client:        httpClient,
+			HomeserverURL: homeserverURL,
+		}
+
+		service := NewCommandService(client, botUserID)
+		service.SetReplyAIHandler(mockReplyHandler)
+
+		replyEvent := &event.Event{
+			Type:   event.EventMessage,
+			RoomID: roomID,
+			Sender: senderID,
+			ID:     id.EventID("$reply_error:example.com"),
+			Content: event.Content{
+				Parsed: &event.MessageEventContent{
+					MsgType: event.MsgText,
+					Body:    "> <@saber:example.com> Bot 消息\n\n触发错误",
+					RelatesTo: &event.RelatesTo{
+						InReplyTo: &event.InReplyTo{
+							EventID: botMessageEventID,
+						},
+					},
+				},
+			},
+		}
+
+		// HandleEvent 会尝试发送错误消息到房间，但这里我们不验证具体的错误消息
+		// 只验证不会 panic 且返回错误
+		err := service.HandleEvent(context.Background(), replyEvent)
+		if err == nil {
+			t.Error("处理器返回错误时，HandleEvent 应该返回错误")
+		}
+	})
+
+	t.Run("GetEvent 失败时优雅降级", func(t *testing.T) {
+		var handlerCalled bool
+		var mu sync.Mutex
+
+		mockReplyHandler := &mockCommandHandler{
+			handleFunc: func(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
+				mu.Lock()
+				defer mu.Unlock()
+				handlerCalled = true
+				return nil
+			},
+		}
+
+		// 模拟 GetEvent 返回错误
+		roundTripper := &mockRoundTripper{
+			responseErr: errors.New("网络错误"),
+		}
+
+		homeserverURL, _ := url.Parse("https://example.com")
+		httpClient := &http.Client{Transport: roundTripper}
+		client := &mautrix.Client{
+			UserID:        botUserID,
+			Client:        httpClient,
+			HomeserverURL: homeserverURL,
+		}
+
+		service := NewCommandService(client, botUserID)
+		service.SetReplyAIHandler(mockReplyHandler)
+
+		replyEvent := &event.Event{
+			Type:   event.EventMessage,
+			RoomID: roomID,
+			Sender: senderID,
+			ID:     id.EventID("$reply_getevent_fail:example.com"),
+			Content: event.Content{
+				Parsed: &event.MessageEventContent{
+					MsgType: event.MsgText,
+					Body:    "> <@saber:example.com> Bot 消息\n\n回复内容",
+					RelatesTo: &event.RelatesTo{
+						InReplyTo: &event.InReplyTo{
+							EventID: botMessageEventID,
+						},
+					},
+				},
+			},
+		}
+
+		// 应该不崩溃
+		err := service.HandleEvent(context.Background(), replyEvent)
+		if err != nil {
+			t.Errorf("GetEvent 失败时不应返回错误: %v", err)
+		}
+
+		mu.Lock()
+		wasCalled := handlerCalled
+		mu.Unlock()
+
+		// GetEvent 失败时，isReplyToBot 返回 false，处理器不应被调用
+		if wasCalled {
+			t.Error("GetEvent 失败时不应该触发 replyAI 处理器")
+		}
+	})
+
+	t.Run("处理带富文本格式的回复", func(t *testing.T) {
+		var receivedArgs []string
+		var mu sync.Mutex
+
+		mockReplyHandler := &mockCommandHandler{
+			handleFunc: func(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
+				mu.Lock()
+				defer mu.Unlock()
+				receivedArgs = args
+				return nil
+			},
+		}
+
+		roundTripper := &mockRoundTripper{
+			responseBody: mustMarshalEvent(botUserID, botMessageEventID),
+		}
+
+		homeserverURL, _ := url.Parse("https://example.com")
+		httpClient := &http.Client{Transport: roundTripper}
+		client := &mautrix.Client{
+			UserID:        botUserID,
+			Client:        httpClient,
+			HomeserverURL: homeserverURL,
+		}
+
+		service := NewCommandService(client, botUserID)
+		service.SetReplyAIHandler(mockReplyHandler)
+
+		// 创建带 HTML 格式的回复消息
+		replyEvent := &event.Event{
+			Type:   event.EventMessage,
+			RoomID: roomID,
+			Sender: senderID,
+			ID:     id.EventID("$reply_html:example.com"),
+			Content: event.Content{
+				Parsed: &event.MessageEventContent{
+					MsgType:       event.MsgText,
+					Body:          "> <@saber:example.com> Bot 消息\n\n**重要内容** 和 *斜体*",
+					Format:        event.FormatHTML,
+					FormattedBody: "<mx-reply><blockquote><a href=\"https://matrix.to/#/!test:example.com/$bot_message:example.com\">In reply to</a> <a href=\"https://matrix.to/#/@saber:example.com\">@saber:example.com</a><br>Bot 消息</blockquote></mx-reply><strong>重要内容</strong> 和 <em>斜体</em>",
+					RelatesTo: &event.RelatesTo{
+						InReplyTo: &event.InReplyTo{
+							EventID: botMessageEventID,
+						},
+					},
+				},
+			},
+		}
+
+		err := service.HandleEvent(context.Background(), replyEvent)
+		if err != nil {
+			t.Fatalf("HandleEvent() returned error: %v", err)
+		}
+
+		mu.Lock()
+		args := receivedArgs
+		mu.Unlock()
+
+		// 验证清理后的内容
+		expectedContent := "**重要内容** 和 *斜体*"
+		if len(args) == 0 || args[0] != expectedContent {
+			t.Errorf("处理器收到 args = %v，期望 [%s]", args, expectedContent)
+		}
+	})
+}
