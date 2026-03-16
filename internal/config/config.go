@@ -394,6 +394,9 @@ ai:
 
   # 在群聊中 @mention 时自动回复（无需 !ai 前缀）
   group_chat_mention_reply: true
+
+  # 回复机器人消息时自动回复（用于连续对话）
+  reply_to_bot_reply: true
 `
 }
 
