@@ -701,3 +701,94 @@ func TestOnMessage_ErrorHandling(t *testing.T) {
 		t.Errorf("期望 10 个成功，实际 %d", successCount)
 	}
 }
+
+// TestIsReplyToBot 测试 isReplyToBot 方法的各种场景。
+//
+// 该测试覆盖以下情况：
+//   - 回复 bot 发送的消息（应返回 true）
+//   - 回复其他用户发送的消息（应返回 false）
+//   - GetEvent 失败时（应返回 false）
+func TestIsReplyToBot(t *testing.T) {
+	botUserID := id.UserID("@saber:example.com")
+	otherUserID := id.UserID("@other:example.com")
+	roomID := id.RoomID("!test:example.com")
+	eventID := id.EventID("$original_event:example.com")
+
+	tests := []struct {
+		name         string
+		botID        id.UserID
+		roundTripper *mockRoundTripper
+		wantResult   bool
+	}{
+		{
+			name:  "回复 bot 发送的消息",
+			botID: botUserID,
+			roundTripper: &mockRoundTripper{
+				responseBody: mustMarshalEvent(botUserID, eventID),
+			},
+			wantResult: true,
+		},
+		{
+			name:  "回复其他用户发送的消息",
+			botID: botUserID,
+			roundTripper: &mockRoundTripper{
+				responseBody: mustMarshalEvent(otherUserID, eventID),
+			},
+			wantResult: false,
+		},
+		{
+			name:  "GetEvent 失败",
+			botID: botUserID,
+			roundTripper: &mockRoundTripper{
+				responseErr: errors.New("simulated get event error"),
+			},
+			wantResult: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// 重置请求计数
+			tt.roundTripper.requests = nil
+
+			// 创建真实的 mautrix 客户端，但使用模拟的 HTTP 传输层
+			homeserverURL, _ := url.Parse("https://example.com")
+			httpClient := &http.Client{
+				Transport: tt.roundTripper,
+			}
+			client := &mautrix.Client{
+				UserID:        tt.botID,
+				Client:        httpClient,
+				HomeserverURL: homeserverURL,
+			}
+
+			// 创建命令服务
+			service := NewCommandService(client, tt.botID)
+
+			// 调用 isReplyToBot 方法
+			ctx := context.Background()
+			result := service.isReplyToBot(ctx, roomID, eventID)
+
+			// 验证结果
+			if result != tt.wantResult {
+				t.Errorf("isReplyToBot() = %v, want %v", result, tt.wantResult)
+			}
+		})
+	}
+}
+
+// mustMarshalEvent 将事件信息序列化为 Matrix API 返回的 JSON 格式。
+func mustMarshalEvent(sender id.UserID, eventID id.EventID) []byte {
+	event := map[string]any{
+		"sender":           string(sender),
+		"event_id":         string(eventID),
+		"type":             "m.room.message",
+		"content":          map[string]any{"msgtype": "m.text", "body": "test message"},
+		"origin_server_ts": 1234567890,
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		panic(err)
+	}
+	return data
+}
