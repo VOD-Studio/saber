@@ -186,6 +186,7 @@ func Run(version, gitMsg string) {
 	// 设置同步器：注册消息事件处理器
 	// 使用 OnEventType 为特定事件类型注册回调
 	if syncer, ok := mautrixClient.Syncer.(*mautrix.DefaultSyncer); ok {
+		syncer.OnSync(mautrixClient.DontProcessOldEvents)
 		syncer.OnEventType(event.EventMessage, eventHandler.OnMessage)
 		syncer.OnEventType(event.StateMember, eventHandler.OnMember)
 	} else {
