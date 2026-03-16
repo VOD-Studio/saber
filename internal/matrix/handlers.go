@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -507,9 +508,30 @@ func (h *EventHandler) OnMessage(ctx context.Context, evt *event.Event) {
 
 	logger.Debug("Processing event")
 
-	if err := h.service.HandleEvent(ctx, evt); err != nil {
-		logger.Error("Event handling failed", "error", err)
-	}
+	// 为每个消息创建独立的 goroutine 进行并发处理
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				stack := debug.Stack()
+				logger.Error("Panic recovered in message handler",
+					"panic", r,
+					"stack_trace", string(stack))
+			}
+		}()
+
+		// 创建独立上下文，带有 5 分钟超时
+		msgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		// 复制 SyncTokenContextKey 到新上下文（如果存在）
+		if token := ctx.Value(mautrix.SyncTokenContextKey); token != nil {
+			msgCtx = context.WithValue(msgCtx, mautrix.SyncTokenContextKey, token)
+		}
+
+		if err := h.service.HandleEvent(msgCtx, evt); err != nil {
+			logger.Error("Event handling failed", "error", err)
+		}
+	}()
 }
 
 // OnMember 处理成员事件（包括邀请）。
