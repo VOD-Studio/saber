@@ -115,6 +115,7 @@ func DefaultAIConfig() AIConfig {
 		TimeoutSeconds:        30,
 		DirectChatAutoReply:   true,
 		GroupChatMentionReply: true,
+		ReplyToBotReply:       true,
 	}
 }
 
