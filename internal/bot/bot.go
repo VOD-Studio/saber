@@ -177,6 +177,13 @@ func Run(version, gitMsg string) {
 				"display_name", mentionService.GetDisplayName())
 		}
 
+		// 启用回复机器人自己的回复（用于连续对话）
+		if cfg.AI.ReplyToBotReply {
+			commandService.SetReplyAIHandler(ai.NewAICommand(aiService))
+			slog.Info("回复机器人自己的回复已启用",
+				"bot_id", client.GetUserID().String())
+		}
+
 		slog.Info("AI 命令注册完成")
 	}
 
