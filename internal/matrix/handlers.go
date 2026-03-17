@@ -278,6 +278,9 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 		"event_id", evt.ID.String(),
 		"body", content.Body)
 
+	// 注入 EventID 到上下文，用于回复消息功能
+	ctx = WithEventID(ctx, evt.ID)
+
 	// 解析命令
 	parsed := s.ParseCommand(content.Body)
 
