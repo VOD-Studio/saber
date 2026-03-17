@@ -13,6 +13,7 @@
 - **可扩展命令**: 清晰的命令注册和分发系统
 - **自动重连**: 弹性连接，支持指数退避
 - **私聊自动回复**: 在私聊中自动响应 AI 消息
+- **群聊提及回复**: 在群聊中被 @mention 时自动响应
 - **回复延续对话**: 回复机器人的消息时自动继续对话
 
 ## 快速开始
@@ -80,6 +81,23 @@ ai:
 
 当启用 `direct_chat_auto_reply` 时，机器人在私聊中会自动响应消息，无需 `!ai` 前缀。
 
+### 群聊提及
+
+当启用 `group_chat_mention_reply` 时，机器人在群聊中被 @mention 时会自动响应，无需 `!ai` 前缀。
+
+配置示例:
+
+```yaml
+ai:
+  enabled: true
+  group_chat_mention_reply: true  # 启用群聊提及回复
+```
+
+使用场景:
+
+1. 用户在群聊中发送 `@botname 你好`
+2. 机器人识别到提及并自动回复
+
 ### 回复延续对话
 
 当启用 `reply_to_bot_reply` 时，用户可以通过回复机器人的消息来继续对话，无需每次都使用 `!ai` 命令。
@@ -145,6 +163,7 @@ ai:
 | `temperature`             | 否          | 响应随机性（0-2）            |
 | `stream_enabled`          | 否          | 启用流式响应                 |
 | `direct_chat_auto_reply`  | 否          | 私聊自动回复                 |
+| `group_chat_mention_reply`| 否          | 群聊 @mention 时自动回复     |
 | `reply_to_bot_reply`      | 否          | 回复机器人消息时自动回复     |
 
 ### 上下文设置

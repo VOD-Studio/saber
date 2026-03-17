@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,11 +20,13 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
-// mockRoundTripper 创建一个模拟的 HTTP 传输层，用于控制 JoinRoom 的响应。
+// mockRoundTripper 创建一个模拟的 HTTP 传输层，用于控制 HTTP 响应。
+// 支持根据请求路径返回不同的响应。
 type mockRoundTripper struct {
-	responseBody []byte
-	responseErr  error
-	requests     []*http.Request
+	responseBody  []byte
+	responseErr   error
+	requests      []*http.Request
+	pathResponses map[string][]byte // 按路径前缀匹配的响应
 }
 
 // RoundTrip 执行 HTTP 请求并返回模拟响应。
@@ -33,9 +36,29 @@ func (m *mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 		return nil, m.responseErr
 	}
 
+	// 根据路径返回不同的响应
+	if m.pathResponses != nil {
+		for pathPrefix, body := range m.pathResponses {
+			if strings.HasPrefix(req.URL.Path, pathPrefix) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewReader(body)),
+				}, nil
+			}
+		}
+	}
+
+	// 默认响应
+	if m.responseBody != nil {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewReader(m.responseBody)),
+		}, nil
+	}
+
 	return &http.Response{
 		StatusCode: http.StatusOK,
-		Body:       io.NopCloser(bytes.NewReader(m.responseBody)),
+		Body:       io.NopCloser(bytes.NewReader([]byte("{}"))),
 	}, nil
 }
 
@@ -795,6 +818,27 @@ func mustMarshalEvent(sender id.UserID, eventID id.EventID) []byte {
 	return data
 }
 
+// mustMarshalState 将房间状态序列化为 Matrix State API 返回的 JSON 格式。
+// members 参数指定成员列表，用于模拟群聊（>2 成员）或私聊（=2 成员）。
+func mustMarshalState(members []id.UserID) []byte {
+	events := make([]map[string]any, 0, len(members))
+	for _, member := range members {
+		events = append(events, map[string]any{
+			"type":      "m.room.member",
+			"state_key": string(member),
+			"sender":    string(member),
+			"content": map[string]any{
+				"membership": "join",
+			},
+		})
+	}
+	data, err := json.Marshal(events)
+	if err != nil {
+		panic(err)
+	}
+	return data
+}
+
 // TestHandleEvent_ReplyToBot 测试 HandleEvent 中回复消息的处理逻辑。
 //
 // 该测试覆盖以下情况：
@@ -1464,18 +1508,15 @@ func TestHandleEvent_ReplyToOriginalMessage(t *testing.T) {
 	privateRoomID := id.RoomID("!private:example.com")
 
 	homeserverURL, _ := url.Parse("https://example.com")
-	httpClient := &http.Client{}
-	client := &mautrix.Client{
-		UserID:        botUserID,
-		Client:        httpClient,
-		HomeserverURL: homeserverURL,
-	}
 
 	tests := []struct {
 		name            string
 		roomID          id.RoomID
 		event           *event.Event
 		setupDirectChat bool
+		setupMention    bool
+		setupReply      bool
+		roundTripper    *mockRoundTripper
 	}{
 		{
 			name:   "!ai command sends reply in group chat",
@@ -1493,6 +1534,11 @@ func TestHandleEvent_ReplyToOriginalMessage(t *testing.T) {
 				},
 			},
 			setupDirectChat: false,
+			setupMention:    false,
+			setupReply:      false,
+			roundTripper: &mockRoundTripper{
+				responseBody: []byte("{}"),
+			},
 		},
 		{
 			name:   "mention sends reply in group chat",
@@ -1505,11 +1551,23 @@ func TestHandleEvent_ReplyToOriginalMessage(t *testing.T) {
 				Content: event.Content{
 					Parsed: &event.MessageEventContent{
 						MsgType: event.MsgText,
-						Body:    "@saber:example.com test message",
+						Body:    "Hey @saber:example.com, can you help me?",
 					},
 				},
 			},
 			setupDirectChat: false,
+			setupMention:    true,
+			setupReply:      false,
+			roundTripper: &mockRoundTripper{
+				// 群聊：3 个成员（bot + sender + another）
+				pathResponses: map[string][]byte{
+					"/_matrix/client/v3/rooms/!group:example.com/state": mustMarshalState([]id.UserID{
+						botUserID,
+						senderID,
+						id.UserID("@another:example.com"),
+					}),
+				},
+			},
 		},
 		{
 			name:   "reply trigger sends reply in group chat",
@@ -1532,6 +1590,20 @@ func TestHandleEvent_ReplyToOriginalMessage(t *testing.T) {
 				},
 			},
 			setupDirectChat: false,
+			setupMention:    false,
+			setupReply:      true,
+			roundTripper: &mockRoundTripper{
+				// 群聊：3 个成员
+				pathResponses: map[string][]byte{
+					"/_matrix/client/v3/rooms/!group:example.com/state": mustMarshalState([]id.UserID{
+						botUserID,
+						senderID,
+						id.UserID("@another:example.com"),
+					}),
+					// GetEvent 返回 bot 发送的消息
+					"/_matrix/client/v3/rooms/!group:example.com/event/$bot_message:example.com": mustMarshalEvent(botUserID, "$bot_message:example.com"),
+				},
+			},
 		},
 		{
 			name:   "private chat sends direct message",
@@ -1549,6 +1621,17 @@ func TestHandleEvent_ReplyToOriginalMessage(t *testing.T) {
 				},
 			},
 			setupDirectChat: true,
+			setupMention:    false,
+			setupReply:      false,
+			roundTripper: &mockRoundTripper{
+				// 私聊：2 个成员（bot + sender）
+				pathResponses: map[string][]byte{
+					"/_matrix/client/v3/rooms/!private:example.com/state": mustMarshalState([]id.UserID{
+						botUserID,
+						senderID,
+					}),
+				},
+			},
 		},
 	}
 
@@ -1556,6 +1639,15 @@ func TestHandleEvent_ReplyToOriginalMessage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var receivedEventID id.EventID
 			var mu sync.Mutex
+
+			httpClient := &http.Client{
+				Transport: tt.roundTripper,
+			}
+			client := &mautrix.Client{
+				UserID:        botUserID,
+				Client:        httpClient,
+				HomeserverURL: homeserverURL,
+			}
 
 			service := NewCommandService(client, botUserID)
 
@@ -1571,11 +1663,15 @@ func TestHandleEvent_ReplyToOriginalMessage(t *testing.T) {
 			if tt.setupDirectChat {
 				service.SetDirectChatAIHandler(mockHandler)
 			} else {
-				service.SetReplyAIHandler(mockHandler)
-				service.SetMentionAIHandler(mockHandler)
-				mentionService := NewMentionService(client, botUserID)
-				mentionService.displayName = "saber"
-				service.SetMentionService(mentionService)
+				if tt.setupReply {
+					service.SetReplyAIHandler(mockHandler)
+				}
+				if tt.setupMention {
+					service.SetMentionAIHandler(mockHandler)
+					mentionService := NewMentionService(client, botUserID)
+					mentionService.displayName = "saber"
+					service.SetMentionService(mentionService)
+				}
 				service.RegisterCommand("ai", mockHandler)
 			}
 
