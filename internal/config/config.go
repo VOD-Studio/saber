@@ -256,12 +256,13 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	cfg := DefaultConfig()
+
+	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	return &cfg, nil
+	return cfg, nil
 }
 
 // LoadOrDefault 从指定路径读取配置，如果文件不存在则返回默认配置

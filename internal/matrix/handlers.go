@@ -151,11 +151,13 @@ func (s *CommandService) isDirectChat(ctx context.Context, roomID id.RoomID) boo
 func (s *CommandService) isReplyToBot(ctx context.Context, roomID id.RoomID, eventID id.EventID) bool {
 	evt, err := s.client.GetEvent(ctx, roomID, eventID)
 	if err != nil {
-		slog.Debug("Failed to get event for reply check", "room", roomID, "event_id", eventID, "error", err)
+		slog.Debug("获取被回复消息失败", "room", roomID, "event_id", eventID, "error", err)
 		return false
 	}
 
-	return evt.Sender == s.botID
+	isBot := evt.Sender == s.botID
+	slog.Debug("检查回复目标", "sender", evt.Sender, "botID", s.botID, "isBot", isBot)
+	return isBot
 }
 
 // ListCommands 返回所有已注册的命令。
@@ -300,6 +302,7 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 		// 回复消息响应（优先于 mention 检测，避免回复引用中的 mention 误触发）
 		if s.replyAI != nil && content.RelatesTo != nil && content.RelatesTo.GetReplyTo() != "" {
 			replyToEventID := content.RelatesTo.GetReplyTo()
+			slog.Debug("检测到回复消息", "reply_to", replyToEventID.String(), "replyAI", s.replyAI != nil)
 			if s.isReplyToBot(ctx, roomID, replyToEventID) {
 				cleanedBody := event.TrimReplyFallbackText(content.Body)
 				slog.Info("回复消息触发 AI 回复",
@@ -315,6 +318,11 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 				}
 				return nil
 			}
+		} else if content.RelatesTo != nil {
+			slog.Debug("回复消息条件不满足",
+				"replyAI", s.replyAI != nil,
+				"relatesTo", content.RelatesTo != nil,
+				"replyTo", content.RelatesTo.GetReplyTo())
 		}
 
 		// 群聊 mention 响应
