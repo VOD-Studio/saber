@@ -495,7 +495,25 @@ func (s *CommandService) SendTextWithRelatesTo(ctx context.Context, roomID id.Ro
 		if relatesTo.InReplyTo != nil {
 			// Matrix 客户端需要 fallback 文本来显示回复关系
 			// fallback 格式：> <@user:example.com> Original message\n\nbody
-			content.Body = fmt.Sprintf("> <%s> %s\n\n%s", relatesTo.InReplyTo.EventID, relatesTo.InReplyTo.EventID, body)
+			senderID := id.UserID("")
+			originalMsg := ""
+
+			// 获取原始事件以提取发送者和消息内容
+			if evt, err := s.client.GetEvent(ctx, roomID, relatesTo.InReplyTo.EventID); err == nil {
+				senderID = evt.Sender
+				if msgContent, ok := evt.Content.Parsed.(*event.MessageEventContent); ok {
+					originalMsg = msgContent.Body
+				}
+			} else {
+				slog.Debug("Failed to get original event for reply fallback",
+					"room", roomID.String(),
+					"event_id", relatesTo.InReplyTo.EventID.String(),
+					"error", err)
+				// 使用 EventID 作为 fallback 的发送者（虽然不理想，但比什么都不好）
+				senderID = id.UserID(relatesTo.InReplyTo.EventID.String())
+			}
+
+			content.Body = CreateReplyFallback(senderID, originalMsg, body)
 		}
 	}
 
