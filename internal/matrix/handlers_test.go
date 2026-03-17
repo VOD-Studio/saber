@@ -612,8 +612,10 @@ func TestOnMessage_ErrorHandling(t *testing.T) {
 	senderID := id.UserID("@sender:example.com")
 
 	homeserverURL, _ := url.Parse("https://example.com")
+	httpClient := &http.Client{}
 	client := &mautrix.Client{
 		UserID:        botUserID,
+		Client:        httpClient,
 		HomeserverURL: homeserverURL,
 	}
 
@@ -1453,4 +1455,146 @@ func TestHandleEvent_ReplyIntegration(t *testing.T) {
 			t.Errorf("处理器收到 args = %v，期望 [%s]", args, expectedContent)
 		}
 	})
+}
+
+func TestHandleEvent_ReplyToOriginalMessage(t *testing.T) {
+	botUserID := id.UserID("@saber:example.com")
+	senderID := id.UserID("@sender:example.com")
+	groupRoomID := id.RoomID("!group:example.com")
+	privateRoomID := id.RoomID("!private:example.com")
+
+	homeserverURL, _ := url.Parse("https://example.com")
+	httpClient := &http.Client{}
+	client := &mautrix.Client{
+		UserID:        botUserID,
+		Client:        httpClient,
+		HomeserverURL: homeserverURL,
+	}
+
+	tests := []struct {
+		name            string
+		roomID          id.RoomID
+		event           *event.Event
+		setupDirectChat bool
+	}{
+		{
+			name:   "!ai command sends reply in group chat",
+			roomID: groupRoomID,
+			event: &event.Event{
+				Type:   event.EventMessage,
+				RoomID: groupRoomID,
+				Sender: senderID,
+				ID:     id.EventID("$test_event:example.com"),
+				Content: event.Content{
+					Parsed: &event.MessageEventContent{
+						MsgType: event.MsgText,
+						Body:    "!ai test message",
+					},
+				},
+			},
+			setupDirectChat: false,
+		},
+		{
+			name:   "mention sends reply in group chat",
+			roomID: groupRoomID,
+			event: &event.Event{
+				Type:   event.EventMessage,
+				RoomID: groupRoomID,
+				Sender: senderID,
+				ID:     id.EventID("$test_event:example.com"),
+				Content: event.Content{
+					Parsed: &event.MessageEventContent{
+						MsgType: event.MsgText,
+						Body:    "@saber:example.com test message",
+					},
+				},
+			},
+			setupDirectChat: false,
+		},
+		{
+			name:   "reply trigger sends reply in group chat",
+			roomID: groupRoomID,
+			event: &event.Event{
+				Type:   event.EventMessage,
+				RoomID: groupRoomID,
+				Sender: senderID,
+				ID:     id.EventID("$test_event:example.com"),
+				Content: event.Content{
+					Parsed: &event.MessageEventContent{
+						MsgType: event.MsgText,
+						Body:    "> <@saber:example.com> Bot message\n\ntest reply",
+						RelatesTo: &event.RelatesTo{
+							InReplyTo: &event.InReplyTo{
+								EventID: "$bot_message:example.com",
+							},
+						},
+					},
+				},
+			},
+			setupDirectChat: false,
+		},
+		{
+			name:   "private chat sends direct message",
+			roomID: privateRoomID,
+			event: &event.Event{
+				Type:   event.EventMessage,
+				RoomID: privateRoomID,
+				Sender: senderID,
+				ID:     id.EventID("$test_event:example.com"),
+				Content: event.Content{
+					Parsed: &event.MessageEventContent{
+						MsgType: event.MsgText,
+						Body:    "test message",
+					},
+				},
+			},
+			setupDirectChat: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var receivedEventID id.EventID
+			var mu sync.Mutex
+
+			service := NewCommandService(client, botUserID)
+
+			mockHandler := &mockCommandHandler{
+				handleFunc: func(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
+					mu.Lock()
+					defer mu.Unlock()
+					receivedEventID = GetEventID(ctx)
+					return nil
+				},
+			}
+
+			if tt.setupDirectChat {
+				service.SetDirectChatAIHandler(mockHandler)
+			} else {
+				service.SetReplyAIHandler(mockHandler)
+				service.SetMentionAIHandler(mockHandler)
+				mentionService := NewMentionService(client, botUserID)
+				mentionService.displayName = "saber"
+				service.SetMentionService(mentionService)
+				service.RegisterCommand("ai", mockHandler)
+			}
+
+			err := service.HandleEvent(context.Background(), tt.event)
+			if err != nil {
+				t.Fatalf("HandleEvent() error: %v", err)
+			}
+
+			time.Sleep(50 * time.Millisecond)
+
+			mu.Lock()
+			eventID := receivedEventID
+			mu.Unlock()
+
+			if eventID == "" {
+				t.Errorf("Expected EventID in context, got empty string")
+			} else if eventID != tt.event.ID {
+				t.Errorf("Expected EventID %v, got %v", tt.event.ID, eventID)
+			}
+		})
+	}
 }
