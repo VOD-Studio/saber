@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -13,7 +14,171 @@ import (
 
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/matrix"
+	"rua.plus/saber/internal/mcp"
 )
+
+type contextKey string
+
+const (
+	userIDKey contextKey = "userID"
+	roomIDKey contextKey = "roomID"
+)
+
+func WithUserContext(ctx context.Context, userID id.UserID, roomID id.RoomID) context.Context {
+	ctx = context.WithValue(ctx, userIDKey, userID)
+	return context.WithValue(ctx, roomIDKey, roomID)
+}
+
+func GetUserFromContext(ctx context.Context) (id.UserID, bool) {
+	userID, ok := ctx.Value(userIDKey).(id.UserID)
+	return userID, ok
+}
+
+func GetRoomFromContext(ctx context.Context) (id.RoomID, bool) {
+	roomID, ok := ctx.Value(roomIDKey).(id.RoomID)
+	return roomID, ok
+}
+
+func (s *Service) handleToolCall(ctx context.Context, toolCall openai.ToolCall) error {
+	userID, ok := GetUserFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("user context missing - cannot execute tool")
+	}
+
+	slog.Debug("工具调用已验证用户上下文", "user_id", userID)
+	return nil
+}
+
+const maxToolIterations = 5
+
+// executeToolCallingLoop 执行工具调用循环，处理 AI 响应中的工具调用。
+//
+// 它最多执行 maxToolIterations 次迭代，每次迭代都会：
+// 1. 向 AI 发送当前消息历史
+// 2. 检查 AI 响应是否包含工具调用
+// 3. 如果没有工具调用，返回最终内容
+// 4. 如果有工具调用，执行每个工具并将其结果添加到消息历史中
+// 5. 继续下一次迭代
+//
+// 参数:
+//   - ctx: 上下文，用于取消操作
+//   - messages: 聊天消息历史
+//   - modelName: 使用的 AI 模型名称
+//   - tools: 可用的工具列表
+//
+// 返回值:
+//   - string: 最终的 AI 响应内容
+//   - error: 执行过程中发生的错误
+func (s *Service) executeToolCallingLoop(
+	ctx context.Context,
+	messages []openai.ChatCompletionMessage,
+	modelName string,
+	tools []openai.Tool,
+) (string, error) {
+	currentMessages := make([]openai.ChatCompletionMessage, len(messages))
+	copy(currentMessages, messages)
+
+	for i := 0; i < maxToolIterations; i++ {
+		req := ChatCompletionRequest{
+			Model:    modelName,
+			Messages: currentMessages,
+			Tools:    tools,
+		}
+
+		client, err := s.getClient(modelName)
+		if err != nil {
+			return "", fmt.Errorf("获取AI客户端失败: %w", err)
+		}
+
+		resp, err := client.CreateChatCompletion(ctx, req)
+		if err != nil {
+			return "", fmt.Errorf("AI请求失败: %w", err)
+		}
+
+		// No tool calls - return final content
+		if len(resp.ToolCalls) == 0 {
+			return resp.Content, nil
+		}
+
+		// Process tool calls
+		for _, toolCall := range resp.ToolCalls {
+			// Log tool call
+			slog.Debug("执行工具调用", "tool_name", toolCall.Function.Name, "tool_id", toolCall.ID)
+
+			// Parse args
+			var args map[string]any
+			if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+				// Add error as tool result
+				currentMessages = append(currentMessages, openai.ChatCompletionMessage{
+					Role:       "tool",
+					ToolCallID: toolCall.ID,
+					Content:    fmt.Sprintf("Error parsing arguments: %v", err),
+				})
+				continue
+			}
+
+			// Execute tool
+			if s.mcpManager == nil {
+				currentMessages = append(currentMessages, openai.ChatCompletionMessage{
+					Role:       "tool",
+					ToolCallID: toolCall.ID,
+					Content:    "Error: MCP manager not initialized",
+				})
+				continue
+			}
+
+			// Extract server name and tool name from toolCall.Function.Name
+			// Format: serverName.toolName
+			var serverName, actualToolName string
+			toolName := toolCall.Function.Name
+			if idx := strings.Index(toolName, "."); idx != -1 {
+				serverName = toolName[:idx]
+				actualToolName = toolName[idx+1:]
+			} else {
+				// If no dot, assume single server or default server
+				serverName = ""
+				actualToolName = toolName
+				// Try to find which server has this tool
+				for _, serverInfo := range s.mcpManager.ListServers() {
+					if serverInfo.Enabled {
+						// For now, use the first enabled server
+						serverName = serverInfo.Name
+						break
+					}
+				}
+				if serverName == "" {
+					currentMessages = append(currentMessages, openai.ChatCompletionMessage{
+						Role:       "tool",
+						ToolCallID: toolCall.ID,
+						Content:    fmt.Sprintf("Error: No server found for tool %s", toolName),
+					})
+					continue
+				}
+			}
+
+			result, err := s.mcpManager.CallTool(ctx, serverName, actualToolName, args)
+			if err != nil {
+				// Add error as tool result
+				currentMessages = append(currentMessages, openai.ChatCompletionMessage{
+					Role:       "tool",
+					ToolCallID: toolCall.ID,
+					Content:    fmt.Sprintf("Error: %v", err),
+				})
+				continue
+			}
+
+			// Add tool result to messages
+			resultJSON, _ := json.Marshal(result)
+			currentMessages = append(currentMessages, openai.ChatCompletionMessage{
+				Role:       "tool",
+				ToolCallID: toolCall.ID,
+				Content:    string(resultJSON),
+			})
+		}
+	}
+
+	return "", fmt.Errorf("max tool iterations (%d) exceeded", maxToolIterations)
+}
 
 // Service 是 AI 服务的核心结构体。
 //
@@ -22,6 +187,7 @@ type Service struct {
 	globalConfig   *config.AIConfig
 	matrixService  *matrix.CommandService
 	contextManager *ContextManager
+	mcpManager     *mcp.Manager
 	clients        map[string]*Client
 	clientsMu      sync.RWMutex
 }
@@ -31,11 +197,12 @@ type Service struct {
 // 参数:
 //   - cfg: AI 配置，必须提供且验证通过
 //   - matrixService: Matrix 命令服务，用于发送消息
+//   - mcpManager: MCP 管理器，用于工具调用（可选）
 //
 // 返回值:
 //   - *Service: 创建的 AI 服务实例
 //   - error: 初始化过程中发生的错误
-func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService) (*Service, error) {
+func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpManager *mcp.Manager) (*Service, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("AI配置不能为空")
 	}
@@ -53,6 +220,7 @@ func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService) (*Se
 		globalConfig:   cfg,
 		matrixService:  matrixService,
 		contextManager: contextManager,
+		mcpManager:     mcpManager,
 		clients:        make(map[string]*Client),
 	}
 
@@ -160,7 +328,37 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 		req.Model = model
 		slog.Debug("发送AI请求", "model", model, "base_url", s.globalConfig.BaseURL)
 
-		if s.globalConfig.StreamEnabled && s.globalConfig.StreamEdit.Enabled {
+		// Check if we should use tool calling
+		var tools []openai.Tool
+		useToolCalling := false
+		if s.mcpManager != nil && s.mcpManager.IsEnabled() {
+			mcpTools := s.mcpManager.ListTools()
+			if len(mcpTools) > 0 {
+				// Convert MCP tools to OpenAI tools
+				for _, mcpTool := range mcpTools {
+					tools = append(tools, openai.Tool{
+						Type: "function",
+						Function: &openai.FunctionDefinition{
+							Name:        mcpTool.Name,
+							Description: mcpTool.Description,
+							Parameters:  mcpTool.InputSchema,
+						},
+					})
+				}
+				useToolCalling = true
+				slog.Debug("启用工具调用", "tool_count", len(tools))
+			}
+		}
+
+		// If using tool calling, we need to add tools to the request
+		if useToolCalling {
+			req.Tools = tools
+			// For tool calling, we currently don't support streaming
+			// TODO: Add streaming support for tool calls in the future
+			req.Stream = false
+		}
+
+		if s.globalConfig.StreamEnabled && s.globalConfig.StreamEdit.Enabled && !useToolCalling {
 			slog.Debug("使用流式响应模式", "char_threshold", s.globalConfig.StreamEdit.CharThreshold)
 			// Extract EventID for reply-to functionality
 			eventID := matrix.GetEventID(ctx)
@@ -181,7 +379,27 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 				slog.Warn("无法启动 typing indicator", "error", err)
 			}
 
-			resp, chatErr := client.CreateChatCompletion(ctx, req)
+			var finalContent string
+			var usage openai.Usage
+			var chatErr error
+
+			if useToolCalling {
+				// Use tool calling loop
+				finalContent, chatErr = s.executeToolCallingLoop(ctx, messages, model, tools)
+				if chatErr == nil {
+					// Create a dummy usage for tool calling responses
+					usage = openai.Usage{}
+				}
+			} else {
+				// Use direct chat completion
+				resp, err := client.CreateChatCompletion(ctx, req)
+				if err != nil {
+					chatErr = err
+				} else {
+					finalContent = resp.Content
+					usage = resp.Usage
+				}
+			}
 
 			// 停止 typing indicator
 			if stopErr := s.matrixService.StopTyping(ctx, roomID); stopErr != nil {
@@ -195,21 +413,21 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 
 			slog.Debug("AI响应成功",
 				"model", model,
-				"content_length", len(resp.Content),
-				"content", resp.Content,
-				"prompt_tokens", resp.Usage.PromptTokens,
-				"completion_tokens", resp.Usage.CompletionTokens,
-				"total_tokens", resp.Usage.TotalTokens)
+				"content_length", len(finalContent),
+				"content", finalContent,
+				"prompt_tokens", usage.PromptTokens,
+				"completion_tokens", usage.CompletionTokens,
+				"total_tokens", usage.TotalTokens)
 
-			slog.Info("AI 响应", "model", model, "content", resp.Content)
+			slog.Info("AI 响应", "model", model, "content", finalContent)
 
 			// 如果上下文中有 EventID，使用回复模式（群聊场景）
 			eventID := matrix.GetEventID(ctx)
 			var sendErr error
 			if eventID != "" {
-				_, sendErr = s.matrixService.SendReply(ctx, roomID, resp.Content, eventID)
+				_, sendErr = s.matrixService.SendReply(ctx, roomID, finalContent, eventID)
 			} else {
-				sendErr = s.matrixService.SendText(ctx, roomID, resp.Content)
+				sendErr = s.matrixService.SendText(ctx, roomID, finalContent)
 			}
 
 			if sendErr != nil {
@@ -218,10 +436,15 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 			}
 
 			if s.contextManager != nil {
-				s.contextManager.AddMessage(roomID, RoleAssistant, resp.Content, s.matrixService.BotID())
+				s.contextManager.AddMessage(roomID, RoleAssistant, finalContent, s.matrixService.BotID())
 			}
 
-			return resp, nil
+			// Return a dummy response for the fallback handler
+			return &ChatCompletionResponse{
+				Content: finalContent,
+				Usage:   usage,
+				Model:   model,
+			}, nil
 		}
 	})
 

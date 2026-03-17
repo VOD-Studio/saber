@@ -13,6 +13,7 @@ import (
 type Config struct {
 	Matrix MatrixConfig `yaml:"matrix"`
 	AI     AIConfig     `yaml:"ai"`
+	MCP    MCPConfig    `yaml:"mcp"`
 }
 
 // MatrixConfig 存储 Matrix 连接配置
@@ -75,6 +76,24 @@ type RetryConfig struct {
 	BackoffFactor   float64  `yaml:"backoff_factor"`   // 退避因子
 	FallbackEnabled bool     `yaml:"fallback_enabled"` // 是否启用降级
 	FallbackModels  []string `yaml:"fallback_models"`  // 降级模型列表
+}
+
+// MCPConfig 存储 MCP (Model Context Protocol) 集成配置
+type MCPConfig struct {
+	Enabled bool                    `yaml:"enabled"` // 是否启用 MCP 功能
+	Servers map[string]ServerConfig `yaml:"servers"` // MCP 服务器配置
+}
+
+// ServerConfig 存储单个 MCP 服务器配置
+type ServerConfig struct {
+	Type    string            `yaml:"type"`              // 服务器类型: builtin, stdio, http
+	Enabled bool              `yaml:"enabled"`           // 是否启用
+	Command string            `yaml:"command,omitempty"` // stdio: 可执行文件路径
+	Args    []string          `yaml:"args,omitempty"`    // stdio: 命令参数
+	Env     map[string]string `yaml:"env,omitempty"`     // stdio: 环境变量
+	URL     string            `yaml:"url,omitempty"`     // http: 服务器地址
+	Token   string            `yaml:"token,omitempty"`   // http: Bearer 认证令牌
+	Timeout int               `yaml:"timeout_seconds"`   // 调用超时（秒）
 }
 
 // ModelConfig 存储特定模型配置
@@ -292,7 +311,8 @@ func DefaultConfig() *Config {
 			E2EESessionPath: "",
 			PickleKeyPath:   "",
 		},
-		AI: DefaultAIConfig(),
+		AI:  DefaultAIConfig(),
+		MCP: MCPConfig{Enabled: false},
 	}
 }
 
@@ -398,6 +418,11 @@ ai:
 
   # 回复机器人消息时自动回复（用于连续对话）
   reply_to_bot_reply: true
+
+# MCP (Model Context Protocol) 配置
+mcp:
+  # 启用 MCP 功能
+  enabled: false
 `
 }
 

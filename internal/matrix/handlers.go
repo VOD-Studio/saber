@@ -13,6 +13,8 @@ import (
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
+
+	"rua.plus/saber/internal/mcp"
 )
 
 // CommandHandler 定义处理机器人命令的接口。
@@ -781,4 +783,78 @@ func (c *HelpCommand) Handle(ctx context.Context, userID id.UserID, roomID id.Ro
 func RegisterBuiltinCommands(service *CommandService) {
 	service.RegisterCommandWithDesc("ping", "检查机器人是否在线", NewPingCommand(service))
 	service.RegisterCommandWithDesc("help", "列出可用命令", NewHelpCommand(service))
+}
+
+// MCPListCommand lists all available MCP servers and tools.
+type MCPListCommand struct {
+	service *CommandService
+	mcp     *mcp.Manager
+}
+
+// NewMCPListCommand 创建一个新的 MCP 列表命令处理器。
+func NewMCPListCommand(service *CommandService, mcpMgr *mcp.Manager) *MCPListCommand {
+	return &MCPListCommand{service: service, mcp: mcpMgr}
+}
+
+// Handle 实现 CommandHandler，生成 HTML 表格格式的 MCP 服务器和工具列表。
+func (c *MCPListCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
+	if c.mcp == nil || !c.mcp.IsEnabled() {
+		return c.service.SendText(ctx, roomID, "MCP 功能未启用")
+	}
+
+	servers := c.mcp.ListServers()
+	tools := c.mcp.ListTools()
+
+	var html strings.Builder
+	html.WriteString("<h3>🔧 MCP 服务器</h3><table><thead><tr><th>服务器</th><th>类型</th><th>状态</th></tr></thead><tbody>")
+	for _, srv := range servers {
+		status := "❌ 禁用"
+		if srv.Enabled {
+			status = "✅ 启用"
+		}
+		fmt.Fprintf(&html, "<tr><td><code>%s</code></td><td>%s</td><td>%s</td></tr>", srv.Name, srv.Type, status)
+	}
+	html.WriteString("</tbody></table>")
+
+	if len(tools) > 0 {
+		html.WriteString("<h3>🛠️ 可用工具</h3><table><thead><tr><th>工具</th><th>描述</th></tr></thead><tbody>")
+		for _, tool := range tools {
+			desc := tool.Description
+			if desc == "" {
+				desc = "-"
+			}
+			fmt.Fprintf(&html, "<tr><td><code>%s</code></td><td>%s</td></tr>", tool.Name, desc)
+		}
+		html.WriteString("</tbody></table>")
+	}
+
+	var plain strings.Builder
+	plain.WriteString("🔧 MCP 服务器:\n")
+	for _, srv := range servers {
+		status := "❌ 禁用"
+		if srv.Enabled {
+			status = "✅ 启用"
+		}
+		fmt.Fprintf(&plain, "  %s (%s) - %s\n", srv.Name, srv.Type, status)
+	}
+
+	if len(tools) > 0 {
+		plain.WriteString("\n🛠️ 可用工具:\n")
+		for _, tool := range tools {
+			desc := tool.Description
+			if desc == "" {
+				desc = "无描述"
+			}
+			fmt.Fprintf(&plain, "  %s - %s\n", tool.Name, desc)
+		}
+	}
+
+	return c.service.SendFormattedText(ctx, roomID, html.String(), plain.String())
+}
+
+// RegisterMCPCommands 注册 MCP 相关命令。
+func RegisterMCPCommands(service *CommandService, mcpMgr *mcp.Manager) {
+	if mcpMgr != nil && mcpMgr.IsEnabled() {
+		service.RegisterCommandWithDesc("mcp-list", "列出所有 MCP 服务器和工具", NewMCPListCommand(service, mcpMgr))
+	}
 }

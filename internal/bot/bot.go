@@ -17,6 +17,7 @@ import (
 	"rua.plus/saber/internal/cli"
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/matrix"
+	"rua.plus/saber/internal/mcp"
 )
 
 // Run 初始化并运行机器人。
@@ -130,8 +131,20 @@ func Run(version, gitMsg string) {
 			os.Exit(1)
 		}
 
+		// 初始化MCP管理器（如果配置了MCP）
+		var mcpManager *mcp.Manager
+		if cfg.MCP.Enabled {
+			slog.Info("正在初始化MCP管理器...")
+			mcpManager = mcp.NewManager(&cfg.MCP)
+			if err := mcpManager.Init(context.Background()); err != nil {
+				slog.Error("MCP管理器初始化失败", "error", err)
+				os.Exit(1)
+			}
+			slog.Info("MCP管理器初始化成功")
+		}
+
 		// 创建AI服务实例
-		aiService, err = ai.NewService(&cfg.AI, commandService)
+		aiService, err = ai.NewService(&cfg.AI, commandService, mcpManager)
 		if err != nil {
 			slog.Error("AI服务初始化失败", "error", err)
 			os.Exit(1)

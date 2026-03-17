@@ -22,22 +22,25 @@ type Client struct {
 
 // ChatCompletionRequest 表示聊天完成请求。
 //
-// 它包含消息历史、流式传输标志、最大 token 数、温度和模型等参数。
+// 它包含消息历史、流式传输标志、最大 token 数、温度、模型、工具等参数。
 type ChatCompletionRequest struct {
 	Messages    []openai.ChatCompletionMessage `json:"messages"`
 	Stream      bool                           `json:"stream"`
 	MaxTokens   int                            `json:"max_tokens"`
 	Temperature float64                        `json:"temperature"`
 	Model       string                         `json:"model"`
+	Tools       []openai.Tool                  `json:"tools,omitempty"`
+	ToolChoice  string                         `json:"tool_choice,omitempty"`
 }
 
 // ChatCompletionResponse 表示聊天完成响应。
 //
-// 它包含生成的内容、使用统计信息和使用的模型。
+// 它包含生成的内容、使用统计信息、使用的模型和工具调用等。
 type ChatCompletionResponse struct {
-	Content string       `json:"content"`
-	Usage   openai.Usage `json:"usage"`
-	Model   string       `json:"model"`
+	Content   string            `json:"content"`
+	Usage     openai.Usage      `json:"usage"`
+	Model     string            `json:"model"`
+	ToolCalls []openai.ToolCall `json:"tool_calls,omitempty"`
 }
 
 // StreamingChatCompletionHandler 定义了流式聊天完成的处理接口。
@@ -132,6 +135,8 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 				Messages:    req.Messages,
 				MaxTokens:   req.MaxTokens,
 				Temperature: float32(req.Temperature),
+				Tools:       req.Tools,
+				ToolChoice:  req.ToolChoice,
 			},
 		)
 		if err != nil {
@@ -152,9 +157,10 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 			"total_tokens", resp.Usage.TotalTokens)
 
 		return &ChatCompletionResponse{
-			Content: resp.Choices[0].Message.Content,
-			Usage:   resp.Usage,
-			Model:   resp.Model,
+			Content:   resp.Choices[0].Message.Content,
+			Usage:     resp.Usage,
+			Model:     resp.Model,
+			ToolCalls: resp.Choices[0].Message.ToolCalls,
 		}, nil
 	}
 
@@ -167,6 +173,8 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 			MaxTokens:   req.MaxTokens,
 			Temperature: float32(req.Temperature),
 			Stream:      true,
+			Tools:       req.Tools,
+			ToolChoice:  req.ToolChoice,
 		},
 	)
 	if err != nil {
@@ -252,6 +260,8 @@ func (c *Client) CreateStreamingChatCompletion(
 			MaxTokens:   req.MaxTokens,
 			Temperature: float32(req.Temperature),
 			Stream:      true,
+			Tools:       req.Tools,
+			ToolChoice:  req.ToolChoice,
 		},
 	)
 	if err != nil {
