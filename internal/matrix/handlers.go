@@ -475,6 +475,12 @@ func (s *CommandService) SendTextWithRelatesTo(ctx context.Context, roomID id.Ro
 				Body:    body,
 			}
 		}
+		// 如果是回复消息，自动添加 fallback 文本
+		if relatesTo.InReplyTo != nil {
+			// Matrix 客户端需要 fallback 文本来显示回复关系
+			// fallback 格式：> <@user:example.com> Original message\n\nbody
+			content.Body = fmt.Sprintf("> <%s> %s\n\n%s", relatesTo.InReplyTo.EventID, relatesTo.InReplyTo.EventID, body)
+		}
 	}
 
 	resp, err := s.client.SendMessageEvent(
@@ -491,6 +497,26 @@ func (s *CommandService) SendTextWithRelatesTo(ctx context.Context, roomID id.Ro
 	}
 
 	return resp.EventID, nil
+}
+
+// SendReply 发送回复消息到指定的事件。
+//
+// 参数:
+//   - ctx: 上下文
+//   - roomID: 房间 ID
+//   - body: 消息内容
+//   - replyTo: 要回复的事件 ID
+//
+// 返回值:
+//   - id.EventID: 发送的消息事件 ID
+//   - error: 操作过程中发生的错误
+func (s *CommandService) SendReply(ctx context.Context, roomID id.RoomID, body string, replyTo id.EventID) (id.EventID, error) {
+	relatesTo := &event.RelatesTo{
+		InReplyTo: &event.InReplyTo{
+			EventID: replyTo,
+		},
+	}
+	return s.SendTextWithRelatesTo(ctx, roomID, body, relatesTo)
 }
 
 // BotID 返回机器人的用户 ID。
