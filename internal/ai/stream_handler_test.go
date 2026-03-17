@@ -19,7 +19,7 @@ func TestNewSmartStreamHandler(t *testing.T) {
 	mock := &mockMessageSender{}
 	roomID := id.RoomID("!test:example.com")
 	cfg := config.DefaultStreamEditConfig()
-	editor := NewStreamEditor(mock, roomID, "", cfg)
+	editor := NewStreamEditor(mock, roomID, "", cfg, "")
 
 	handler := NewSmartStreamHandler(editor, 10, 1000)
 
@@ -42,7 +42,7 @@ func TestSmartStreamHandler_OnChunk_CharThreshold(t *testing.T) {
 	mock := &mockMessageSender{}
 	roomID := id.RoomID("!test:example.com")
 	cfg := config.StreamEditConfig{Enabled: true, MaxEdits: 10, EditIntervalMs: 0}
-	editor := NewStreamEditor(mock, roomID, "", cfg)
+	editor := NewStreamEditor(mock, roomID, "", cfg, "")
 
 	handler := NewSmartStreamHandler(editor, 10, 10000)
 	ctx := context.Background()
@@ -70,7 +70,7 @@ func TestSmartStreamHandler_OnChunk_TimeThreshold(t *testing.T) {
 	mock := &mockMessageSender{}
 	roomID := id.RoomID("!test:example.com")
 	cfg := config.StreamEditConfig{Enabled: true, MaxEdits: 10, EditIntervalMs: 0}
-	editor := NewStreamEditor(mock, roomID, "", cfg)
+	editor := NewStreamEditor(mock, roomID, "", cfg, "")
 
 	handler := NewSmartStreamHandler(editor, 1000, 100)
 	ctx := context.Background()
@@ -120,7 +120,7 @@ func TestSmartStreamHandler_OnComplete(t *testing.T) {
 			mock := &mockMessageSender{}
 			roomID := id.RoomID("!test:example.com")
 			cfg := config.StreamEditConfig{Enabled: true, MaxEdits: 10}
-			editor := NewStreamEditor(mock, roomID, "", cfg)
+			editor := NewStreamEditor(mock, roomID, "", cfg, "")
 
 			handler := NewSmartStreamHandler(editor, 10, 1000)
 			if tt.setupHandler != nil {
@@ -143,7 +143,7 @@ func TestSmartStreamHandler_OnError(t *testing.T) {
 	mock := &mockMessageSender{}
 	roomID := id.RoomID("!test:example.com")
 	cfg := config.StreamEditConfig{Enabled: true}
-	editor := NewStreamEditor(mock, roomID, "", cfg)
+	editor := NewStreamEditor(mock, roomID, "", cfg, "")
 
 	handler := NewSmartStreamHandler(editor, 10, 1000)
 	ctx := context.Background()
@@ -173,7 +173,7 @@ func TestSmartStreamHandler_ContentAccumulation(t *testing.T) {
 	mock := &mockMessageSender{}
 	roomID := id.RoomID("!test:example.com")
 	cfg := config.StreamEditConfig{Enabled: true, MaxEdits: 10, EditIntervalMs: 0}
-	editor := NewStreamEditor(mock, roomID, "", cfg)
+	editor := NewStreamEditor(mock, roomID, "", cfg, "")
 
 	handler := NewSmartStreamHandler(editor, 5, 10000)
 	ctx := context.Background()
@@ -193,7 +193,7 @@ func TestSmartStreamHandler_Concurrency(t *testing.T) {
 	mock := &mockMessageSender{}
 	roomID := id.RoomID("!test:example.com")
 	cfg := config.StreamEditConfig{Enabled: true, MaxEdits: 100, EditIntervalMs: 0}
-	editor := NewStreamEditor(mock, roomID, "", cfg)
+	editor := NewStreamEditor(mock, roomID, "", cfg, "")
 
 	handler := NewSmartStreamHandler(editor, 1, 1)
 	ctx := context.Background()
@@ -226,7 +226,7 @@ func TestSmartStreamHandler_DualThreshold(t *testing.T) {
 		mock := &mockMessageSender{}
 		roomID := id.RoomID("!test:example.com")
 		cfg := config.StreamEditConfig{Enabled: true, MaxEdits: 10, EditIntervalMs: 0}
-		editor := NewStreamEditor(mock, roomID, "", cfg)
+		editor := NewStreamEditor(mock, roomID, "", cfg, "")
 
 		handler := NewSmartStreamHandler(editor, 5, 10000)
 		ctx := context.Background()
@@ -248,7 +248,7 @@ func TestSmartStreamHandler_DualThreshold(t *testing.T) {
 		mock := &mockMessageSender{}
 		roomID := id.RoomID("!test:example.com")
 		cfg := config.StreamEditConfig{Enabled: true, MaxEdits: 10, EditIntervalMs: 0}
-		editor := NewStreamEditor(mock, roomID, "", cfg)
+		editor := NewStreamEditor(mock, roomID, "", cfg, "")
 
 		handler := NewSmartStreamHandler(editor, 1000, 50)
 		ctx := context.Background()
@@ -275,7 +275,7 @@ func TestSmartStreamHandler_EdgeCases(t *testing.T) {
 		mock := &mockMessageSender{}
 		roomID := id.RoomID("!test:example.com")
 		cfg := config.StreamEditConfig{Enabled: true}
-		editor := NewStreamEditor(mock, roomID, "", cfg)
+		editor := NewStreamEditor(mock, roomID, "", cfg, "")
 
 		handler := NewSmartStreamHandler(editor, 1, 1)
 		ctx := context.Background()
@@ -292,7 +292,7 @@ func TestSmartStreamHandler_EdgeCases(t *testing.T) {
 		mock := &mockMessageSender{}
 		roomID := id.RoomID("!test:example.com")
 		cfg := config.StreamEditConfig{Enabled: true}
-		editor := NewStreamEditor(mock, roomID, "", cfg)
+		editor := NewStreamEditor(mock, roomID, "", cfg, "")
 
 		handler := NewSmartStreamHandler(editor, 1, 1)
 

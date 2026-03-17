@@ -162,7 +162,9 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 
 		if s.globalConfig.StreamEnabled && s.globalConfig.StreamEdit.Enabled {
 			slog.Debug("使用流式响应模式", "char_threshold", s.globalConfig.StreamEdit.CharThreshold)
-			editor := NewStreamEditor(s.matrixService, roomID, "", s.globalConfig.StreamEdit)
+			// Extract EventID for reply-to functionality
+			eventID := matrix.GetEventID(ctx)
+			editor := NewStreamEditor(s.matrixService, roomID, "", s.globalConfig.StreamEdit, eventID)
 			handler := NewSmartStreamHandler(editor, s.globalConfig.StreamEdit.CharThreshold, s.globalConfig.StreamEdit.TimeThresholdMs)
 
 			streamErr := client.CreateStreamingChatCompletion(ctx, req, handler)

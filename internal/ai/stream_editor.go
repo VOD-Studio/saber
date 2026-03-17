@@ -31,6 +31,7 @@ type MessageSender interface {
 type StreamEditor struct {
 	matrixService MessageSender
 	roomID        id.RoomID
+	replyTo       id.EventID
 	initialMsg    string
 	messageID     id.EventID
 	mu            sync.Mutex
@@ -48,13 +49,15 @@ type StreamEditor struct {
 //   - roomID: 消息所在的房间 ID
 //   - initialMsg: 初始消息内容
 //   - config: 流编辑配置
+//   - replyTo: 要回复的事件 ID（可选）
 //
 // 返回值:
 //   - *StreamEditor: 创建的流编辑器实例
-func NewStreamEditor(matrixService MessageSender, roomID id.RoomID, initialMsg string, config config.StreamEditConfig) *StreamEditor {
+func NewStreamEditor(matrixService MessageSender, roomID id.RoomID, initialMsg string, config config.StreamEditConfig, replyTo id.EventID) *StreamEditor {
 	return &StreamEditor{
 		matrixService: matrixService,
 		roomID:        roomID,
+		replyTo:       replyTo,
 		initialMsg:    initialMsg,
 		config:        config,
 		lastEditTime:  time.Time{},
@@ -88,7 +91,17 @@ func (se *StreamEditor) Start(ctx context.Context) error {
 	}
 
 	slog.Debug("发送流式初始消息", "room", se.roomID, "content", initialContent)
-	eventID, err := se.matrixService.SendTextWithRelatesTo(ctx, se.roomID, initialContent, nil)
+
+	var relatesTo *event.RelatesTo
+	if se.replyTo != "" {
+		relatesTo = &event.RelatesTo{
+			InReplyTo: &event.InReplyTo{
+				EventID: se.replyTo,
+			},
+		}
+	}
+
+	eventID, err := se.matrixService.SendTextWithRelatesTo(ctx, se.roomID, initialContent, relatesTo)
 	if err != nil {
 		slog.Error("发送初始消息失败", "room", se.roomID, "error", err)
 		return fmt.Errorf("failed to send initial message: %w", err)

@@ -76,7 +76,7 @@ func TestNewStreamEditor(t *testing.T) {
 	roomID := id.RoomID("!test:example.com")
 	cfg := config.DefaultStreamEditConfig()
 
-	editor := NewStreamEditor(mock, roomID, "initial", cfg)
+	editor := NewStreamEditor(mock, roomID, "initial", cfg, "")
 
 	if editor == nil {
 		t.Fatal("NewStreamEditor returned nil")
@@ -152,7 +152,7 @@ func TestStreamEditor_Start(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &mockMessageSender{sendTextWithRelatesToErr: tt.mockErr}
-			editor := NewStreamEditor(mock, roomID, tt.initialMsg, tt.config)
+			editor := NewStreamEditor(mock, roomID, tt.initialMsg, tt.config, "")
 
 			ctx := context.Background()
 			err := editor.Start(ctx)
@@ -288,7 +288,7 @@ func TestStreamEditor_Update(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &mockMessageSender{}
-			editor := NewStreamEditor(mock, roomID, "", tt.config)
+			editor := NewStreamEditor(mock, roomID, "", tt.config, "")
 
 			if tt.setupEditor != nil {
 				tt.setupEditor(editor)
@@ -373,7 +373,7 @@ func TestStreamEditor_SendFinal(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &mockMessageSender{}
-			editor := NewStreamEditor(mock, roomID, "", tt.config)
+			editor := NewStreamEditor(mock, roomID, "", tt.config, "")
 
 			if tt.setupEditor != nil {
 				tt.setupEditor(editor)
@@ -403,7 +403,7 @@ func TestStreamEditor_SendFinal_Idempotency(t *testing.T) {
 	roomID := id.RoomID("!test:example.com")
 	cfg := config.StreamEditConfig{Enabled: true}
 
-	editor := NewStreamEditor(mock, roomID, "", cfg)
+	editor := NewStreamEditor(mock, roomID, "", cfg, "")
 	ctx := context.Background()
 
 	for i := range 5 {
@@ -425,7 +425,7 @@ func TestStreamEditor_Stop(t *testing.T) {
 	roomID := id.RoomID("!test:example.com")
 	cfg := config.StreamEditConfig{Enabled: true}
 
-	editor := NewStreamEditor(mock, roomID, "", cfg)
+	editor := NewStreamEditor(mock, roomID, "", cfg, "")
 
 	if editor.IsStopped() {
 		t.Error("editor should not be stopped initially")
@@ -448,7 +448,7 @@ func TestStreamEditor_MaxEdits(t *testing.T) {
 		EditIntervalMs: 0,
 	}
 
-	editor := NewStreamEditor(mock, roomID, "", cfg)
+	editor := NewStreamEditor(mock, roomID, "", cfg, "")
 	ctx := context.Background()
 
 	_ = editor.Start(ctx)
@@ -474,7 +474,7 @@ func TestStreamEditor_EditInterval(t *testing.T) {
 		EditIntervalMs: 100,
 	}
 
-	editor := NewStreamEditor(mock, roomID, "", cfg)
+	editor := NewStreamEditor(mock, roomID, "", cfg, "")
 	ctx := context.Background()
 
 	_ = editor.Start(ctx)
@@ -501,7 +501,7 @@ func TestStreamEditor_Concurrency(t *testing.T) {
 		EditIntervalMs: 0,
 	}
 
-	editor := NewStreamEditor(mock, roomID, "", cfg)
+	editor := NewStreamEditor(mock, roomID, "", cfg, "")
 	ctx := context.Background()
 
 	_ = editor.Start(ctx)
