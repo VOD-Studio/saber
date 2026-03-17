@@ -199,11 +199,20 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 				"completion_tokens", resp.Usage.CompletionTokens,
 				"total_tokens", resp.Usage.TotalTokens)
 
-			slog.Info("AI响应", "model", model, "content", resp.Content)
+			slog.Info("AI 响应", "model", model, "content", resp.Content)
 
-			if sendErr := s.matrixService.SendText(ctx, roomID, resp.Content); sendErr != nil {
-				slog.Error("发送AI响应失败", "error", sendErr)
-				return nil, fmt.Errorf("发送响应失败: %w", sendErr)
+			// 如果上下文中有 EventID，使用回复模式（群聊场景）
+			eventID := matrix.GetEventID(ctx)
+			var sendErr error
+			if eventID != "" {
+				_, sendErr = s.matrixService.SendReply(ctx, roomID, resp.Content, eventID)
+			} else {
+				sendErr = s.matrixService.SendText(ctx, roomID, resp.Content)
+			}
+
+			if sendErr != nil {
+				slog.Error("发送 AI 响应失败", "error", sendErr)
+				return nil, fmt.Errorf("发送响应失败：%w", sendErr)
 			}
 
 			if s.contextManager != nil {

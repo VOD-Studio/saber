@@ -391,6 +391,19 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 func (s *CommandService) reportError(ctx context.Context, roomID id.RoomID, cmd string, err error) error {
 	msg := fmt.Sprintf("Error executing command '%s': %v", cmd, err)
 
+	// 如果上下文中有 EventID，则作为回复发送
+	if eventID := GetEventID(ctx); eventID != "" {
+		_, sendErr := s.SendReply(ctx, roomID, msg, eventID)
+		if sendErr != nil {
+			slog.Error("Failed to send error message to room",
+				"room", roomID.String(),
+				"error", sendErr)
+			return fmt.Errorf("command error: %v, send error: %w", err, sendErr)
+		}
+		return err
+	}
+
+	// 否则，作为普通消息发送
 	_, sendErr := s.client.SendMessageEvent(
 		ctx,
 		roomID,
