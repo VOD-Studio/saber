@@ -305,13 +305,26 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 			slog.Debug("检测到回复消息", "reply_to", replyToEventID.String(), "replyAI", s.replyAI != nil)
 			if s.isReplyToBot(ctx, roomID, replyToEventID) {
 				cleanedBody := event.TrimReplyFallbackText(content.Body)
+
+				replyContext := ""
+				if evt, err := s.client.GetEvent(ctx, roomID, replyToEventID); err == nil {
+					if msgContent, ok := evt.Content.Parsed.(*event.MessageEventContent); ok {
+						replyContext = msgContent.Body
+					}
+				}
+
 				slog.Info("回复消息触发 AI 回复",
 					"sender", sender.String(),
 					"room", roomID.String(),
 					"reply_to", replyToEventID.String(),
+					"reply_context", replyContext,
 					"message", cleanedBody)
 
 				args := []string{cleanedBody}
+				if replyContext != "" {
+					args = []string{fmt.Sprintf("[引用消息]\n%s\n\n[回复]\n%s", replyContext, cleanedBody)}
+				}
+
 				if err := s.replyAI.Handle(ctx, sender, roomID, args); err != nil {
 					slog.Error("回复消息处理失败", "error", err)
 					return s.reportError(ctx, roomID, "ai", err)
