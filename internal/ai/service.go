@@ -127,36 +127,18 @@ func (s *Service) executeToolCallingLoop(
 				continue
 			}
 
-			// Extract server name and tool name from toolCall.Function.Name
-			// Format: serverName.toolName
-			var serverName, actualToolName string
 			toolName := toolCall.Function.Name
-			if idx := strings.Index(toolName, "."); idx != -1 {
-				serverName = toolName[:idx]
-				actualToolName = toolName[idx+1:]
-			} else {
-				// If no dot, assume single server or default server
-				serverName = ""
-				actualToolName = toolName
-				// Try to find which server has this tool
-				for _, serverInfo := range s.mcpManager.ListServers() {
-					if serverInfo.Enabled {
-						// For now, use the first enabled server
-						serverName = serverInfo.Name
-						break
-					}
-				}
-				if serverName == "" {
-					currentMessages = append(currentMessages, openai.ChatCompletionMessage{
-						Role:       "tool",
-						ToolCallID: toolCall.ID,
-						Content:    fmt.Sprintf("Error: No server found for tool %s", toolName),
-					})
-					continue
-				}
+			serverName := s.mcpManager.GetServerForTool(toolName)
+			if serverName == "" {
+				currentMessages = append(currentMessages, openai.ChatCompletionMessage{
+					Role:       "tool",
+					ToolCallID: toolCall.ID,
+					Content:    fmt.Sprintf("Error: No server found for tool %s", toolName),
+				})
+				continue
 			}
 
-			result, err := s.mcpManager.CallTool(ctx, serverName, actualToolName, args)
+			result, err := s.mcpManager.CallTool(ctx, serverName, toolName, args)
 			if err != nil {
 				// Add error as tool result
 				currentMessages = append(currentMessages, openai.ChatCompletionMessage{

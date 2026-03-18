@@ -9,6 +9,38 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// BuiltinServers 定义所有可用的内置 MCP 服务器名称。
+// 这些服务器不需要配置即可自动启用。
+var BuiltinServers = []string{
+	"web_fetch",
+}
+
+// BuiltinServerInfo 包含内置服务器的元信息。
+type BuiltinServerInfo struct {
+	Name        string
+	Description string
+	Tools       []ToolInfo
+}
+
+// ToolInfo 包含工具的元信息。
+type ToolInfo struct {
+	Name        string
+	Description string
+}
+
+// BuiltinServersInfo 返回所有内置服务器的详细信息。
+func BuiltinServersInfo() []BuiltinServerInfo {
+	return []BuiltinServerInfo{
+		{
+			Name:        "web_fetch",
+			Description: "网页获取与内容提取",
+			Tools: []ToolInfo{
+				{Name: "fetch_url", Description: "获取网页内容并转换为文本"},
+			},
+		},
+	}
+}
+
 // CreateBuiltinServer 创建内置 MCP 服务器并使用内存传输。
 func CreateBuiltinServer(ctx context.Context, name string) (*mcp.Client, *mcp.ClientSession, error) {
 	var server *mcp.Server

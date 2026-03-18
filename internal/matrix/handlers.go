@@ -905,7 +905,7 @@ func (c *MCPListCommand) Handle(ctx context.Context, userID id.UserID, roomID id
 
 // RegisterMCPCommands 注册 MCP 相关命令。
 func RegisterMCPCommands(service *CommandService, mcpMgr *mcp.Manager) {
-	if mcpMgr != nil && mcpMgr.IsEnabled() {
+	if mcpMgr != nil {
 		service.RegisterCommandWithDesc("mcp-list", "列出所有 MCP 服务器和工具", NewMCPListCommand(service, mcpMgr))
 	}
 }

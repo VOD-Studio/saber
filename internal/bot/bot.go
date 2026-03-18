@@ -122,6 +122,7 @@ func Run(version, gitMsg string) {
 
 	// 初始化AI服务（如果启用）
 	var aiService *ai.Service
+	var mcpManager *mcp.Manager
 	if cfg.AI.Enabled {
 		slog.Info("正在初始化AI服务...")
 
@@ -131,17 +132,20 @@ func Run(version, gitMsg string) {
 			os.Exit(1)
 		}
 
-		// 初始化MCP管理器（如果配置了MCP）
-		var mcpManager *mcp.Manager
-		if cfg.MCP.Enabled {
-			slog.Info("正在初始化MCP管理器...")
-			mcpManager = mcp.NewManager(&cfg.MCP)
-			if err := mcpManager.Init(context.Background()); err != nil {
-				slog.Error("MCP管理器初始化失败", "error", err)
-				os.Exit(1)
-			}
-			slog.Info("MCP管理器初始化成功")
+		// 初始化MCP管理器（内置工具自动启用，无需配置）
+		slog.Info("正在初始化MCP管理器...")
+		mcpManager = mcp.NewManagerWithBuiltin(&cfg.MCP)
+		if err := mcpManager.InitBuiltinServers(context.Background()); err != nil {
+			slog.Warn("MCP内置服务器初始化失败", "error", err)
 		}
+
+		// 如果配置了额外的MCP服务器，也初始化它们
+		if cfg.MCP.Enabled && len(cfg.MCP.Servers) > 0 {
+			if err := mcpManager.Init(context.Background()); err != nil {
+				slog.Warn("MCP配置服务器初始化失败", "error", err)
+			}
+		}
+		slog.Info("MCP管理器初始化成功")
 
 		matrix.RegisterMCPCommands(commandService, mcpManager)
 

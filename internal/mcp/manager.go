@@ -41,17 +41,59 @@ type Manager struct {
 	enabled        bool
 	toolCache      []*mcp.Tool
 	toolCacheValid bool
+	toolToServer   map[string]string // 工具名到服务器名的映射
 }
 
 // NewManager 创建新的 MCP 管理器。
 func NewManager(cfg *config.MCPConfig) *Manager {
 	return &Manager{
-		config:      cfg,
-		clients:     make(map[string]*mcp.Client),
-		sessions:    make(map[string]*mcp.ClientSession),
-		rateLimiter: NewRateLimiter(60), // 默认每分钟 60 次
-		enabled:     cfg != nil && cfg.Enabled,
+		config:       cfg,
+		clients:      make(map[string]*mcp.Client),
+		sessions:     make(map[string]*mcp.ClientSession),
+		rateLimiter:  NewRateLimiter(60), // 默认每分钟 60 次
+		enabled:      cfg != nil && cfg.Enabled,
+		toolToServer: make(map[string]string),
 	}
+}
+
+// NewManagerWithBuiltin 创建管理器并自动启用内置服务器。
+// 即使 cfg 为 nil 或 MCP.Enabled 为 false，也会初始化内置工具。
+func NewManagerWithBuiltin(cfg *config.MCPConfig) *Manager {
+	mgr := &Manager{
+		config:       cfg,
+		clients:      make(map[string]*mcp.Client),
+		sessions:     make(map[string]*mcp.ClientSession),
+		rateLimiter:  NewRateLimiter(60),
+		enabled:      true,
+		toolToServer: make(map[string]string),
+	}
+	return mgr
+}
+
+// InitBuiltinServers 初始化所有内置 MCP 服务器。
+// 此方法不依赖配置文件，直接启用所有内置工具。
+func (m *Manager) InitBuiltinServers(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, name := range servers.BuiltinServers {
+		if _, exists := m.sessions[name]; exists {
+			continue
+		}
+
+		client, session, err := servers.CreateBuiltinServer(ctx, name)
+		if err != nil {
+			slog.Error("创建内置 MCP 服务器失败", "server", name, "error", err)
+			continue
+		}
+
+		m.clients[name] = client
+		m.sessions[name] = session
+		slog.Info("内置 MCP 服务器已连接", "server", name)
+	}
+
+	m.doRefreshToolCache()
+	return nil
 }
 
 // Init 初始化所有配置的 MCP 服务器。
@@ -110,7 +152,7 @@ func (m *Manager) Init(ctx context.Context) error {
 	}
 
 	// 初始化工具缓存
-	m.refreshToolCache()
+	m.doRefreshToolCache()
 
 	return nil
 }
@@ -275,6 +317,22 @@ func (m *Manager) ListTools() []*mcp.Tool {
 	return result
 }
 
+// GetServerForTool 返回提供指定工具的服务器名称。
+//
+// 如果工具不存在，返回空字符串。
+func (m *Manager) GetServerForTool(toolName string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if !m.toolCacheValid {
+		m.mu.RUnlock()
+		m.refreshToolCache()
+		m.mu.RLock()
+	}
+
+	return m.toolToServer[toolName]
+}
+
 // refreshToolCache 刷新工具缓存。
 //
 // 它遍历所有已连接的 MCP 服务器，收集所有可用工具。
@@ -282,8 +340,14 @@ func (m *Manager) ListTools() []*mcp.Tool {
 func (m *Manager) refreshToolCache() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.doRefreshToolCache()
+}
 
+// doRefreshToolCache 执行工具缓存刷新，调用者必须持有锁。
+func (m *Manager) doRefreshToolCache() {
 	var allTools []*mcp.Tool
+	toolMap := make(map[string]string)
+
 	for name, session := range m.sessions {
 		resp, err := session.ListTools(context.Background(), nil)
 		if err != nil {
@@ -291,11 +355,15 @@ func (m *Manager) refreshToolCache() {
 			continue
 		}
 		allTools = append(allTools, resp.Tools...)
+		for _, tool := range resp.Tools {
+			toolMap[tool.Name] = name
+		}
 	}
 
 	m.toolCache = allTools
+	m.toolToServer = toolMap
 	m.toolCacheValid = true
-	slog.Debug("工具缓存已刷新", "tool_count", len(allTools))
+	slog.Debug("工具缓存已刷新", "tool_count", len(allTools), "mapping_count", len(toolMap))
 }
 
 // InvalidateToolCache 使工具缓存失效。
