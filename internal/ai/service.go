@@ -39,16 +39,6 @@ func GetRoomFromContext(ctx context.Context) (id.RoomID, bool) {
 	return roomID, ok
 }
 
-func (s *Service) handleToolCall(ctx context.Context, toolCall openai.ToolCall) error {
-	userID, ok := GetUserFromContext(ctx)
-	if !ok {
-		return fmt.Errorf("user context missing - cannot execute tool")
-	}
-
-	slog.Debug("工具调用已验证用户上下文", "user_id", userID)
-	return nil
-}
-
 const maxToolIterations = 5
 
 // executeToolCallingLoop 执行工具调用循环，处理 AI 响应中的工具调用。

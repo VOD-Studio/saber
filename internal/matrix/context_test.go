@@ -7,6 +7,14 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
+// testContextKey 是测试专用的上下文键类型，避免与内置类型冲突。
+type testContextKey string
+
+const (
+	testKey1 testContextKey = "key1"
+	testKey2 testContextKey = "key2"
+)
+
 func TestContextEventID(t *testing.T) {
 	t.Run("with valid EventID", func(t *testing.T) {
 		ctx := context.Background()
@@ -43,19 +51,19 @@ func TestContextEventID(t *testing.T) {
 		ctx := context.Background()
 		eventID := id.EventID("$test:example.org")
 
-		ctx1 := context.WithValue(ctx, "key1", "value1")
+		ctx1 := context.WithValue(ctx, testKey1, "value1")
 		ctx2 := WithEventID(ctx1, eventID)
-		ctx3 := context.WithValue(ctx2, "key2", "value2")
+		ctx3 := context.WithValue(ctx2, testKey2, "value2")
 
 		got := GetEventID(ctx3)
 		if got != eventID {
 			t.Errorf("GetEventID() = %v, want %v", got, eventID)
 		}
 
-		if v := ctx3.Value("key1"); v != "value1" {
+		if v := ctx3.Value(testKey1); v != "value1" {
 			t.Errorf("key1 = %v, want value1", v)
 		}
-		if v := ctx3.Value("key2"); v != "value2" {
+		if v := ctx3.Value(testKey2); v != "value2" {
 			t.Errorf("key2 = %v, want value2", v)
 		}
 	})

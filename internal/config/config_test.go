@@ -337,6 +337,7 @@ func TestLoadOrDefault(t *testing.T) {
 		}
 		if cfg == nil {
 			t.Fatal("LoadOrDefault() returned nil")
+			return
 		}
 		if cfg.Matrix.Homeserver != "https://matrix.org" {
 			t.Errorf("Default Homeserver = %s, want https://matrix.org", cfg.Matrix.Homeserver)

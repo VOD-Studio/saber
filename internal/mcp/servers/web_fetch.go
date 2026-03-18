@@ -80,7 +80,11 @@ func handleFetchURL(ctx context.Context, session *mcp.ServerSession, params *mcp
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			slog.Warn("Failed to close response body", "error", closeErr)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP error: %d %s", resp.StatusCode, resp.Status)

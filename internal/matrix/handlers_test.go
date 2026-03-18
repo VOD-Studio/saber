@@ -75,39 +75,6 @@ func (m *mockCommandHandler) Handle(ctx context.Context, userID id.UserID, roomI
 	return nil
 }
 
-// panicInfo 存储 panic 恢复信息。
-type panicInfo struct {
-	recovered bool
-	value     any
-}
-
-// trackingWriter 是一个跟踪写入内容的 io.Writer。
-type trackingWriter struct {
-	mu     sync.Mutex
-	buffer bytes.Buffer
-}
-
-// Write 实现 io.Writer 接口。
-func (t *trackingWriter) Write(p []byte) (n int, err error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.buffer.Write(p)
-}
-
-// String 返回捕获的内容。
-func (t *trackingWriter) String() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.buffer.String()
-}
-
-// Reset 清空缓冲区。
-func (t *trackingWriter) Reset() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.buffer.Reset()
-}
-
 // TestOnMember 测试 OnMember 方法的各种场景。
 //
 // 该测试覆盖以下情况：

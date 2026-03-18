@@ -27,7 +27,8 @@ func TestNewService_WithMCPManager(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if service == nil {
-		t.Error("service is nil")
+		t.Fatal("service is nil")
+		return
 	}
 	if service.mcpManager != mcpManager {
 		t.Error("mcpManager not stored correctly")

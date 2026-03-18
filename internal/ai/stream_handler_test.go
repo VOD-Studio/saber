@@ -25,6 +25,7 @@ func TestNewSmartStreamHandler(t *testing.T) {
 
 	if handler == nil {
 		t.Fatal("NewSmartStreamHandler returned nil")
+		return
 	}
 	if handler.editor != editor {
 		t.Error("editor not set correctly")

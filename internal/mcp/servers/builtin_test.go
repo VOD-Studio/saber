@@ -28,6 +28,8 @@ func TestCreateBuiltinServer(t *testing.T) {
 
 	// Clean up
 	if session != nil {
-		session.Close()
+		if err := session.Close(); err != nil {
+			t.Logf("Warning: failed to close session: %v", err)
+		}
 	}
 }

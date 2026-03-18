@@ -289,6 +289,7 @@ func TestOlmCryptoServiceCreation(t *testing.T) {
 
 		if svc == nil {
 			t.Fatal("期望返回非 nil 实例")
+			return
 		}
 		if svc.sessionPath != "/tmp/test.db" {
 			t.Errorf("期望 sessionPath 为 /tmp/test.db，实际: %s", svc.sessionPath)

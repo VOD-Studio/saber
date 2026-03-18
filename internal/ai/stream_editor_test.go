@@ -80,6 +80,7 @@ func TestNewStreamEditor(t *testing.T) {
 
 	if editor == nil {
 		t.Fatal("NewStreamEditor returned nil")
+		return
 	}
 	if editor.matrixService != mock {
 		t.Error("matrixService not set correctly")
