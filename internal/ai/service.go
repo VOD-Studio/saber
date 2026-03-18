@@ -100,6 +100,14 @@ func (s *Service) executeToolCallingLoop(
 			return resp.Content, nil
 		}
 
+		// Add assistant message with tool calls to history FIRST
+		// This is required for the AI to see its previous tool calls
+		currentMessages = append(currentMessages, openai.ChatCompletionMessage{
+			Role:      openai.ChatMessageRoleAssistant,
+			Content:   resp.Content,
+			ToolCalls: resp.ToolCalls,
+		})
+
 		// Process tool calls
 		for _, toolCall := range resp.ToolCalls {
 			// Log tool call
@@ -249,6 +257,9 @@ func (s *Service) IsEnabled() bool {
 }
 
 func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID id.RoomID, modelName string, args []string) error {
+	// 添加用户上下文，供 MCP 工具使用
+	ctx = mcp.WithUserContext(ctx, userID, roomID)
+
 	if !s.IsEnabled() {
 		return fmt.Errorf("AI功能未启用")
 	}
