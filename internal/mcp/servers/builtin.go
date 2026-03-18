@@ -7,6 +7,8 @@ import (
 	"log/slog"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"rua.plus/saber/internal/config"
 )
 
 // BuiltinServers 定义所有可用的内置 MCP 服务器名称。
@@ -50,14 +52,14 @@ func BuiltinServersInfo() []BuiltinServerInfo {
 }
 
 // CreateBuiltinServer 创建内置 MCP 服务器并使用内存传输。
-func CreateBuiltinServer(ctx context.Context, name string) (*mcp.Client, *mcp.ClientSession, error) {
+func CreateBuiltinServer(ctx context.Context, name string, cfg *config.BuiltinConfig) (*mcp.Client, *mcp.ClientSession, error) {
 	var server *mcp.Server
 
 	switch name {
 	case "web_fetch":
 		server = NewWebFetchServer()
 	case "web_search":
-		server = NewWebSearchServer()
+		server = NewWebSearchServerWithConfig(cfg.WebSearch)
 	default:
 		return nil, nil, fmt.Errorf("未知的内置服务器: %s", name)
 	}

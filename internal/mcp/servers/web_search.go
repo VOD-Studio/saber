@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"rua.plus/saber/internal/config"
 )
 
 // SearchInput 定义搜索工具的输入参数。
@@ -50,17 +52,42 @@ type searxResponse struct {
 	} `json:"results"`
 }
 
-// SearXNG 公共实例列表，按优先级排序（基于 searx.space 可用率统计）。
-var searxInstances = []string{
+// defaultSearXInstances 默认 SearXNG 实例列表（基于 searx.space 可用率统计）。
+var defaultSearXInstances = []string{
 	"https://seek.fyi",
 	"https://search.femboy.ad",
 	"https://etsi.me",
 }
 
-// NewWebSearchServer 创建 web_search MCP 服务器。
-//
-// 该服务器提供互联网搜索功能，使用 SearXNG 元搜索引擎聚合多个搜索源。
+// webSearchConfig 存储运行时配置。
+var webSearchConfig = struct {
+	instances      []string
+	maxResults     int
+	timeoutSeconds int
+}{
+	instances:      defaultSearXInstances,
+	maxResults:     5,
+	timeoutSeconds: 20,
+}
+
+// NewWebSearchServer 创建 web_search MCP 服务器（使用默认配置）。
 func NewWebSearchServer() *mcp.Server {
+	return NewWebSearchServerWithConfig(config.WebSearchConfig{})
+}
+
+// NewWebSearchServerWithConfig 使用指定配置创建 web_search MCP 服务器。
+func NewWebSearchServerWithConfig(cfg config.WebSearchConfig) *mcp.Server {
+	// 应用配置
+	if len(cfg.Instances) > 0 {
+		webSearchConfig.instances = cfg.Instances
+	}
+	if cfg.MaxResults > 0 {
+		webSearchConfig.maxResults = cfg.MaxResults
+	}
+	if cfg.TimeoutSeconds > 0 {
+		webSearchConfig.timeoutSeconds = cfg.TimeoutSeconds
+	}
+
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "web_search",
 		Version: "1.0.0",
@@ -80,20 +107,17 @@ func handleWebSearch(ctx context.Context, session *mcp.ServerSession,
 
 	input := params.Arguments
 
-	// 参数验证
 	if input.Query == "" {
 		return nil, fmt.Errorf("query 参数不能为空")
 	}
 
-	// 设置默认值
 	if input.Num <= 0 {
-		input.Num = 5
+		input.Num = webSearchConfig.maxResults
 	}
 	if input.Num > 10 {
 		input.Num = 10
 	}
 
-	// 执行搜索
 	results, source, err := searchWithSearXNG(ctx, input.Query, input.Num, input.Language)
 	if err != nil {
 		return nil, fmt.Errorf("搜索失败: %w", err)
@@ -113,13 +137,12 @@ func handleWebSearch(ctx context.Context, session *mcp.ServerSession,
 // searchWithSearXNG 使用 SearXNG 实例进行搜索，支持多实例降级。
 func searchWithSearXNG(ctx context.Context, query string, maxResults int, language string) ([]SearchItem, string, error) {
 	client := &http.Client{
-		Timeout: 20 * time.Second,
+		Timeout: time.Duration(webSearchConfig.timeoutSeconds) * time.Second,
 	}
 
 	var lastErr error
 
-	// 尝试多个实例，直到成功
-	for _, instance := range searxInstances {
+	for _, instance := range webSearchConfig.instances {
 		results, err := searchSearXNGInstance(ctx, client, instance, query, maxResults, language)
 		if err != nil {
 			lastErr = err
@@ -136,7 +159,6 @@ func searchWithSearXNG(ctx context.Context, query string, maxResults int, langua
 
 // searchSearXNGInstance 向单个 SearXNG 实例发送搜索请求。
 func searchSearXNGInstance(ctx context.Context, client *http.Client, instance, query string, maxResults int, language string) ([]SearchItem, error) {
-	// 构造 URL
 	params := url.Values{}
 	params.Set("q", query)
 	params.Set("format", "json")
@@ -146,7 +168,6 @@ func searchSearXNGInstance(ctx context.Context, client *http.Client, instance, q
 
 	searchURL := fmt.Sprintf("%s/search?%s", instance, params.Encode())
 
-	// 创建请求
 	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %w", err)
@@ -155,7 +176,6 @@ func searchSearXNGInstance(ctx context.Context, client *http.Client, instance, q
 	req.Header.Set("User-Agent", "Saber-MCP-Bot/1.0")
 	req.Header.Set("Accept", "application/json")
 
-	// 发送请求
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("请求失败: %w", err)
@@ -170,13 +190,11 @@ func searchSearXNGInstance(ctx context.Context, client *http.Client, instance, q
 		return nil, fmt.Errorf("HTTP 错误: %d %s", resp.StatusCode, resp.Status)
 	}
 
-	// 解析响应
 	var searxResp searxResponse
 	if err := json.NewDecoder(resp.Body).Decode(&searxResp); err != nil {
 		return nil, fmt.Errorf("解析响应失败: %w", err)
 	}
 
-	// 转换结果
 	return convertSearXResults(searxResp.Results, maxResults), nil
 }
 
@@ -196,19 +214,16 @@ func convertSearXResults(results []struct {
 			break
 		}
 
-		// 清理标题
 		title := strings.TrimSpace(r.Title)
 		if title == "" {
 			title = "无标题"
 		}
 
-		// 清理 URL
 		resultURL := strings.TrimSpace(r.URL)
 		if resultURL == "" {
 			continue
 		}
 
-		// 清理摘要，限制长度
 		snippet := strings.TrimSpace(r.Content)
 		if len(snippet) > 300 {
 			snippet = snippet[:297] + "..."

@@ -84,6 +84,19 @@ type RetryConfig struct {
 type MCPConfig struct {
 	Enabled bool                    `yaml:"enabled"` // 是否启用 MCP 功能
 	Servers map[string]ServerConfig `yaml:"servers"` // MCP 服务器配置
+	Builtin BuiltinConfig           `yaml:"builtin"` // 内置工具配置
+}
+
+// BuiltinConfig 存储内置 MCP 工具配置
+type BuiltinConfig struct {
+	WebSearch WebSearchConfig `yaml:"web_search"` // web_search 工具配置
+}
+
+// WebSearchConfig 存储 web_search 工具配置
+type WebSearchConfig struct {
+	Instances      []string `yaml:"instances"`       // SearXNG 实例列表
+	MaxResults     int      `yaml:"max_results"`     // 最大返回结果数
+	TimeoutSeconds int      `yaml:"timeout_seconds"` // 请求超时时间（秒）
 }
 
 // ServerConfig 存储单个 MCP 服务器配置
@@ -315,8 +328,17 @@ func DefaultConfig() *Config {
 			E2EESessionPath: "./saber.session",
 			PickleKeyPath:   "",
 		},
-		AI:  DefaultAIConfig(),
-		MCP: MCPConfig{Enabled: true},
+		AI: DefaultAIConfig(),
+		MCP: MCPConfig{
+			Enabled: true,
+			Builtin: BuiltinConfig{
+				WebSearch: WebSearchConfig{
+					Instances:      nil,
+					MaxResults:     5,
+					TimeoutSeconds: 20,
+				},
+			},
+		},
 	}
 }
 
@@ -410,6 +432,18 @@ ai:
 mcp:
   # 启用 MCP 功能
   enabled: true
+  # 内置工具配置
+  builtin:
+    # web_search 搜索工具配置
+    web_search:
+      # SearXNG 实例列表（可选，留空使用默认实例）
+      # instances:
+      #   - "https://seek.fyi"
+      #   - "https://search.femboy.ad"
+      # 最大返回结果数（默认 5，最大 10）
+      max_results: 5
+      # 请求超时时间（秒，默认 20）
+      timeout_seconds: 20
 `
 }
 

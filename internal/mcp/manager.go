@@ -76,12 +76,17 @@ func (m *Manager) InitBuiltinServers(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	var builtinCfg config.BuiltinConfig
+	if m.config != nil {
+		builtinCfg = m.config.Builtin
+	}
+
 	for _, name := range servers.BuiltinServers {
 		if _, exists := m.sessions[name]; exists {
 			continue
 		}
 
-		client, session, err := servers.CreateBuiltinServer(ctx, name)
+		client, session, err := servers.CreateBuiltinServer(ctx, name, &builtinCfg)
 		if err != nil {
 			slog.Error("创建内置 MCP 服务器失败", "server", name, "error", err)
 			continue
@@ -122,7 +127,7 @@ func (m *Manager) Init(ctx context.Context) error {
 
 		switch serverCfg.Type {
 		case ServerTypeBuiltin:
-			client, session, err = servers.CreateBuiltinServer(ctx, name)
+			client, session, err = servers.CreateBuiltinServer(ctx, name, &m.config.Builtin)
 		case ServerTypeStdio:
 			client, session, err = servers.CreateStdioServer(ctx, name, &serverCfg)
 		case ServerTypeHTTP:

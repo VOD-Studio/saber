@@ -3,13 +3,15 @@ package servers
 import (
 	"context"
 	"testing"
+
+	"rua.plus/saber/internal/config"
 )
 
 func TestCreateBuiltinServer(t *testing.T) {
 	ctx := context.Background()
 
 	// Test unknown server
-	client, session, err := CreateBuiltinServer(ctx, "unknown")
+	client, session, err := CreateBuiltinServer(ctx, "unknown", nil)
 	if err == nil {
 		t.Error("Expected error for unknown server")
 	}
@@ -18,7 +20,7 @@ func TestCreateBuiltinServer(t *testing.T) {
 	}
 
 	// Test web_fetch server (now implemented)
-	client, session, err = CreateBuiltinServer(ctx, "web_fetch")
+	client, session, err = CreateBuiltinServer(ctx, "web_fetch", &config.BuiltinConfig{})
 	if err != nil {
 		t.Errorf("Expected success for web_fetch server, got error: %v", err)
 	}
