@@ -16,34 +16,34 @@ else
     MKDIR_P := mkdir -p $(BUILD_DIR)
 endif
 
-build: ## Build the binary
+build: ## 构建二进制文件
 	@$(MKDIR_P)
 	go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)$(shell go env GOEXE) .
 
-build-prod: ## Build optimized production binary (static, stripped)
+build-prod: ## 构建优化的生产版本（静态链接，去除调试信息）
 	@$(MKDIR_P)
 	CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -gcflags="-l=4" -o $(BUILD_DIR)/$(APP_NAME)$(shell go env GOEXE) .
 
-clean: ## Remove build artifacts
+clean: ## 清理构建产物
 ifeq ($(OS),Windows_NT)
 	@powershell -Command "if (Test-Path $(BUILD_DIR)) { Remove-Item -Recurse -Force $(BUILD_DIR) }"
 else
 	@rm -rf $(BUILD_DIR)
 endif
 
-test: ## Run tests
+test: ## 运行测试
 	go test -v -tags goolm ./...
 
-fmt: ## Format code with goimports
+fmt: ## 使用 goimports 格式化代码
 	goimports -w .
 
-lint: ## Run golangci-lint
+lint: ## 运行 golangci-lint 检查
 	golangci-lint run --build-tags goolm ./...
 
-run: ## Run the application
+run: ## 运行应用程序
 	go run -tags goolm $(MAIN_FILE)
 
-help: ## Show this help
+help: ## 显示帮助信息
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 .DEFAULT_GOAL := build
