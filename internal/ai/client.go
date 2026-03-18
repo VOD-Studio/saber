@@ -30,7 +30,7 @@ type ChatCompletionRequest struct {
 	Temperature float64                        `json:"temperature"`
 	Model       string                         `json:"model"`
 	Tools       []openai.Tool                  `json:"tools,omitempty"`
-	ToolChoice  string                         `json:"tool_choice,omitempty"`
+	ToolChoice  *string                        `json:"tool_choice,omitempty"`
 }
 
 // ChatCompletionResponse 表示聊天完成响应。
