@@ -6,12 +6,29 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/sashabaranov/go-openai"
 	"rua.plus/saber/internal/config"
 )
+
+// sharedTransport 是共享的 HTTP Transport，用于连接复用。
+// 所有 AI 客户端共享同一个 Transport，减少 TCP 连接和 TLS 握手开销。
+var sharedTransport = &http.Transport{
+	DialContext: (&net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext,
+	MaxIdleConns:          100,
+	MaxIdleConnsPerHost:   10,
+	IdleConnTimeout:       90 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ResponseHeaderTimeout: 10 * time.Second,
+	ExpectContinueTimeout: 1 * time.Second,
+}
 
 // Client 是 AI 客户端的结构体，封装了 OpenAI 客户端和相关配置。
 type Client struct {
@@ -71,7 +88,8 @@ func NewClientWithModel(cfg *config.ModelConfig) (*Client, error) {
 	}
 
 	httpClient := &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout:   30 * time.Second,
+		Transport: sharedTransport,
 	}
 
 	slog.Debug("创建AI客户端",
@@ -187,7 +205,8 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 		}
 	}()
 
-	var fullContent string
+	var builder strings.Builder
+	builder.Grow(2048)
 	var usage openai.Usage
 	var model string
 	var chunkCount int
@@ -203,7 +222,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 		}
 
 		if len(response.Choices) > 0 {
-			fullContent += response.Choices[0].Delta.Content
+			builder.WriteString(response.Choices[0].Delta.Content)
 			chunkCount++
 		}
 
@@ -214,6 +233,8 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 			model = response.Model
 		}
 	}
+
+	fullContent := builder.String()
 
 	slog.Debug("流式AI响应完成",
 		"model", model,
@@ -275,7 +296,8 @@ func (c *Client) CreateStreamingChatCompletion(
 		}
 	}()
 
-	var fullContent string
+	var builder strings.Builder
+	builder.Grow(2048)
 	var usage openai.Usage
 	var model string
 	var chunkCount int
@@ -283,6 +305,7 @@ func (c *Client) CreateStreamingChatCompletion(
 	for {
 		response, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
+			fullContent := builder.String()
 			slog.Debug("回调式流式AI响应完成",
 				"model", model,
 				"content_length", len(fullContent),
@@ -301,7 +324,7 @@ func (c *Client) CreateStreamingChatCompletion(
 
 		if len(response.Choices) > 0 && response.Choices[0].Delta.Content != "" {
 			chunk := response.Choices[0].Delta.Content
-			fullContent += chunk
+			builder.WriteString(chunk)
 			chunkCount++
 			handler.OnChunk(ctx, chunk)
 		}
