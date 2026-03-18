@@ -1,11 +1,11 @@
-// Package mcp provides validation and error handling utilities for MCP (Model Context Protocol) tools.
+// Package mcp 为 MCP (Model Context Protocol) 工具提供验证和错误处理工具。
 package mcp
 
 import (
 	"fmt"
 )
 
-// ValidationError represents a validation error that should be returned to the user.
+// ValidationError 表示应该返回给用户的验证错误。
 type ValidationError struct {
 	Field   string
 	Message string
@@ -15,7 +15,7 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Field, e.Message)
 }
 
-// SystemError represents an internal system error.
+// SystemError 表示内部系统错误。
 type SystemError struct {
 	Op      string
 	Err     error
@@ -30,13 +30,13 @@ func (e *SystemError) Unwrap() error {
 	return e.Err
 }
 
-// IsValidationError checks if an error is a validation error.
+// IsValidationError 检查一个错误是否为验证错误。
 func IsValidationError(err error) bool {
 	_, ok := err.(*ValidationError)
 	return ok
 }
 
-// WrapSystemError wraps an internal error with context.
+// WrapSystemError 使用上下文包装内部错误。
 func WrapSystemError(err error, op, message string) error {
 	return &SystemError{
 		Op:      op,
@@ -45,9 +45,9 @@ func WrapSystemError(err error, op, message string) error {
 	}
 }
 
-// ValidateToolInput validates tool input against a JSON schema.
+// ValidateToolInput 根据 JSON schema 验证工具输入。
 func ValidateToolInput(params map[string]any, schema map[string]any) error {
-	// Basic validation - check required fields
+	// 基础验证 - 检查必填字段
 	required, ok := schema["required"].([]interface{})
 	if !ok {
 		return nil
@@ -61,7 +61,7 @@ func ValidateToolInput(params map[string]any, schema map[string]any) error {
 		if _, exists := params[field]; !exists {
 			return &ValidationError{
 				Field:   field,
-				Message: "required field is missing",
+				Message: "必填字段缺失",
 			}
 		}
 	}
