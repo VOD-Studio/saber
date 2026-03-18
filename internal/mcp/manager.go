@@ -209,6 +209,10 @@ func (m *Manager) ListServers() []ServerInfo {
 	defer m.mu.RUnlock()
 
 	var infos []ServerInfo
+	if m.config == nil || m.config.Servers == nil {
+		return infos
+	}
+
 	for name, serverCfg := range m.config.Servers {
 		infos = append(infos, ServerInfo{
 			Name:    name,
