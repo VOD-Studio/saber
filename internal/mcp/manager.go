@@ -100,8 +100,13 @@ func (m *Manager) Init(ctx context.Context) error {
 		slog.Info("MCP 服务器已连接", "server", name, "type", serverCfg.Type)
 	}
 
+	if len(m.config.Servers) == 0 {
+		slog.Debug("未配置 MCP 服务器，跳过")
+		return nil
+	}
+
 	if len(m.sessions) == 0 {
-		slog.Warn("没有成功连接的 MCP 服务器")
+		slog.Warn("没有成功连接的 MCP 服务器，请检查服务器配置")
 	}
 
 	// 初始化工具缓存

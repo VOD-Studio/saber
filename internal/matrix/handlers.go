@@ -427,7 +427,13 @@ func (s *CommandService) reportError(ctx context.Context, roomID id.RoomID, cmd 
 }
 
 // SendText 向房间发送文本消息。
+// 如果 context 中包含 EventID，则使用引用回复。
 func (s *CommandService) SendText(ctx context.Context, roomID id.RoomID, body string) error {
+	if eventID := GetEventID(ctx); eventID != "" {
+		_, err := s.SendReply(ctx, roomID, body, eventID)
+		return err
+	}
+
 	_, err := s.client.SendMessageEvent(
 		ctx,
 		roomID,
@@ -447,16 +453,13 @@ func (s *CommandService) SendText(ctx context.Context, roomID id.RoomID, body st
 }
 
 // SendFormattedText 向房间发送格式化消息（支持 HTML）。
-//
-// 参数:
-//   - ctx: 上下文
-//   - roomID: 目标房间 ID
-//   - html: HTML 格式的消息内容
-//   - plain: 纯文本格式的消息内容（用于不支持 HTML 的客户端）
-//
-// 返回值:
-//   - error: 发送过程中发生的错误
+// 如果 context 中包含 EventID，则使用引用回复。
 func (s *CommandService) SendFormattedText(ctx context.Context, roomID id.RoomID, html, plain string) error {
+	if eventID := GetEventID(ctx); eventID != "" {
+		_, err := s.SendFormattedReply(ctx, roomID, html, plain, eventID)
+		return err
+	}
+
 	_, err := s.client.SendMessageEvent(
 		ctx,
 		roomID,
@@ -475,6 +478,54 @@ func (s *CommandService) SendFormattedText(ctx context.Context, roomID id.RoomID
 	}
 
 	return err
+}
+
+func (s *CommandService) SendFormattedReply(ctx context.Context, roomID id.RoomID, html, plain string, replyTo id.EventID) (id.EventID, error) {
+	relatesTo := &event.RelatesTo{
+		InReplyTo: &event.InReplyTo{
+			EventID: replyTo,
+		},
+	}
+
+	content := &event.MessageEventContent{
+		MsgType:       event.MsgText,
+		Body:          plain,
+		Format:        event.FormatHTML,
+		FormattedBody: html,
+		RelatesTo:     relatesTo,
+	}
+
+	senderID := id.UserID("")
+	originalMsg := ""
+	if evt, err := s.client.GetEvent(ctx, roomID, replyTo); err == nil {
+		senderID = evt.Sender
+		if msgContent, ok := evt.Content.Parsed.(*event.MessageEventContent); ok {
+			originalMsg = msgContent.Body
+		}
+	} else {
+		slog.Debug("Failed to get original event for reply fallback",
+			"room", roomID.String(),
+			"event_id", replyTo.String(),
+			"error", err)
+		senderID = id.UserID(replyTo.String())
+	}
+
+	content.Body = CreateReplyFallback(senderID, originalMsg, plain)
+
+	resp, err := s.client.SendMessageEvent(
+		ctx,
+		roomID,
+		event.EventMessage,
+		content,
+	)
+	if err != nil {
+		slog.Error("Failed to send formatted reply",
+			"room", roomID.String(),
+			"error", err)
+		return "", err
+	}
+
+	return resp.EventID, nil
 }
 
 // SendTextWithRelatesTo 向房间发送文本消息，并指定关系。

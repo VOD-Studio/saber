@@ -143,6 +143,8 @@ func Run(version, gitMsg string) {
 			slog.Info("MCP管理器初始化成功")
 		}
 
+		matrix.RegisterMCPCommands(commandService, mcpManager)
+
 		// 创建AI服务实例
 		aiService, err = ai.NewService(&cfg.AI, commandService, mcpManager)
 		if err != nil {

@@ -307,12 +307,12 @@ func DefaultConfig() *Config {
 			DeviceName:      "Saber Bot",
 			Password:        "",
 			AccessToken:     "",
-			EnableE2EE:      false,
-			E2EESessionPath: "",
+			EnableE2EE:      true,
+			E2EESessionPath: "./saber.session",
 			PickleKeyPath:   "",
 		},
 		AI:  DefaultAIConfig(),
-		MCP: MCPConfig{Enabled: false},
+		MCP: MCPConfig{Enabled: true},
 	}
 }
 
@@ -321,65 +321,49 @@ func ExampleConfig() string {
 	return `matrix:
   # Matrix 服务器地址
   homeserver: "https://matrix.org"
-
   # 完整的 Matrix 用户 ID（格式：@username:server.org）
   user_id: "@your-bot:matrix.org"
-
   # 设备标识符（可选，留空则服务器自动生成）
   device_id: "saber-bot-device"
-
   # 设备显示名称（可选）
   device_name: "Saber Bot"
-
   # 认证方式（二选一，access_token 优先级更高）
   # 方式 1: 使用 Access Token（推荐，更安全）
   access_token: "syt_xxxxxxxxxxxxx_xxxxxxxxxxxx"
-
   # 方式 2: 使用密码登录（首次登录使用）
   # password: "your-secure-password"
-
   # 启动时自动加入的房间列表（可选）
   # auto_join_rooms:
   #   - "!roomid1:matrix.org"
   #   - "#public-room:matrix.org"
-
-  # 端到端加密（E2EE）配置（可选）
-  # enable_e2ee: true  # 启用端到端加密
-  # e2ee_session_path: "./saber.session"  # 加密会话文件路径
+  # 端到端加密（E2EE）配置
+  enable_e2ee: true  # 启用端到端加密（默认启用）
+  e2ee_session_path: "./saber.session"  # 加密会话文件路径
   # pickle_key_path: "./saber.session.key"  # pickle 密钥路径（可选，默认为 e2ee_session_path + ".key"）
 
 ai:
   # 启用 AI 功能
   enabled: false
-
   # AI 提供商（如 openai, azure, anthropic）
   provider: "openai"
-
   # API 基础 URL
   base_url: "https://api.openai.com/v1"
-
   # API 密钥
   api_key: ""
-
   # 默认使用的模型
   default_model: "gpt-4o-mini"
-
   # 最大生成 token 数
   max_tokens: 4096
-
   # 生成温度（0-2）
   temperature: 0.7
-
   # 上下文管理配置
   context:
     enabled: true
     max_messages: 50
     max_tokens: 8000
     expiry_minutes: 60
-
   # 是否启用流式响应
   stream_enabled: false
-
   # 流式编辑配置
   stream_edit:
     enabled: false
@@ -387,7 +371,6 @@ ai:
     time_threshold_ms: 1000
     edit_interval_ms: 100
     max_edits: 5
-
   # 重试配置
   retry:
     enabled: true
@@ -397,7 +380,6 @@ ai:
     backoff_factor: 2.0
     fallback_enabled: true
     fallback_models: []
-
   # 多模型配置示例
   models: {}
     # fast:
@@ -409,20 +391,17 @@ ai:
 
   # 请求超时时间（秒）
   timeout_seconds: 30
-
   # 在私聊中自动回复（无需 !ai 前缀）
   direct_chat_auto_reply: true
-
   # 在群聊中 @mention 时自动回复（无需 !ai 前缀）
   group_chat_mention_reply: true
-
   # 回复机器人消息时自动回复（用于连续对话）
   reply_to_bot_reply: true
 
 # MCP (Model Context Protocol) 配置
 mcp:
   # 启用 MCP 功能
-  enabled: false
+  enabled: true
 `
 }
 
