@@ -50,11 +50,11 @@ type searxResponse struct {
 	} `json:"results"`
 }
 
-// SearXNG 公共实例列表，按优先级排序。
+// SearXNG 公共实例列表，按优先级排序（基于 searx.space 可用率统计）。
 var searxInstances = []string{
-	"https://search.sapti.me",
-	"https://searx.be",
-	"https://search.bus-hit.me",
+	"https://seek.fyi",
+	"https://search.femboy.ad",
+	"https://etsi.me",
 }
 
 // NewWebSearchServer 创建 web_search MCP 服务器。
