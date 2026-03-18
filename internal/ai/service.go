@@ -243,6 +243,124 @@ func (s *Service) IsEnabled() bool {
 	return s.globalConfig.Enabled
 }
 
+// GenerateSimpleResponse 使用 AI 生成简单的响应。
+//
+// 该方法用于生成简单的 AI 响应，不涉及上下文管理或消息发送。
+// 适用于主动聊天等需要 AI 生成内容但不需要完整命令流程的场景。
+//
+// 参数:
+//   - ctx: 上下文，用于取消操作
+//   - systemPrompt: 系统提示词
+//   - userMessage: 用户消息
+//
+// 返回值:
+//   - string: AI 生成的响应内容
+//   - error: 生成过程中发生的错误
+func (s *Service) GenerateSimpleResponse(ctx context.Context, systemPrompt, userMessage string) (string, error) {
+	if !s.IsEnabled() {
+		return "", fmt.Errorf("AI功能未启用")
+	}
+
+	if s.rateLimiter != nil {
+		if err := s.rateLimiter.Wait(ctx); err != nil {
+			return "", fmt.Errorf("AI请求速率限制: %w", err)
+		}
+	}
+
+	modelName := s.globalConfig.DefaultModel
+	client, err := s.getClient(modelName)
+	if err != nil {
+		return "", fmt.Errorf("获取AI客户端失败: %w", err)
+	}
+
+	messages := []openai.ChatCompletionMessage{
+		{Role: string(RoleSystem), Content: systemPrompt},
+		{Role: string(RoleUser), Content: userMessage},
+	}
+
+	req := ChatCompletionRequest{
+		Model:       modelName,
+		Messages:    messages,
+		MaxTokens:   s.globalConfig.MaxTokens,
+		Temperature: s.globalConfig.Temperature,
+	}
+
+	slog.Debug("发送简单AI请求", "model", modelName, "system_prompt", systemPrompt, "user_message", userMessage)
+
+	resp, err := client.CreateChatCompletion(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("AI请求失败: %w", err)
+	}
+
+	slog.Debug("简单AI响应成功", "model", modelName, "content_length", len(resp.Content))
+
+	return resp.Content, nil
+}
+
+// GenerateSimpleResponseWithModel 使用指定模型生成响应。
+//
+// 该方法允许指定模型名称和温度参数，适用于需要使用特定模型配置的场景。
+//
+// 参数:
+//   - ctx: 上下文，用于取消操作
+//   - modelName: 要使用的模型名称（为空则使用默认模型）
+//   - temperature: 生成温度（0 表示使用全局默认值）
+//   - systemPrompt: 系统提示词
+//   - userMessage: 用户消息
+//
+// 返回值:
+//   - string: AI 生成的响应内容
+//   - error: 生成过程中发生的错误
+func (s *Service) GenerateSimpleResponseWithModel(ctx context.Context, modelName string, temperature float64, systemPrompt, userMessage string) (string, error) {
+	if !s.IsEnabled() {
+		return "", fmt.Errorf("AI功能未启用")
+	}
+
+	if s.rateLimiter != nil {
+		if err := s.rateLimiter.Wait(ctx); err != nil {
+			return "", fmt.Errorf("AI请求速率限制: %w", err)
+		}
+	}
+
+	// 使用指定的模型或默认模型
+	if modelName == "" {
+		modelName = s.globalConfig.DefaultModel
+	}
+
+	// 使用指定的温度或全局默认值
+	if temperature == 0 {
+		temperature = s.globalConfig.Temperature
+	}
+
+	client, err := s.getClient(modelName)
+	if err != nil {
+		return "", fmt.Errorf("获取AI客户端失败: %w", err)
+	}
+
+	messages := []openai.ChatCompletionMessage{
+		{Role: string(RoleSystem), Content: systemPrompt},
+		{Role: string(RoleUser), Content: userMessage},
+	}
+
+	req := ChatCompletionRequest{
+		Model:       modelName,
+		Messages:    messages,
+		MaxTokens:   s.globalConfig.MaxTokens,
+		Temperature: temperature,
+	}
+
+	slog.Debug("发送简单AI请求（指定模型）", "model", modelName, "temperature", temperature, "system_prompt", systemPrompt, "user_message", userMessage)
+
+	resp, err := client.CreateChatCompletion(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("AI请求失败: %w", err)
+	}
+
+	slog.Debug("简单AI响应成功（指定模型）", "model", modelName, "content_length", len(resp.Content))
+
+	return resp.Content, nil
+}
+
 func (s *Service) prependSystemPrompt(messages []openai.ChatCompletionMessage, prompt string) []openai.ChatCompletionMessage {
 	hasSystem := false
 	for _, msg := range messages {

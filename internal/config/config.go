@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -50,6 +51,7 @@ type AIConfig struct {
 	DirectChatAutoReply   bool                   `yaml:"direct_chat_auto_reply"`   // 在私聊中自动回复（无需 !ai 前缀）
 	GroupChatMentionReply bool                   `yaml:"group_chat_mention_reply"` // 在群聊中 @mention 时自动回复（无需 !ai 前缀）
 	ReplyToBotReply       bool                   `yaml:"reply_to_bot_reply"`       // 回复机器人自己的回复（用于连续对话）
+	Proactive             ProactiveConfig        `yaml:"proactive"`                // 主动聊天配置
 }
 
 // ContextConfig 存储上下文管理配置
@@ -121,6 +123,43 @@ type ModelConfig struct {
 	Temperature float64 `yaml:"temperature"` // 温度（覆盖全局）
 }
 
+// ProactiveConfig 存储 AI 主动聊天配置
+type ProactiveConfig struct {
+	Enabled            bool            `yaml:"enabled"`              // 是否启用主动聊天
+	MaxMessagesPerDay  int             `yaml:"max_messages_per_day"` // 每天最大主动消息数
+	MinIntervalMinutes int             `yaml:"min_interval_minutes"` // 最小间隔时间（分钟）
+	Silence            SilenceConfig   `yaml:"silence"`              // 静默检测配置
+	Schedule           ScheduleConfig  `yaml:"schedule"`             // 定时聊天配置
+	NewMember          NewMemberConfig `yaml:"new_member"`           // 新成员欢迎配置
+	Decision           DecisionConfig  `yaml:"decision"`             // 决策模型配置
+}
+
+// SilenceConfig 存储静默检测配置
+type SilenceConfig struct {
+	Enabled              bool `yaml:"enabled"`                // 是否启用静默检测
+	ThresholdMinutes     int  `yaml:"threshold_minutes"`      // 静默阈值（分钟）
+	CheckIntervalMinutes int  `yaml:"check_interval_minutes"` // 检查间隔（分钟）
+}
+
+// ScheduleConfig 存储定时聊天配置
+type ScheduleConfig struct {
+	Enabled bool     `yaml:"enabled"` // 是否启用定时聊天
+	Times   []string `yaml:"times"`   // 定时时间点（格式："HH:MM"）
+}
+
+// NewMemberConfig 存储新成员欢迎配置
+type NewMemberConfig struct {
+	Enabled       bool   `yaml:"enabled"`        // 是否启用新成员欢迎
+	WelcomePrompt string `yaml:"welcome_prompt"` // 欢迎提示词
+}
+
+// DecisionConfig 存储决策模型配置
+type DecisionConfig struct {
+	Model          string  `yaml:"model"`           // 用于决策的模型
+	Temperature    float64 `yaml:"temperature"`     // 决策温度（0-2）
+	PromptTemplate string  `yaml:"prompt_template"` // 决策提示词模板
+}
+
 // UseTokenAuth 检查是否使用 Token 认证
 func (m *MatrixConfig) UseTokenAuth() bool {
 	return m.AccessToken != ""
@@ -152,6 +191,7 @@ func DefaultAIConfig() AIConfig {
 		DirectChatAutoReply:   true,
 		GroupChatMentionReply: true,
 		ReplyToBotReply:       true,
+		Proactive:             DefaultProactiveConfig(),
 	}
 }
 
@@ -186,6 +226,53 @@ func DefaultRetryConfig() RetryConfig {
 		BackoffFactor:   2.0,
 		FallbackEnabled: true,
 		FallbackModels:  []string{},
+	}
+}
+
+// DefaultProactiveConfig 返回带有合理默认值的主动聊天配置
+func DefaultProactiveConfig() ProactiveConfig {
+	return ProactiveConfig{
+		Enabled:            false,
+		MaxMessagesPerDay:  5,
+		MinIntervalMinutes: 60,
+		Silence:            DefaultSilenceConfig(),
+		Schedule:           DefaultScheduleConfig(),
+		NewMember:          DefaultNewMemberConfig(),
+		Decision:           DefaultDecisionConfig(),
+	}
+}
+
+// DefaultSilenceConfig 返回带有合理默认值的静默检测配置
+func DefaultSilenceConfig() SilenceConfig {
+	return SilenceConfig{
+		Enabled:              true,
+		ThresholdMinutes:     60,
+		CheckIntervalMinutes: 15,
+	}
+}
+
+// DefaultScheduleConfig 返回带有合理默认值的定时聊天配置
+func DefaultScheduleConfig() ScheduleConfig {
+	return ScheduleConfig{
+		Enabled: true,
+		Times:   []string{"09:00", "12:00", "18:00"},
+	}
+}
+
+// DefaultNewMemberConfig 返回带有合理默认值的新成员欢迎配置
+func DefaultNewMemberConfig() NewMemberConfig {
+	return NewMemberConfig{
+		Enabled:       true,
+		WelcomePrompt: "用友好的方式欢迎新成员加入",
+	}
+}
+
+// DefaultDecisionConfig 返回带有合理默认值的决策模型配置
+func DefaultDecisionConfig() DecisionConfig {
+	return DecisionConfig{
+		Model:          "",
+		Temperature:    0.8,
+		PromptTemplate: "",
 	}
 }
 
@@ -228,6 +315,79 @@ func (a *AIConfig) Validate() error {
 	}
 	if a.TimeoutSeconds <= 0 {
 		return fmt.Errorf("timeout_seconds must be positive")
+	}
+	return nil
+}
+
+// Validate 验证主动聊天配置是否有效
+func (p *ProactiveConfig) Validate() error {
+	if !p.Enabled {
+		return nil
+	}
+	if p.MaxMessagesPerDay < 0 {
+		return fmt.Errorf("max_messages_per_day must be non-negative")
+	}
+	if p.MinIntervalMinutes < 0 {
+		return fmt.Errorf("min_interval_minutes must be non-negative")
+	}
+	if err := p.Silence.Validate(); err != nil {
+		return fmt.Errorf("silence config: %w", err)
+	}
+	if err := p.Schedule.Validate(); err != nil {
+		return fmt.Errorf("schedule config: %w", err)
+	}
+	return nil
+}
+
+// Validate 验证静默检测配置是否有效
+func (s *SilenceConfig) Validate() error {
+	if !s.Enabled {
+		return nil
+	}
+	if s.ThresholdMinutes <= 0 {
+		return fmt.Errorf("threshold_minutes must be positive")
+	}
+	if s.CheckIntervalMinutes <= 0 {
+		return fmt.Errorf("check_interval_minutes must be positive")
+	}
+	return nil
+}
+
+// Validate 验证定时聊天配置是否有效
+func (s *ScheduleConfig) Validate() error {
+	if !s.Enabled {
+		return nil
+	}
+	if len(s.Times) == 0 {
+		return fmt.Errorf("times must not be empty when schedule is enabled")
+	}
+	for i, t := range s.Times {
+		// 严格验证格式为 "HH:MM"（必须 5 个字符）
+		if len(t) != 5 {
+			return fmt.Errorf("times[%d] invalid format %q: must be HH:MM (24-hour format)", i, t)
+		}
+		if _, err := time.Parse("15:04", t); err != nil {
+			return fmt.Errorf("times[%d] invalid format %q: must be HH:MM (24-hour format)", i, t)
+		}
+	}
+	return nil
+}
+
+// Validate 验证新成员欢迎配置是否有效
+func (n *NewMemberConfig) Validate() error {
+	if !n.Enabled {
+		return nil
+	}
+	if n.WelcomePrompt == "" {
+		return fmt.Errorf("welcome_prompt is required when new_member is enabled")
+	}
+	return nil
+}
+
+// Validate 验证决策模型配置是否有效
+func (d *DecisionConfig) Validate() error {
+	if d.Temperature < 0 || d.Temperature > 2 {
+		return fmt.Errorf("temperature must be between 0 and 2")
 	}
 	return nil
 }
@@ -427,6 +587,33 @@ ai:
   group_chat_mention_reply: true
   # 回复机器人消息时自动回复（用于连续对话）
   reply_to_bot_reply: true
+
+  # 主动聊天配置
+  proactive:
+    # 是否启用主动聊天
+    enabled: false
+    # 每天最大主动消息数
+    max_messages_per_day: 5
+    # 最小间隔时间（分钟）
+    min_interval_minutes: 60
+    # 静默检测配置
+    silence:
+      enabled: true
+      threshold_minutes: 60
+      check_interval_minutes: 15
+    # 定时聊天配置
+    schedule:
+      enabled: true
+      times: ["09:00", "12:00", "18:00"]
+    # 新成员欢迎配置
+    new_member:
+      enabled: true
+      welcome_prompt: "用友好的方式欢迎新成员加入"
+    # 决策模型配置
+    decision:
+      model: ""
+      temperature: 0.8
+      prompt_template: ""
 
 # MCP (Model Context Protocol) 配置
 mcp:

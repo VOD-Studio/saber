@@ -414,6 +414,270 @@ func TestExampleConfig(t *testing.T) {
 	if !contains(content, "provider:") {
 		t.Error("示例配置应包含 provider 说明")
 	}
+	if !contains(content, "proactive:") {
+		t.Error("示例配置应包含 proactive 说明")
+	}
+}
+
+func TestProactiveConfigValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  ProactiveConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			"禁用时不验证",
+			ProactiveConfig{Enabled: false},
+			false,
+			"",
+		},
+		{
+			"有效配置",
+			ProactiveConfig{
+				Enabled:            true,
+				MaxMessagesPerDay:  5,
+				MinIntervalMinutes: 60,
+				Silence:            SilenceConfig{Enabled: false},
+				Schedule:           ScheduleConfig{Enabled: false},
+				NewMember:          NewMemberConfig{Enabled: false},
+				Decision:           DecisionConfig{Temperature: 0.8},
+			},
+			false,
+			"",
+		},
+		{
+			"负的 max_messages_per_day",
+			ProactiveConfig{
+				Enabled:           true,
+				MaxMessagesPerDay: -1,
+				Silence:           SilenceConfig{Enabled: false},
+				Schedule:          ScheduleConfig{Enabled: false},
+			},
+			true,
+			"max_messages_per_day must be non-negative",
+		},
+		{
+			"负的 min_interval_minutes",
+			ProactiveConfig{
+				Enabled:            true,
+				MinIntervalMinutes: -1,
+				Silence:            SilenceConfig{Enabled: false},
+				Schedule:           ScheduleConfig{Enabled: false},
+			},
+			true,
+			"min_interval_minutes must be non-negative",
+		},
+		{
+			"Silence 配置无效",
+			ProactiveConfig{
+				Enabled:  true,
+				Silence:  SilenceConfig{Enabled: true, ThresholdMinutes: -1, CheckIntervalMinutes: 15},
+				Schedule: ScheduleConfig{Enabled: false},
+			},
+			true,
+			"silence config: threshold_minutes must be positive",
+		},
+		{
+			"Schedule 配置无效",
+			ProactiveConfig{
+				Enabled:  true,
+				Silence:  SilenceConfig{Enabled: false},
+				Schedule: ScheduleConfig{Enabled: true, Times: []string{}},
+			},
+			true,
+			"schedule config: times must not be empty when schedule is enabled",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil && tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				t.Errorf("Validate() error = %v, want error containing %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+func TestSilenceConfigValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  SilenceConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{"禁用时不验证", SilenceConfig{Enabled: false}, false, ""},
+		{"有效配置", SilenceConfig{Enabled: true, ThresholdMinutes: 60, CheckIntervalMinutes: 15}, false, ""},
+		{"threshold_minutes 为零", SilenceConfig{Enabled: true, ThresholdMinutes: 0, CheckIntervalMinutes: 15}, true, "threshold_minutes must be positive"},
+		{"threshold_minutes 负数", SilenceConfig{Enabled: true, ThresholdMinutes: -10, CheckIntervalMinutes: 15}, true, "threshold_minutes must be positive"},
+		{"check_interval_minutes 为零", SilenceConfig{Enabled: true, ThresholdMinutes: 60, CheckIntervalMinutes: 0}, true, "check_interval_minutes must be positive"},
+		{"check_interval_minutes 负数", SilenceConfig{Enabled: true, ThresholdMinutes: 60, CheckIntervalMinutes: -5}, true, "check_interval_minutes must be positive"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil && tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				t.Errorf("Validate() error = %v, want error containing %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+func TestScheduleConfigValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  ScheduleConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{"禁用时不验证", ScheduleConfig{Enabled: false}, false, ""},
+		{"有效配置", ScheduleConfig{Enabled: true, Times: []string{"09:00", "18:00"}}, false, ""},
+		{"times 为空", ScheduleConfig{Enabled: true, Times: []string{}}, true, "times must not be empty when schedule is enabled"},
+		{"times 为 nil", ScheduleConfig{Enabled: true, Times: nil}, true, "times must not be empty when schedule is enabled"},
+		{"时间格式无效", ScheduleConfig{Enabled: true, Times: []string{"9:00"}}, true, "times[0] invalid format"},
+		{"时间格式错误", ScheduleConfig{Enabled: true, Times: []string{"25:00"}}, true, "times[0] invalid format"},
+		{"时间格式缺少分钟", ScheduleConfig{Enabled: true, Times: []string{"09"}}, true, "times[0] invalid format"},
+		{"第二个时间格式错误", ScheduleConfig{Enabled: true, Times: []string{"09:00", "invalid"}}, true, "times[1] invalid format"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil && tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				t.Errorf("Validate() error = %v, want error containing %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+func TestNewMemberConfigValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  NewMemberConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{"禁用时不验证", NewMemberConfig{Enabled: false}, false, ""},
+		{"有效配置", NewMemberConfig{Enabled: true, WelcomePrompt: "欢迎新成员"}, false, ""},
+		{"缺少 welcome_prompt", NewMemberConfig{Enabled: true, WelcomePrompt: ""}, true, "welcome_prompt is required when new_member is enabled"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil && tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				t.Errorf("Validate() error = %v, want error containing %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+func TestDecisionConfigValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  DecisionConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{"有效配置", DecisionConfig{Model: "gpt-4", Temperature: 0.8}, false, ""},
+		{"空配置", DecisionConfig{}, false, ""},
+		{"温度过低", DecisionConfig{Temperature: -0.1}, true, "temperature must be between 0 and 2"},
+		{"温度过高", DecisionConfig{Temperature: 2.1}, true, "temperature must be between 0 and 2"},
+		{"温度边界 0", DecisionConfig{Temperature: 0}, false, ""},
+		{"温度边界 2", DecisionConfig{Temperature: 2}, false, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil && tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				t.Errorf("Validate() error = %v, want error containing %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+func TestDefaultProactiveConfigs(t *testing.T) {
+	t.Run("DefaultProactiveConfig", func(t *testing.T) {
+		cfg := DefaultProactiveConfig()
+		if cfg.Enabled {
+			t.Error("Default proactive should be disabled")
+		}
+		if cfg.MaxMessagesPerDay != 5 {
+			t.Errorf("Default MaxMessagesPerDay = %d, want 5", cfg.MaxMessagesPerDay)
+		}
+		if cfg.MinIntervalMinutes != 60 {
+			t.Errorf("Default MinIntervalMinutes = %d, want 60", cfg.MinIntervalMinutes)
+		}
+	})
+
+	t.Run("DefaultSilenceConfig", func(t *testing.T) {
+		cfg := DefaultSilenceConfig()
+		if !cfg.Enabled {
+			t.Error("Default silence should be enabled")
+		}
+		if cfg.ThresholdMinutes != 60 {
+			t.Errorf("Default ThresholdMinutes = %d, want 60", cfg.ThresholdMinutes)
+		}
+		if cfg.CheckIntervalMinutes != 15 {
+			t.Errorf("Default CheckIntervalMinutes = %d, want 15", cfg.CheckIntervalMinutes)
+		}
+	})
+
+	t.Run("DefaultScheduleConfig", func(t *testing.T) {
+		cfg := DefaultScheduleConfig()
+		if !cfg.Enabled {
+			t.Error("Default schedule should be enabled")
+		}
+		if len(cfg.Times) != 3 {
+			t.Errorf("Default Times length = %d, want 3", len(cfg.Times))
+		}
+		expectedTimes := []string{"09:00", "12:00", "18:00"}
+		for i, expected := range expectedTimes {
+			if i < len(cfg.Times) && cfg.Times[i] != expected {
+				t.Errorf("Default Times[%d] = %s, want %s", i, cfg.Times[i], expected)
+			}
+		}
+	})
+
+	t.Run("DefaultNewMemberConfig", func(t *testing.T) {
+		cfg := DefaultNewMemberConfig()
+		if !cfg.Enabled {
+			t.Error("Default new_member should be enabled")
+		}
+		if cfg.WelcomePrompt == "" {
+			t.Error("Default WelcomePrompt should not be empty")
+		}
+	})
+
+	t.Run("DefaultDecisionConfig", func(t *testing.T) {
+		cfg := DefaultDecisionConfig()
+		if cfg.Temperature != 0.8 {
+			t.Errorf("Default Temperature = %f, want 0.8", cfg.Temperature)
+		}
+	})
 }
 
 func contains(s, substr string) bool {

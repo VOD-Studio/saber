@@ -123,6 +123,7 @@ func Run(version, gitMsg string) {
 	// 初始化AI服务（如果启用）
 	var aiService *ai.Service
 	var mcpManager *mcp.Manager
+	var proactiveManager *ai.ProactiveManager
 	if cfg.AI.Enabled {
 		slog.Info("正在初始化AI服务...")
 
@@ -204,10 +205,27 @@ func Run(version, gitMsg string) {
 		}
 
 		slog.Info("AI 命令注册完成")
+
+		// 初始化主动聊天管理器（如果启用）
+		if cfg.AI.Proactive.Enabled {
+			slog.Info("正在初始化主动聊天管理器...")
+			roomService := matrix.NewRoomService(client)
+			proactiveManager, err = ai.NewProactiveManager(&cfg.AI.Proactive, aiService, roomService, nil)
+			if err != nil {
+				slog.Error("主动聊天管理器初始化失败", "error", err)
+				os.Exit(1)
+			}
+			slog.Info("主动聊天管理器初始化成功")
+		}
 	}
 
 	// 设置事件处理器
 	eventHandler := matrix.NewEventHandler(commandService)
+
+	// 设置主动聊天管理器（如果已初始化）
+	if proactiveManager != nil {
+		eventHandler.SetProactiveManager(proactiveManager)
+	}
 
 	// 设置同步器：注册消息事件处理器
 	// 使用 OnEventType 为特定事件类型注册回调
@@ -260,6 +278,10 @@ func Run(version, gitMsg string) {
 		}
 	}()
 
+	// 启动主动聊天管理器（如果启用）
+	if proactiveManager != nil {
+		proactiveManager.Start(ctx)
+	}
 	slog.Info("Saber Bot is running", "version", version, "git", gitMsg)
 	slog.Info("Press Ctrl+C to exit.")
 
@@ -273,6 +295,11 @@ func Run(version, gitMsg string) {
 		if err := mcpManager.Close(); err != nil {
 			slog.Warn("Failed to close MCP manager", "error", err)
 		}
+	}
+
+	if proactiveManager != nil {
+		slog.Info("Stopping proactive manager...")
+		proactiveManager.Stop()
 	}
 
 	cancel()

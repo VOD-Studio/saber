@@ -658,8 +658,11 @@ func (s *CommandService) StopTyping(ctx context.Context, roomID id.RoomID) error
 
 // EventHandler 封装 CommandService 并实现 mautrix 事件处理。
 type EventHandler struct {
-	service *CommandService
-	logger  *slog.Logger
+	service          *CommandService
+	logger           *slog.Logger
+	proactiveManager interface {
+		OnNewMember(ctx context.Context, roomID id.RoomID, userID id.UserID) error
+	}
 }
 
 // NewEventHandler 创建一个新的事件处理器。
@@ -668,6 +671,14 @@ func NewEventHandler(service *CommandService) *EventHandler {
 		service: service,
 		logger:  slog.With("component", "event_handler"),
 	}
+}
+
+// SetProactiveManager 设置主动聊天管理器。
+func (h *EventHandler) SetProactiveManager(manager interface {
+	OnNewMember(ctx context.Context, roomID id.RoomID, userID id.UserID) error
+}) {
+	h.proactiveManager = manager
+	slog.Debug("设置主动聊天管理器")
 }
 
 // OnMessage 处理传入的消息事件。
@@ -706,7 +717,7 @@ func (h *EventHandler) OnMessage(ctx context.Context, evt *event.Event) {
 	}()
 }
 
-// OnMember 处理成员事件（包括邀请）。
+// OnMember 处理成员事件（包括邀请和新成员加入）。
 func (h *EventHandler) OnMember(ctx context.Context, evt *event.Event) {
 	logger := h.logger.With(
 		"event_id", evt.ID.String(),
@@ -720,33 +731,70 @@ func (h *EventHandler) OnMember(ctx context.Context, evt *event.Event) {
 		return
 	}
 
-	// 只处理邀请事件
-	if content.Membership != event.MembershipInvite {
-		logger.Debug("忽略非邀请成员事件", "membership", content.Membership)
-		return
-	}
-
-	// 检查是否邀请机器人自己
+	// 检查 StateKey 是否存在
 	if evt.StateKey == nil {
 		logger.Debug("成员事件没有 state key")
 		return
 	}
 
 	targetUserID := id.UserID(*evt.StateKey)
-	if targetUserID != h.service.botID {
-		logger.Debug("邀请目标不是本机器人", "target", targetUserID)
-		return
-	}
 
-	// 接受邀请
-	logger.Info("接受房间邀请", "inviter", evt.Sender.String())
-	_, err := h.service.client.JoinRoom(ctx, evt.RoomID.String(), nil)
-	if err != nil {
-		logger.Error("接受邀请失败", "error", err)
-		return
-	}
+	// 处理不同类型的成员事件
+	switch content.Membership {
+	case event.MembershipInvite:
+		// 处理邀请事件：检查是否邀请机器人自己
+		if targetUserID != h.service.botID {
+			logger.Debug("邀请目标不是本机器人", "target", targetUserID)
+			return
+		}
 
-	logger.Info("成功接受邀请")
+		// 接受邀请
+		logger.Info("接受房间邀请", "inviter", evt.Sender.String())
+		_, err := h.service.client.JoinRoom(ctx, evt.RoomID.String(), nil)
+		if err != nil {
+			logger.Error("接受邀请失败", "error", err)
+			return
+		}
+
+		logger.Info("成功接受邀请")
+
+	case event.MembershipJoin:
+		// 处理成员加入事件：触发新成员欢迎
+		// 忽略机器人自己的加入事件
+		if targetUserID == h.service.botID {
+			logger.Debug("忽略机器人自己的加入事件")
+			return
+		}
+
+		// 检查是否需要触发新成员欢迎
+		if h.proactiveManager != nil {
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						stack := debug.Stack()
+						logger.Error("新成员欢迎处理发生 panic",
+							"panic", r,
+							"stack_trace", string(stack))
+					}
+				}()
+
+				// 创建独立上下文，带有超时
+				welcomeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+
+				logger.Info("触发新成员欢迎",
+					"room", evt.RoomID.String(),
+					"new_member", targetUserID.String())
+
+				if err := h.proactiveManager.OnNewMember(welcomeCtx, evt.RoomID, targetUserID); err != nil {
+					logger.Error("新成员欢迎处理失败", "error", err)
+				}
+			}()
+		}
+
+	default:
+		logger.Debug("忽略其他成员事件", "membership", content.Membership)
+	}
 }
 
 // OnEvent 是通用事件处理器，分发到适当的处理器。
