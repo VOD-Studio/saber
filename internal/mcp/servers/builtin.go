@@ -13,6 +13,7 @@ import (
 // 这些服务器不需要配置即可自动启用。
 var BuiltinServers = []string{
 	"web_fetch",
+	"web_search",
 }
 
 // BuiltinServerInfo 包含内置服务器的元信息。
@@ -38,6 +39,13 @@ func BuiltinServersInfo() []BuiltinServerInfo {
 				{Name: "fetch_url", Description: "获取网页内容并转换为文本"},
 			},
 		},
+		{
+			Name:        "web_search",
+			Description: "互联网搜索",
+			Tools: []ToolInfo{
+				{Name: "web_search", Description: "搜索互联网获取相关信息"},
+			},
+		},
 	}
 }
 
@@ -48,6 +56,8 @@ func CreateBuiltinServer(ctx context.Context, name string) (*mcp.Client, *mcp.Cl
 	switch name {
 	case "web_fetch":
 		server = NewWebFetchServer()
+	case "web_search":
+		server = NewWebSearchServer()
 	default:
 		return nil, nil, fmt.Errorf("未知的内置服务器: %s", name)
 	}
