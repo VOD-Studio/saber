@@ -169,9 +169,9 @@ func DefaultContextConfig() ContextConfig {
 func DefaultStreamEditConfig() StreamEditConfig {
 	return StreamEditConfig{
 		Enabled:         false,
-		CharThreshold:   10,
-		TimeThresholdMs: 1000,
-		EditIntervalMs:  100,
+		CharThreshold:   300,
+		TimeThresholdMs: 3000,
+		EditIntervalMs:  500,
 		MaxEdits:        5,
 	}
 }
@@ -397,9 +397,9 @@ ai:
   # 流式编辑配置
   stream_edit:
     enabled: false
-    char_threshold: 10
-    time_threshold_ms: 1000
-    edit_interval_ms: 100
+    char_threshold: 300
+    time_threshold_ms: 3000
+    edit_interval_ms: 500
     max_edits: 5
   # 重试配置
   retry:

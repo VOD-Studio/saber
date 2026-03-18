@@ -207,8 +207,14 @@ func TestDefaultConfigs(t *testing.T) {
 		if cfg.Enabled {
 			t.Error("Default stream edit should be disabled")
 		}
-		if cfg.CharThreshold != 10 {
-			t.Errorf("Default CharThreshold = %d, want 10", cfg.CharThreshold)
+		if cfg.CharThreshold != 300 {
+			t.Errorf("Default CharThreshold = %d, want 300", cfg.CharThreshold)
+		}
+		if cfg.TimeThresholdMs != 3000 {
+			t.Errorf("Default TimeThresholdMs = %d, want 3000", cfg.TimeThresholdMs)
+		}
+		if cfg.EditIntervalMs != 500 {
+			t.Errorf("Default EditIntervalMs = %d, want 500", cfg.EditIntervalMs)
 		}
 		if cfg.MaxEdits != 5 {
 			t.Errorf("Default MaxEdits = %d, want 5", cfg.MaxEdits)
