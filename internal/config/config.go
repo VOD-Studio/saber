@@ -39,6 +39,8 @@ type AIConfig struct {
 	DefaultModel          string                 `yaml:"default_model"`            // 默认使用的模型
 	MaxTokens             int                    `yaml:"max_tokens"`               // 最大生成 token 数
 	Temperature           float64                `yaml:"temperature"`              // 生成温度（0-2）
+	SystemPrompt          string                 `yaml:"system_prompt"`            // 系统提示词
+	RateLimitPerMinute    int                    `yaml:"rate_limit_per_minute"`    // 每分钟请求限制（0 表示无限制）
 	Context               ContextConfig          `yaml:"context"`                  // 上下文管理配置
 	StreamEnabled         bool                   `yaml:"stream_enabled"`           // 是否启用流式响应
 	StreamEdit            StreamEditConfig       `yaml:"stream_edit"`              // 流式编辑配置
@@ -126,6 +128,8 @@ func DefaultAIConfig() AIConfig {
 		DefaultModel:          "",
 		MaxTokens:             4096,
 		Temperature:           0.7,
+		SystemPrompt:          "",
+		RateLimitPerMinute:    0,
 		Context:               DefaultContextConfig(),
 		StreamEnabled:         false,
 		StreamEdit:            DefaultStreamEditConfig(),
@@ -356,6 +360,10 @@ ai:
   max_tokens: 4096
   # 生成温度（0-2）
   temperature: 0.7
+  # 系统提示词（可选，用于自定义 AI 行为）
+  # system_prompt: "You are a helpful assistant."
+  # 每分钟请求限制（0 表示无限制）
+  rate_limit_per_minute: 0
   # 上下文管理配置
   context:
     enabled: true

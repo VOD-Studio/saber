@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sashabaranov/go-openai"
+	"golang.org/x/time/rate"
 	"maunium.net/go/mautrix/id"
 
 	"rua.plus/saber/internal/config"
@@ -161,8 +162,6 @@ func (s *Service) executeToolCallingLoop(
 }
 
 // Service 是 AI 服务的核心结构体。
-//
-// 它管理 AI 客户端、上下文和命令处理。
 type Service struct {
 	globalConfig   *config.AIConfig
 	matrixService  *matrix.CommandService
@@ -170,18 +169,9 @@ type Service struct {
 	mcpManager     *mcp.Manager
 	clients        map[string]*Client
 	clientsMu      sync.RWMutex
+	rateLimiter    *rate.Limiter
 }
 
-// NewService 创建并初始化一个新的 AI 服务实例。
-//
-// 参数:
-//   - cfg: AI 配置，必须提供且验证通过
-//   - matrixService: Matrix 命令服务，用于发送消息
-//   - mcpManager: MCP 管理器，用于工具调用（可选）
-//
-// 返回值:
-//   - *Service: 创建的 AI 服务实例
-//   - error: 初始化过程中发生的错误
 func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpManager *mcp.Manager) (*Service, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("AI配置不能为空")
@@ -196,19 +186,26 @@ func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpM
 		contextManager = NewContextManager(cfg.Context)
 	}
 
+	var rateLimiter *rate.Limiter
+	if cfg.RateLimitPerMinute > 0 {
+		rateLimiter = rate.NewLimiter(rate.Limit(cfg.RateLimitPerMinute)/60, cfg.RateLimitPerMinute/6)
+	}
+
 	service := &Service{
 		globalConfig:   cfg,
 		matrixService:  matrixService,
 		contextManager: contextManager,
 		mcpManager:     mcpManager,
 		clients:        make(map[string]*Client),
+		rateLimiter:    rateLimiter,
 	}
 
 	slog.Info("AI服务初始化完成",
 		"enabled", cfg.Enabled,
 		"provider", cfg.Provider,
 		"default_model", cfg.DefaultModel,
-		"context_enabled", cfg.Context.Enabled)
+		"context_enabled", cfg.Context.Enabled,
+		"rate_limit_per_minute", cfg.RateLimitPerMinute)
 
 	return service, nil
 }
@@ -246,12 +243,36 @@ func (s *Service) IsEnabled() bool {
 	return s.globalConfig.Enabled
 }
 
+func (s *Service) prependSystemPrompt(messages []openai.ChatCompletionMessage, prompt string) []openai.ChatCompletionMessage {
+	hasSystem := false
+	for _, msg := range messages {
+		if msg.Role == string(RoleSystem) {
+			hasSystem = true
+			break
+		}
+	}
+	if hasSystem {
+		return messages
+	}
+	result := make([]openai.ChatCompletionMessage, 0, len(messages)+1)
+	result = append(result, openai.ChatCompletionMessage{
+		Role:    string(RoleSystem),
+		Content: prompt,
+	})
+	return append(result, messages...)
+}
+
 func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID id.RoomID, modelName string, args []string) error {
-	// 添加用户上下文，供 MCP 工具使用
 	ctx = mcp.WithUserContext(ctx, userID, roomID)
 
 	if !s.IsEnabled() {
 		return fmt.Errorf("AI功能未启用")
+	}
+
+	if s.rateLimiter != nil {
+		if err := s.rateLimiter.Wait(ctx); err != nil {
+			return fmt.Errorf("AI请求速率限制: %w", err)
+		}
 	}
 
 	userInput := strings.Join(args, " ")
@@ -270,6 +291,10 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 		messages = []openai.ChatCompletionMessage{
 			{Role: string(RoleUser), Content: userInput},
 		}
+	}
+
+	if s.globalConfig.SystemPrompt != "" {
+		messages = s.prependSystemPrompt(messages, s.globalConfig.SystemPrompt)
 	}
 
 	req := ChatCompletionRequest{

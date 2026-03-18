@@ -268,6 +268,13 @@ func Run(version, gitMsg string) {
 	slog.Info("Shutdown signal received", "signal", sig.String())
 
 	// 优雅关闭
+	if mcpManager != nil {
+		slog.Info("Closing MCP connections...")
+		if err := mcpManager.Close(); err != nil {
+			slog.Warn("Failed to close MCP manager", "error", err)
+		}
+	}
+
 	cancel()
 	slog.Info("Bot stopped")
 }

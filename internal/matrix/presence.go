@@ -344,6 +344,8 @@ func (p *PresenceService) StartSyncWithReconnect(ctx context.Context, cfg *Recon
 			// 重连后恢复在线状态
 			if restoreErr := p.restorePresence(); restoreErr != nil {
 				slog.Warn("Failed to restore presence after reconnection", "error", restoreErr)
+			} else {
+				attempt = 0
 			}
 		} else {
 			// 同步完成且无错误（通常不应该发生）

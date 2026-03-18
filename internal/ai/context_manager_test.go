@@ -721,7 +721,7 @@ func TestContextManager_ExpiryCleanup(t *testing.T) {
 		}
 	})
 
-	t.Run("empty room context cleaned up", func(t *testing.T) {
+	t.Run("cleanup only current room on AddMessage", func(t *testing.T) {
 		cm := NewContextManager(config.ContextConfig{
 			MaxMessages:   10,
 			MaxTokens:     0,
@@ -729,26 +729,41 @@ func TestContextManager_ExpiryCleanup(t *testing.T) {
 		})
 
 		oldTime := time.Now().Add(-5 * time.Minute)
+		room2 := id.RoomID("!room2:example.com")
+
 		cm.mu.Lock()
 		cm.contexts[roomID] = []ChatMessage{
 			{
 				Role:      RoleUser,
-				Content:   "Old message",
+				Content:   "Old message in room1",
 				UserID:    userID,
 				RoomID:    roomID,
 				Timestamp: oldTime,
 			},
 		}
+		cm.contexts[room2] = []ChatMessage{
+			{
+				Role:      RoleUser,
+				Content:   "Old message in room2",
+				UserID:    userID,
+				RoomID:    room2,
+				Timestamp: oldTime,
+			},
+		}
 		cm.mu.Unlock()
 
-		room2 := id.RoomID("!room2:example.com")
 		cm.AddMessage(room2, RoleUser, "New message in room2", userID)
 
-		if len(cm.GetContext(roomID)) != 0 {
-			t.Error("Room 1 should be cleaned up")
+		if len(cm.GetContext(roomID)) != 1 {
+			t.Error("Room 1 should not be cleaned up (lazy cleanup only cleans current room)")
 		}
 		if len(cm.GetContext(room2)) != 1 {
-			t.Error("Room 2 should have message")
+			t.Error("Room 2 should have 1 message (old expired, new kept)")
+		}
+
+		cm.cleanupAllExpired()
+		if len(cm.GetContext(roomID)) != 0 {
+			t.Error("Room 1 should be cleaned up after cleanupAllExpired")
 		}
 	})
 }
