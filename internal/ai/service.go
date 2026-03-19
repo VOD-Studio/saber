@@ -161,6 +161,153 @@ func (s *Service) executeToolCallingLoop(
 	return "", fmt.Errorf("max tool iterations (%d) exceeded", maxToolIterations)
 }
 
+// executeStreamingWithToolCalling 执行支持工具调用的流式响应。
+//
+// 此方法结合了流式输出和工具调用能力：
+// 1. 使用流式请求获取 AI 响应
+// 2. 如果响应包含工具调用，累积工具调用参数
+// 3. 执行工具并将结果添加到消息历史
+// 4. 继续流式请求直到获得最终响应
+//
+// 参数:
+//   - ctx: 上下文
+//   - client: AI 客户端
+//   - req: 聊天完成请求
+//   - roomID: Matrix 房间 ID
+//   - messages: 消息历史
+//   - tools: 可用工具列表
+//   - model: 使用的模型名称
+//
+// 返回值:
+//   - any: 响应结果
+//   - error: 错误信息
+func (s *Service) executeStreamingWithToolCalling(
+	ctx context.Context,
+	client *Client,
+	req ChatCompletionRequest,
+	roomID id.RoomID,
+	messages []openai.ChatCompletionMessage,
+	tools []openai.Tool,
+	model string,
+) (any, error) {
+	currentMessages := make([]openai.ChatCompletionMessage, len(messages))
+	copy(currentMessages, messages)
+
+	eventID := matrix.GetEventID(ctx)
+
+	for i := 0; i < maxToolIterations; i++ {
+		// 创建流编辑器和处理器
+		editor := NewStreamEditor(s.matrixService, roomID, "", s.globalConfig.StreamEdit, eventID)
+		handler := NewStreamToolHandler(editor, s.globalConfig.StreamEdit)
+
+		// 发送流式请求
+		req.Messages = currentMessages
+		err := client.CreateStreamingChatCompletionWithTools(ctx, req, handler)
+		if err != nil {
+			slog.Error("流式AI请求失败", "model", model, "iteration", i+1, "error", err)
+			return nil, err
+		}
+
+		// 检查是否有工具调用
+		if !handler.HasToolCalls() || handler.GetFinishReason() != "tool_calls" {
+			// 没有工具调用，流式响应已完成
+			slog.Debug("流式AI请求完成（无工具调用）", "model", model, "iteration", i+1)
+			return nil, nil
+		}
+
+		// 有工具调用，需要执行
+		toolCalls := handler.GetAccumulatedToolCalls()
+		accumulatedContent := handler.GetAccumulatedContent()
+		slog.Debug("检测到工具调用，开始执行",
+			"iteration", i+1,
+			"tool_count", len(toolCalls),
+			"accumulated_content_length", len(accumulatedContent))
+
+		// 如果有累积的文本内容，添加到消息历史
+		if accumulatedContent != "" {
+			currentMessages = append(currentMessages, openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleAssistant,
+				Content: accumulatedContent,
+			})
+		}
+
+		// 添加带工具调用的助手消息
+		currentMessages = append(currentMessages, openai.ChatCompletionMessage{
+			Role:      openai.ChatMessageRoleAssistant,
+			Content:   accumulatedContent,
+			ToolCalls: toolCalls,
+		})
+
+		// 执行每个工具调用
+		for _, toolCall := range toolCalls {
+			slog.Debug("执行工具调用", "tool_name", toolCall.Function.Name, "tool_id", toolCall.ID)
+
+			// 解析参数
+			var args map[string]any
+			if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+				currentMessages = append(currentMessages, openai.ChatCompletionMessage{
+					Role:       openai.ChatMessageRoleTool,
+					ToolCallID: toolCall.ID,
+					Content:    fmt.Sprintf("Error parsing arguments: %v", err),
+				})
+				continue
+			}
+
+			// 执行工具
+			result, execErr := s.executeToolCall(ctx, toolCall.Function.Name, args)
+			if execErr != nil {
+				currentMessages = append(currentMessages, openai.ChatCompletionMessage{
+					Role:       openai.ChatMessageRoleTool,
+					ToolCallID: toolCall.ID,
+					Content:    fmt.Sprintf("Error: %v", execErr),
+				})
+				continue
+			}
+
+			// 添加工具结果
+			resultJSON, _ := json.Marshal(result)
+			currentMessages = append(currentMessages, openai.ChatCompletionMessage{
+				Role:       openai.ChatMessageRoleTool,
+				ToolCallID: toolCall.ID,
+				Content:    string(resultJSON),
+			})
+		}
+
+		slog.Debug("工具调用执行完成，继续流式请求", "iteration", i+1)
+	}
+
+	slog.Error("超过最大工具调用迭代次数", "max_iterations", maxToolIterations)
+	return nil, fmt.Errorf("max tool iterations (%d) exceeded", maxToolIterations)
+}
+
+// executeToolCall 执行单个工具调用。
+//
+// 参数:
+//   - ctx: 上下文
+//   - toolName: 工具名称
+//   - args: 工具参数
+//
+// 返回值:
+//   - any: 工具执行结果
+//   - error: 错误信息
+func (s *Service) executeToolCall(ctx context.Context, toolName string, args map[string]any) (any, error) {
+	if s.mcpManager == nil {
+		return nil, fmt.Errorf("MCP manager not initialized")
+	}
+
+	serverName := s.mcpManager.GetServerForTool(toolName)
+	if serverName == "" {
+		return nil, fmt.Errorf("no server found for tool %s", toolName)
+	}
+
+	result, err := s.mcpManager.CallTool(ctx, serverName, toolName, args)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 // Service 是 AI 服务的核心结构体。
 type Service struct {
 	globalConfig   *config.AIConfig
@@ -479,26 +626,30 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 		// If using tool calling, we need to add tools to the request
 		if useToolCalling {
 			req.Tools = tools
-			// For tool calling, we currently don't support streaming
-			// TODO: Add streaming support for tool calls in the future
-			req.Stream = false
 		}
 
-		if s.globalConfig.StreamEnabled && s.globalConfig.StreamEdit.Enabled && !useToolCalling {
-			slog.Debug("使用流式响应模式", "char_threshold", s.globalConfig.StreamEdit.CharThreshold)
-			// Extract EventID for reply-to functionality
-			eventID := matrix.GetEventID(ctx)
-			editor := NewStreamEditor(s.matrixService, roomID, "", s.globalConfig.StreamEdit, eventID)
-			handler := NewSmartStreamHandler(editor, s.globalConfig.StreamEdit.CharThreshold, s.globalConfig.StreamEdit.TimeThresholdMs)
+		// 决定使用流式还是非流式模式
+		if s.globalConfig.StreamEnabled && s.globalConfig.StreamEdit.Enabled {
+			if useToolCalling {
+				// 流式模式 + 工具调用：使用新的流式工具处理流程
+				slog.Debug("使用流式响应模式（含工具调用）", "tool_count", len(tools))
+				return s.executeStreamingWithToolCalling(ctx, client, req, roomID, messages, tools, model)
+			} else {
+				// 流式模式（无工具调用）
+				slog.Debug("使用流式响应模式", "char_threshold", s.globalConfig.StreamEdit.CharThreshold)
+				eventID := matrix.GetEventID(ctx)
+				editor := NewStreamEditor(s.matrixService, roomID, "", s.globalConfig.StreamEdit, eventID)
+				handler := NewSmartStreamHandler(editor, s.globalConfig.StreamEdit.CharThreshold, s.globalConfig.StreamEdit.TimeThresholdMs)
 
-			streamErr := client.CreateStreamingChatCompletion(ctx, req, handler)
-			if streamErr != nil {
-				slog.Error("流式AI请求失败", "model", model, "error", streamErr)
-				return nil, streamErr
+				streamErr := client.CreateStreamingChatCompletion(ctx, req, handler)
+				if streamErr != nil {
+					slog.Error("流式AI请求失败", "model", model, "error", streamErr)
+					return nil, streamErr
+				}
+
+				slog.Debug("流式AI请求完成", "model", model)
+				return nil, nil
 			}
-
-			slog.Debug("流式AI请求完成", "model", model)
-			return nil, nil
 		} else {
 			// 非流式编辑模式：显示 typing indicator
 			if err := s.matrixService.StartTyping(ctx, roomID, 30000); err != nil {
