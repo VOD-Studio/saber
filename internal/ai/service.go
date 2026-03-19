@@ -368,6 +368,7 @@ type Service struct {
 	clients        map[string]*Client
 	clientsMu      sync.RWMutex
 	rateLimiter    *rate.Limiter
+	modelRegistry  *ModelRegistry
 }
 
 func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpManager *mcp.Manager) (*Service, error) {
@@ -396,6 +397,7 @@ func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpM
 		mcpManager:     mcpManager,
 		clients:        make(map[string]*Client),
 		rateLimiter:    rateLimiter,
+		modelRegistry:  NewModelRegistry(cfg),
 	}
 
 	slog.Info("AI服务初始化完成",
@@ -441,6 +443,14 @@ func (s *Service) IsEnabled() bool {
 	return s.globalConfig.Enabled
 }
 
+// GetModelRegistry 获取模型注册表。
+//
+// 返回值:
+//   - *ModelRegistry: 模型注册表实例
+func (s *Service) GetModelRegistry() *ModelRegistry {
+	return s.modelRegistry
+}
+
 // GenerateSimpleResponse 使用 AI 生成简单的响应。
 //
 // 该方法用于生成简单的 AI 响应，不涉及上下文管理或消息发送。
@@ -465,7 +475,7 @@ func (s *Service) GenerateSimpleResponse(ctx context.Context, systemPrompt, user
 		}
 	}
 
-	modelName := s.globalConfig.DefaultModel
+	modelName := s.modelRegistry.GetDefault()
 	client, err := s.getClient(modelName)
 	if err != nil {
 		return "", fmt.Errorf("获取AI客户端失败: %w", err)
@@ -522,7 +532,7 @@ func (s *Service) GenerateSimpleResponseWithModel(ctx context.Context, modelName
 
 	// 使用指定的模型或默认模型
 	if modelName == "" {
-		modelName = s.globalConfig.DefaultModel
+		modelName = s.modelRegistry.GetDefault()
 	}
 
 	// 使用指定的温度或全局默认值
@@ -586,7 +596,7 @@ func (s *Service) GenerateStreamingSimpleResponse(ctx context.Context, modelName
 	}
 
 	if modelName == "" {
-		modelName = s.globalConfig.DefaultModel
+		modelName = s.modelRegistry.GetDefault()
 	}
 
 	if temperature == 0 {
@@ -876,7 +886,7 @@ func NewAICommand(service *Service) *AICommand {
 // 返回值:
 //   - error: 处理过程中发生的错误
 func (c *AICommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
-	return c.service.handleAICommand(ctx, userID, roomID, c.service.globalConfig.DefaultModel, args)
+	return c.service.handleAICommand(ctx, userID, roomID, c.service.modelRegistry.GetDefault(), args)
 }
 
 // MultiModelAICommand 处理指定模型的 AI 聊天命令。
