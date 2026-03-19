@@ -679,6 +679,7 @@ type EventHandler struct {
 	logger           *slog.Logger
 	proactiveManager interface {
 		OnNewMember(ctx context.Context, roomID id.RoomID, userID id.UserID) error
+		RecordUserMessage(roomID id.RoomID)
 	}
 }
 
@@ -693,6 +694,7 @@ func NewEventHandler(service *CommandService) *EventHandler {
 // SetProactiveManager 设置主动聊天管理器。
 func (h *EventHandler) SetProactiveManager(manager interface {
 	OnNewMember(ctx context.Context, roomID id.RoomID, userID id.UserID) error
+	RecordUserMessage(roomID id.RoomID)
 }) {
 	h.proactiveManager = manager
 	slog.Debug("设置主动聊天管理器")
@@ -707,6 +709,11 @@ func (h *EventHandler) OnMessage(ctx context.Context, evt *event.Event) {
 		"sender", evt.Sender.String())
 
 	logger.Debug("Processing event")
+
+	// 记录用户消息时间（排除机器人自己的消息）
+	if h.proactiveManager != nil && evt.Sender != h.service.botID {
+		h.proactiveManager.RecordUserMessage(evt.RoomID)
+	}
 
 	// 为每个消息创建独立的 goroutine 进行并发处理
 	go func() {

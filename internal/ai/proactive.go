@@ -590,6 +590,20 @@ func (m *ProactiveManager) SendMessage(ctx context.Context, roomID id.RoomID, me
 	return nil
 }
 
+// RecordUserMessage 记录用户发送的消息。
+//
+// 此方法用于更新房间的最后消息时间，以供静默检测使用。
+// 当 Matrix 消息处理器收到用户消息时，应调用此方法。
+//
+// 参数:
+//   - roomID: 用户发送消息的房间 ID
+func (m *ProactiveManager) RecordUserMessage(roomID id.RoomID) {
+	if m.stateTracker == nil {
+		return
+	}
+	m.stateTracker.RecordUserMessage(roomID)
+}
+
 // TriggerCoordinator 协调所有主动聊天触发器。
 //
 // 它负责：
