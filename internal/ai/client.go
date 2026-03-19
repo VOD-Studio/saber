@@ -74,6 +74,39 @@ type StreamingChatCompletionHandler interface {
 	OnError(ctx context.Context, err error)
 }
 
+// StreamingToolCallHandler 定义了支持工具调用的流式聊天完成处理接口。
+//
+// 扩展了基础流式处理接口，增加了工具调用处理能力。
+type StreamingToolCallHandler interface {
+	StreamingChatCompletionHandler
+
+	// OnToolCallChunk 处理工具调用的增量数据块。
+	// 每次收到工具调用相关的 delta 时调用。
+	OnToolCallChunk(ctx context.Context, toolCallIndex int, id string, name string, argumentsChunk string)
+
+	// OnFinishReason 处理流的结束原因。
+	// 可能的值包括 "stop", "tool_calls" 等。
+	OnFinishReason(ctx context.Context, reason string)
+
+	// GetAccumulatedToolCalls 返回累积的工具调用列表。
+	// 在流结束后调用，用于获取完整的工具调用信息。
+	GetAccumulatedToolCalls() []openai.ToolCall
+
+	// HasToolCalls 返回是否存在工具调用。
+	HasToolCalls() bool
+}
+
+// StreamingToolCallState 表示单个工具调用的累积状态。
+//
+// 在流式响应中，工具调用的参数是分多次返回的，
+// 需要累积拼接才能得到完整的参数 JSON。
+type StreamingToolCallState struct {
+	Index     int             // 工具调用索引，用于标识多个并行工具调用
+	ID        string          // 工具调用 ID
+	Name      string          // 函数名称
+	Arguments strings.Builder // 累积的参数 JSON 字符串
+}
+
 // NewClientWithModel 使用指定的模型配置创建一个新的 AI 客户端。
 //
 // 参数:
@@ -327,6 +360,123 @@ func (c *Client) CreateStreamingChatCompletion(
 			builder.WriteString(chunk)
 			chunkCount++
 			handler.OnChunk(ctx, chunk)
+		}
+
+		if response.Usage != nil {
+			usage = *response.Usage
+		}
+		if response.Model != "" {
+			model = response.Model
+		}
+	}
+}
+
+// CreateStreamingChatCompletionWithTools 创建支持工具调用的流式聊天完成。
+//
+// 与 CreateStreamingChatCompletion 不同，此方法能够处理流式响应中的工具调用。
+// 工具调用在流式响应中以增量方式返回，需要累积拼接参数。
+//
+// 参数:
+//   - ctx: 上下文，用于取消操作
+//   - req: 聊天完成请求
+//   - handler: 支持工具调用的流式处理接口
+//
+// 返回值:
+//   - error: 操作过程中发生的错误
+func (c *Client) CreateStreamingChatCompletionWithTools(
+	ctx context.Context,
+	req ChatCompletionRequest,
+	handler StreamingToolCallHandler,
+) error {
+	slog.Debug("开始支持工具调用的流式AI请求",
+		"model", req.Model,
+		"messages_count", len(req.Messages),
+		"has_tools", len(req.Tools) > 0)
+
+	stream, err := c.openaiClient.CreateChatCompletionStream(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model:       req.Model,
+			Messages:    req.Messages,
+			MaxTokens:   req.MaxTokens,
+			Temperature: float32(req.Temperature),
+			Stream:      true,
+			Tools:       req.Tools,
+			ToolChoice:  req.ToolChoice,
+		},
+	)
+	if err != nil {
+		slog.Error("创建支持工具调用的流式请求失败", "model", req.Model, "error", err)
+		handler.OnError(ctx, fmt.Errorf("failed to create chat completion stream: %w", err))
+		return err
+	}
+	defer func() {
+		if closeErr := stream.Close(); closeErr != nil {
+			slog.Debug("Failed to close stream", "error", closeErr)
+		}
+	}()
+
+	var builder strings.Builder
+	builder.Grow(2048)
+	var usage openai.Usage
+	var model string
+	var chunkCount int
+
+	for {
+		response, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			fullContent := builder.String()
+			slog.Debug("支持工具调用的流式AI响应完成",
+				"model", model,
+				"content_length", len(fullContent),
+				"chunks", chunkCount,
+				"has_tool_calls", handler.HasToolCalls(),
+				"prompt_tokens", usage.PromptTokens,
+				"completion_tokens", usage.CompletionTokens,
+				"total_tokens", usage.TotalTokens)
+			handler.OnComplete(ctx, fullContent, usage, model)
+			return nil
+		}
+		if err != nil {
+			slog.Error("支持工具调用的流式响应错误", "model", req.Model, "error", err)
+			handler.OnError(ctx, fmt.Errorf("error in stream: %w", err))
+			return err
+		}
+
+		if len(response.Choices) > 0 {
+			choice := response.Choices[0]
+
+			// 处理文本内容
+			if choice.Delta.Content != "" {
+				chunk := choice.Delta.Content
+				builder.WriteString(chunk)
+				chunkCount++
+				handler.OnChunk(ctx, chunk)
+			}
+
+			// 处理工具调用
+			if len(choice.Delta.ToolCalls) > 0 {
+				for _, tc := range choice.Delta.ToolCalls {
+					var id, name string
+					if tc.ID != "" {
+						id = tc.ID
+					}
+					if tc.Function.Name != "" {
+						name = tc.Function.Name
+					}
+					// tc.Index 可能是 nil，默认使用 0
+					index := 0
+					if tc.Index != nil {
+						index = *tc.Index
+					}
+					handler.OnToolCallChunk(ctx, index, id, name, tc.Function.Arguments)
+				}
+			}
+
+			// 处理结束原因
+			if choice.FinishReason != "" {
+				handler.OnFinishReason(ctx, string(choice.FinishReason))
+			}
 		}
 
 		if response.Usage != nil {
