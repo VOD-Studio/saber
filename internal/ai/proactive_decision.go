@@ -113,7 +113,13 @@ func GatherDecisionContext(
 	state := stateProvider.GetState(roomID)
 
 	// 计算距离最后一条消息的分钟数
-	minutesSinceLast := calculateMinutesSinceLast(state.LastMessageTime)
+	// 如果最后消息时间为零值（从未有用户消息），使用 threshold + 1 与触发器逻辑保持一致
+	var minutesSinceLast int
+	if state.LastMessageTime.IsZero() {
+		minutesSinceLast = silenceThresholdMinutes + 1
+	} else {
+		minutesSinceLast = calculateMinutesSinceLast(state.LastMessageTime)
+	}
 
 	// 从房间服务获取房间元数据
 	roomInfo, err := roomInfoProvider.GetRoomInfo(ctx, roomID.String())
@@ -207,7 +213,6 @@ func (dc *DecisionContext) GetActivityLevel() ActivityLevel {
 //   - 如果今日已发送消息数 >= 5，则不触发（避免骚扰）
 //   - 如果房间活动水平为高，则不触发（避免打扰活跃对话）
 //   - 如果距离最后消息时间 < SilenceThresholdMinutes，则不触发（避免干扰）
-//   - 如果最后消息时间未知（MinutesSinceLast = -1），则不触发
 //   - 其他情况建议触发
 //
 // 返回:
@@ -223,12 +228,12 @@ func (dc *DecisionContext) ShouldPromptAI() bool {
 		return false
 	}
 
-	// 在静默阈值时间内时不触发，或时间未知时不触发
+	// 在静默阈值时间内时不触发
 	threshold := dc.SilenceThresholdMinutes
 	if threshold <= 0 {
 		threshold = 60 // 默认值
 	}
-	if dc.MinutesSinceLast < 0 || dc.MinutesSinceLast < threshold {
+	if dc.MinutesSinceLast < threshold {
 		return false
 	}
 
