@@ -7,6 +7,7 @@
 - **Matrix 协议**: 通过 mautrix-go 完整支持 Matrix 协议
 - **端到端加密**: 可选的 E2EE 支持，使用 goolm（纯 Go 实现，无需 CGO）
 - **AI 集成**: 内置 AI 对话功能，支持 OpenAI 兼容的 API
+- **工具调用**: 支持 MCP (Model Context Protocol) 工具调用，AI 可执行网络搜索、网页抓取等操作
 - **流式响应**: 实时流式输出，智能消息编辑
 - **上下文管理**: 每个房间独立的持久化对话上下文
 - **多模型支持**: 配置多个 AI 模型，各自独立参数
@@ -70,13 +71,15 @@ ai:
 
 ### 内置命令
 
-| 命令              | 描述               |
-| ----------------- | ------------------ |
-| `!ping`           | 检查机器人是否在线 |
-| `!help`           | 列出所有可用命令   |
-| `!ai <message>`   | 与 AI 对话         |
-| `!ai-clear`       | 清除对话上下文     |
-| `!ai-context`     | 显示上下文信息     |
+| 命令              | 描述                     |
+| ----------------- | ------------------------ |
+| `!ping`           | 检查机器人是否在线       |
+| `!help`           | 列出所有可用命令         |
+| `!version`        | 显示版本信息             |
+| `!ai <message>`   | 与 AI 对话               |
+| `!ai-clear`       | 清除对话上下文           |
+| `!ai-context`     | 显示上下文信息           |
+| `!mcp-list`       | 列出所有 MCP 服务器和工具 |
 
 ### 私聊
 
@@ -289,6 +292,72 @@ ai:
 
 然后使用模型特定命令: `!ai-fast <message>`, `!ai-creative <message>`。
 
+### MCP 工具调用
+
+Saber 支持 MCP (Model Context Protocol) 工具调用，让 AI 能够执行实际操作，如网络搜索、网页抓取等。
+
+#### 内置工具
+
+Saber 默认启用以下内置 MCP 工具：
+
+| 工具        | 描述                               |
+| ----------- | ---------------------------------- |
+| `fetch_url` | 获取网页内容并转换为文本           |
+| `web_search`| 搜索互联网获取相关信息             |
+| `run_js`    | 在安全沙箱中执行 JavaScript 代码   |
+
+#### 配置示例
+
+```yaml
+mcp:
+  enabled: true
+  # 内置工具配置
+  builtin:
+    web_search:
+      max_results: 5           # 最大返回结果数
+      timeout_seconds: 20      # 请求超时时间
+    js_sandbox:
+      enabled: true            # 启用 JS 沙箱
+      timeout_ms: 5000         # 执行超时时间
+      max_memory_mb: 64        # 最大内存限制
+```
+
+#### 外部 MCP 服务器
+
+Saber 支持连接外部 MCP 服务器：
+
+```yaml
+mcp:
+  enabled: true
+  servers:
+    # stdio 类型服务器
+    filesystem:
+      type: stdio
+      enabled: true
+      command: "/path/to/mcp-server-filesystem"
+      args: ["--root", "/home/user/documents"]
+      timeout_seconds: 30
+    # http 类型服务器
+    remote-server:
+      type: http
+      enabled: false
+      url: "https://mcp.example.com/api"
+      token: "your-bearer-token"
+```
+
+#### 使用工具
+
+当 AI 需要使用工具时，会自动调用相应的 MCP 工具。例如：
+
+```
+用户: 帮我搜索一下 Go 语言的最佳实践
+AI: [调用 web_search 工具] 我找到了以下信息...
+```
+
+#### 查看可用工具
+
+使用 `!mcp-list` 命令查看当前可用的所有 MCP 服务器和工具。
+
 ## 配置参考
 
 ### Matrix 设置
@@ -380,6 +449,46 @@ ai:
 | `backoff_factor`  | `2.0`  | 指数退避乘数           |
 | `fallback_models` | `[]`   | 降级使用的模型列表     |
 
+### MCP 设置
+
+| 字段       | 必填 | 描述                         |
+| ---------- | ---- | ---------------------------- |
+| `enabled`  | 否   | 启用 MCP 功能                |
+| `servers`  | 否   | 外部 MCP 服务器配置          |
+| `builtin`  | 否   | 内置工具配置                 |
+
+### MCP 内置工具设置
+
+#### web_search 配置
+
+| 字段             | 默认值 | 描述                         |
+| ---------------- | ------ | ---------------------------- |
+| `instances`      | `[]`   | SearXNG 实例列表（留空使用默认）|
+| `max_results`    | `5`    | 最大返回结果数（最大 10）    |
+| `timeout_seconds`| `20`   | 请求超时时间                 |
+
+#### js_sandbox 配置
+
+| 字段               | 默认值  | 描述                   |
+| ------------------ | ------- | ---------------------- |
+| `enabled`          | `true`  | 启用 JS 沙箱           |
+| `timeout_ms`       | `5000`  | 执行超时时间（毫秒）   |
+| `max_memory_mb`    | `64`    | 最大内存限制（MB）     |
+| `max_output_length`| `10000` | 最大输出长度（字符）   |
+
+### MCP 服务器设置
+
+| 字段    | 必填         | 描述                             |
+| ------- | ------------ | -------------------------------- |
+| `type`  | 是           | 服务器类型: `builtin`, `stdio`, `http` |
+| `enabled`| 否          | 是否启用                         |
+| `command`| stdio 必填  | 可执行文件路径                   |
+| `args`  | 否           | 命令参数                         |
+| `env`   | 否           | 环境变量                         |
+| `url`   | http 必填    | 服务器地址                       |
+| `token` | 否           | Bearer 认证令牌                  |
+| `timeout_seconds`| 否   | 调用超时时间                     |
+
 ## 架构
 
 ```
@@ -398,16 +507,35 @@ saber/
       handlers.go         # 事件处理和命令分发
       presence.go         # 在线状态管理
       rooms.go            # 房间操作
+      context.go          # 上下文工具
+      mention.go          # 提及解析服务
+      reply.go            # 回复工具
     ai/
       service.go          # AI 服务编排
       client.go           # OpenAI 兼容客户端
       context_manager.go  # 对话上下文管理
       stream_handler.go   # 流式响应处理
+      stream_editor.go    # 流式消息编辑
+      stream_tool_handler.go # 工具调用流处理
       retry_handler.go    # 重试逻辑和退避
       proactive.go        # 主动聊天管理器
       proactive_triggers.go # 触发器实现（静默/定时）
       proactive_state.go  # 房间状态跟踪
       proactive_decision.go # AI 决策引擎
+    mcp/
+      manager.go          # MCP 管理器
+      config.go           # MCP 配置验证
+      tools.go            # 工具管理
+      middleware.go       # 中间件
+      validation.go       # 输入验证
+      logging.go          # 日志中间件
+      servers/
+        builtin.go        # 内置服务器注册
+        web_fetch.go      # 网页抓取工具
+        web_search.go     # 网络搜索工具
+        js_sandbox.go     # JavaScript 沙箱
+        stdio.go          # Stdio MCP 服务器
+        http.go           # HTTP MCP 服务器
 ```
 
 ## 开发
@@ -471,6 +599,7 @@ go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
 - [mautrix-go](https://github.com/mautrix/go) - Matrix 客户端库
 - [go-openai](https://github.com/sashabaranov/go-openai) - OpenAI 客户端
+- [go-sdk](https://github.com/modelcontextprotocol/go-sdk) - MCP (Model Context Protocol) SDK
 - [tint](https://github.com/lmittmann/tint) - 带颜色的结构化日志
 
 ## 许可证
