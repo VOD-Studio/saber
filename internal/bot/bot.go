@@ -175,6 +175,11 @@ func Run(info matrix.BuildInfo) {
 		commandService.RegisterCommandWithDesc("ai-clear", "清除AI对话上下文", ai.NewClearContextCommand(aiService))
 		commandService.RegisterCommandWithDesc("ai-context", "显示AI对话上下文信息", ai.NewContextInfoCommand(aiService))
 
+		// 注册模型管理命令
+		commandService.RegisterCommandWithDesc("ai-models", "列出所有可用模型", ai.NewModelsCommand(aiService))
+		commandService.RegisterCommandWithDesc("ai-switch", "切换默认模型 (用法: !ai-switch <model-id>)", ai.NewSwitchModelCommand(aiService))
+		commandService.RegisterCommandWithDesc("ai-current", "显示当前默认模型", ai.NewCurrentModelCommand(aiService))
+
 		// 注册多模型AI命令
 		for modelName := range cfg.AI.Models {
 			commandName := fmt.Sprintf("ai-%s", modelName)
