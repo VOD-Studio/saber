@@ -36,15 +36,16 @@ func TestGatherDecisionContext(t *testing.T) {
 	roomID := id.RoomID("!test:example.org")
 
 	tests := []struct {
-		name         string
-		state        *RoomState
-		roomInfo     *matrix.RoomInfo
-		providerErr  error
-		triggerType  TriggerType
-		wantRoomName string
-		wantMessages int
-		wantTrigger  TriggerType
-		wantErr      bool
+		name                 string
+		state                *RoomState
+		roomInfo             *matrix.RoomInfo
+		providerErr          error
+		triggerType          TriggerType
+		wantRoomName         string
+		wantMessages         int
+		wantTrigger          TriggerType
+		wantMinutesSinceLast int
+		wantErr              bool
 	}{
 		{
 			name: "正常情况 - 有状态和房间信息",
@@ -58,11 +59,12 @@ func TestGatherDecisionContext(t *testing.T) {
 				MemberCount: 5,
 				IsEncrypted: true,
 			},
-			triggerType:  TriggerInactivity,
-			wantRoomName: "测试房间",
-			wantMessages: 2,
-			wantTrigger:  TriggerInactivity,
-			wantErr:      false,
+			triggerType:          TriggerInactivity,
+			wantRoomName:         "测试房间",
+			wantMessages:         2,
+			wantTrigger:          TriggerInactivity,
+			wantMinutesSinceLast: 30,
+			wantErr:              false,
 		},
 		{
 			name: "房间信息获取失败 - 使用默认值",
@@ -70,16 +72,17 @@ func TestGatherDecisionContext(t *testing.T) {
 				LastMessageTime: time.Now().Add(-120 * time.Minute),
 				MessagesToday:   1,
 			},
-			roomInfo:     nil,
-			providerErr:  fmt.Errorf("获取房间信息失败"),
-			triggerType:  TriggerScheduled,
-			wantRoomName: roomID.String(),
-			wantMessages: 1,
-			wantTrigger:  TriggerScheduled,
-			wantErr:      false,
+			roomInfo:             nil,
+			providerErr:          fmt.Errorf("获取房间信息失败"),
+			triggerType:          TriggerScheduled,
+			wantRoomName:         roomID.String(),
+			wantMessages:         1,
+			wantTrigger:          TriggerScheduled,
+			wantMinutesSinceLast: 120,
+			wantErr:              false,
 		},
 		{
-			name: "无历史消息",
+			name: "无历史消息 - 零值时间应返回 threshold + 1",
 			state: &RoomState{
 				LastMessageTime: time.Time{},
 				MessagesToday:   0,
@@ -90,11 +93,12 @@ func TestGatherDecisionContext(t *testing.T) {
 				MemberCount: 2,
 				IsEncrypted: false,
 			},
-			triggerType:  TriggerNewUser,
-			wantRoomName: "新房间",
-			wantMessages: 0,
-			wantTrigger:  TriggerNewUser,
-			wantErr:      false,
+			triggerType:          TriggerNewUser,
+			wantRoomName:         "新房间",
+			wantMessages:         0,
+			wantTrigger:          TriggerNewUser,
+			wantMinutesSinceLast: 61, // threshold (60) + 1
+			wantErr:              false,
 		},
 	}
 
@@ -125,6 +129,14 @@ func TestGatherDecisionContext(t *testing.T) {
 
 			if dc.RoomID != roomID {
 				t.Errorf("RoomID = %v, want %v", dc.RoomID, roomID)
+			}
+
+			// 验证 MinutesSinceLast，允许 ±1 分钟的误差（因为是动态计算）
+			if tt.wantMinutesSinceLast > 0 {
+				diff := dc.MinutesSinceLast - tt.wantMinutesSinceLast
+				if diff < -1 || diff > 1 {
+					t.Errorf("MinutesSinceLast = %v, want approximately %v", dc.MinutesSinceLast, tt.wantMinutesSinceLast)
+				}
 			}
 		})
 	}
