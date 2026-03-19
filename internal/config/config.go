@@ -187,12 +187,12 @@ func DefaultAIConfig() AIConfig {
 		BaseURL:               "",
 		APIKey:                "",
 		DefaultModel:          "",
-		MaxTokens:             4096,
+		MaxTokens:             256000,
 		Temperature:           0.7,
 		SystemPrompt:          "",
 		RateLimitPerMinute:    0,
 		Context:               DefaultContextConfig(),
-		StreamEnabled:         false,
+		StreamEnabled:         true,
 		StreamEdit:            DefaultStreamEditConfig(),
 		Retry:                 DefaultRetryConfig(),
 		Models:                make(map[string]ModelConfig),
@@ -217,7 +217,7 @@ func DefaultContextConfig() ContextConfig {
 // DefaultStreamEditConfig 返回带有合理默认值的流式编辑配置
 func DefaultStreamEditConfig() StreamEditConfig {
 	return StreamEditConfig{
-		Enabled:         false,
+		Enabled:         true,
 		CharThreshold:   300,
 		TimeThresholdMs: 3000,
 		EditIntervalMs:  500,
@@ -559,7 +559,7 @@ ai:
   # 默认使用的模型
   default_model: "gpt-4o-mini"
   # 最大生成 token 数
-  max_tokens: 4096
+  max_tokens: 256000
   # 生成温度（0-2）
   temperature: 0.7
   # 系统提示词（可选，用于自定义 AI 行为）
@@ -573,10 +573,10 @@ ai:
     max_tokens: 8000
     expiry_minutes: 60
   # 是否启用流式响应
-  stream_enabled: false
+  stream_enabled: true
   # 流式编辑配置
   stream_edit:
-    enabled: false
+    enabled: true
     char_threshold: 300
     time_threshold_ms: 3000
     edit_interval_ms: 500
