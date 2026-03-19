@@ -77,12 +77,6 @@ func NewModelRegistry(cfg *config.AIConfig) *ModelRegistry {
 		models[id] = info
 	}
 
-	// 确保 configDefault 指向的模型也存在
-	// 如果 DefaultModel 不在 Models map 中，它仍然可用（使用全局配置）
-	if _, exists := models[cfg.DefaultModel]; !exists && cfg.DefaultModel != "" {
-		// 已经在上面添加了
-	}
-
 	return &ModelRegistry{
 		configDefault:  cfg.DefaultModel,
 		currentDefault: cfg.DefaultModel,
