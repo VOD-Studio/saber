@@ -23,11 +23,15 @@ import (
 // Run 初始化并运行机器人。
 //
 // 它处理 CLI 标志、配置加载、Matrix 客户端设置和优雅关闭。
-func Run(version, gitMsg string) {
+func Run(info matrix.BuildInfo) {
 	flags := cli.Parse()
 
 	if flags.ShowVersion {
-		fmt.Printf("Saber Matrix Bot v%s (%s)\n", version, gitMsg)
+		fmt.Printf("Saber Matrix Bot v%s\n", info.Version)
+		fmt.Printf("  Git: %s (%s)\n", info.GitCommit, info.GitBranch)
+		fmt.Printf("  Built: %s\n", info.BuildTime)
+		fmt.Printf("  Go: %s\n", info.GoVersion)
+		fmt.Printf("  Platform: %s\n", info.Platform)
 		os.Exit(0)
 	}
 
@@ -43,7 +47,7 @@ func Run(version, gitMsg string) {
 	// 配置日志
 	setupLogging(flags.Verbose)
 
-	slog.Info("Starting Saber Matrix Bot", "version", version, "git", gitMsg)
+	slog.Info("Starting Saber Matrix Bot", "version", info.Version, "git", info.GitCommit, "branch", info.GitBranch)
 
 	// 加载配置
 	cfg, err := config.Load(flags.ConfigPath)
@@ -115,7 +119,7 @@ func Run(version, gitMsg string) {
 
 	// 设置命令服务
 	mautrixClient := client.GetClient()
-	commandService := matrix.NewCommandService(mautrixClient, client.GetUserID())
+	commandService := matrix.NewCommandService(mautrixClient, client.GetUserID(), &info)
 
 	// 注册内置命令
 	matrix.RegisterBuiltinCommands(commandService)
@@ -282,7 +286,7 @@ func Run(version, gitMsg string) {
 	if proactiveManager != nil {
 		proactiveManager.Start(ctx)
 	}
-	slog.Info("Saber Bot is running", "version", version, "git", gitMsg)
+	slog.Info("Saber Bot is running", "version", info.Version, "git", info.GitCommit, "branch", info.GitBranch)
 	slog.Info("Press Ctrl+C to exit.")
 
 	// 等待关闭信号

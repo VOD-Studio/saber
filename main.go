@@ -6,13 +6,25 @@ package main
 
 import (
 	"rua.plus/saber/internal/bot"
+	"rua.plus/saber/internal/matrix"
 )
 
 var (
-	version = "dev"
-	gitMsg  = "unknown"
+	version   = "dev"
+	gitCommit = "unknown"
+	gitBranch = "unknown"
+	buildTime = "unknown"
+	goVersion = "unknown"
+	platform  = "unknown"
 )
 
 func main() {
-	bot.Run(version, gitMsg)
+	bot.Run(matrix.BuildInfo{
+		Version:   version,
+		GitCommit: gitCommit,
+		GitBranch: gitBranch,
+		BuildTime: buildTime,
+		GoVersion: goVersion,
+		Platform:  platform,
+	})
 }

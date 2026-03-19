@@ -1,13 +1,23 @@
 .PHONY: build build-prod clean test fmt lint run help
 
 APP_NAME := saber
-GIT_MSG := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 VERSION := 0.0.3
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+BUILD_TIME := $(shell date -u '+%Y-%m-%d %H:%M:%S UTC')
+GO_VERSION := $(shell go version | awk '{print $$3}')
+PLATFORM := $(shell go env GOOS)/$(shell go env GOARCH)
 BUILD_DIR := bin
 MAIN_FILE := main.go
 
 # 生产构建标志
-LDFLAGS := -s -w -X 'main.version=$(VERSION)' -X 'main.gitMsg=$(GIT_MSG)'
+LDFLAGS := -s -w \
+	-X 'main.version=$(VERSION)' \
+	-X 'main.gitCommit=$(GIT_COMMIT)' \
+	-X 'main.gitBranch=$(GIT_BRANCH)' \
+	-X 'main.buildTime=$(BUILD_TIME)' \
+	-X 'main.goVersion=$(GO_VERSION)' \
+	-X 'main.platform=$(PLATFORM)'
 
 # 跨平台兼容
 ifeq ($(OS),Windows_NT)

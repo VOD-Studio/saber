@@ -294,7 +294,7 @@ func TestOnMember(t *testing.T) {
 			}
 
 			// 创建命令服务和事件处理器
-			service := NewCommandService(client, tt.botID)
+			service := NewCommandService(client, tt.botID, nil)
 			handler := NewEventHandler(service)
 
 			// 调用 OnMember 方法
@@ -330,7 +330,7 @@ func TestOnMessage_Concurrent(t *testing.T) {
 		HomeserverURL: homeserverURL,
 	}
 
-	service := NewCommandService(client, botUserID)
+	service := NewCommandService(client, botUserID, nil)
 
 	// 添加一个模拟的 AI 命令处理器，记录处理的消息数
 	var (
@@ -423,7 +423,7 @@ func TestOnMessage_PanicRecovery(t *testing.T) {
 		HomeserverURL: homeserverURL,
 	}
 
-	service := NewCommandService(client, botUserID)
+	service := NewCommandService(client, botUserID, nil)
 
 	// 注册一个会 panic 的处理器
 	panicHandler := &mockCommandHandler{
@@ -478,7 +478,7 @@ func TestOnMessage_ContextTimeout(t *testing.T) {
 		HomeserverURL: homeserverURL,
 	}
 
-	service := NewCommandService(client, botUserID)
+	service := NewCommandService(client, botUserID, nil)
 
 	// 注册一个会检查上下文取消的处理器
 	timeoutHandler := &mockCommandHandler{
@@ -539,7 +539,7 @@ func TestOnMessage_ContextPropagation(t *testing.T) {
 		HomeserverURL: homeserverURL,
 	}
 
-	service := NewCommandService(client, botUserID)
+	service := NewCommandService(client, botUserID, nil)
 
 	// 注册一个检查上下文的处理器
 	var receivedToken any
@@ -609,7 +609,7 @@ func TestOnMessage_ErrorHandling(t *testing.T) {
 		HomeserverURL: homeserverURL,
 	}
 
-	service := NewCommandService(client, botUserID)
+	service := NewCommandService(client, botUserID, nil)
 
 	// 注册一个返回错误的处理器
 	var (
@@ -755,7 +755,7 @@ func TestIsReplyToBot(t *testing.T) {
 			}
 
 			// 创建命令服务
-			service := NewCommandService(client, tt.botID)
+			service := NewCommandService(client, tt.botID, nil)
 
 			// 调用 isReplyToBot 方法
 			ctx := context.Background()
@@ -949,7 +949,7 @@ func TestHandleEvent_ReplyToBot(t *testing.T) {
 				HomeserverURL: homeserverURL,
 			}
 
-			service := NewCommandService(client, botUserID)
+			service := NewCommandService(client, botUserID, nil)
 
 			// 设置 replyAI 处理器
 			if tt.setupReplyAI {
@@ -1037,7 +1037,7 @@ func TestHandleEvent_ReplyIntegration(t *testing.T) {
 			HomeserverURL: homeserverURL,
 		}
 
-		service := NewCommandService(client, botUserID)
+		service := NewCommandService(client, botUserID, nil)
 		service.SetReplyAIHandler(mockReplyHandler)
 
 		// 创建真实的 Matrix 回复事件结构
@@ -1129,7 +1129,7 @@ func TestHandleEvent_ReplyIntegration(t *testing.T) {
 			HomeserverURL: homeserverURL,
 		}
 
-		service := NewCommandService(client, botUserID)
+		service := NewCommandService(client, botUserID, nil)
 		service.SetReplyAIHandler(mockReplyHandler)
 
 		replyEvent := &event.Event{
@@ -1177,7 +1177,7 @@ func TestHandleEvent_ReplyIntegration(t *testing.T) {
 			HomeserverURL: homeserverURL,
 		}
 
-		service := NewCommandService(client, botUserID)
+		service := NewCommandService(client, botUserID, nil)
 		// 不设置 replyAI 处理器
 
 		replyEvent := &event.Event{
@@ -1242,7 +1242,7 @@ func TestHandleEvent_ReplyIntegration(t *testing.T) {
 			HomeserverURL: homeserverURL,
 		}
 
-		service := NewCommandService(client, botUserID)
+		service := NewCommandService(client, botUserID, nil)
 		service.SetReplyAIHandler(mockReplyHandler)
 		service.SetMentionAIHandler(mockMentionHandler)
 
@@ -1310,7 +1310,7 @@ func TestHandleEvent_ReplyIntegration(t *testing.T) {
 			HomeserverURL: homeserverURL,
 		}
 
-		service := NewCommandService(client, botUserID)
+		service := NewCommandService(client, botUserID, nil)
 		service.SetReplyAIHandler(mockReplyHandler)
 
 		replyEvent := &event.Event{
@@ -1365,7 +1365,7 @@ func TestHandleEvent_ReplyIntegration(t *testing.T) {
 			HomeserverURL: homeserverURL,
 		}
 
-		service := NewCommandService(client, botUserID)
+		service := NewCommandService(client, botUserID, nil)
 		service.SetReplyAIHandler(mockReplyHandler)
 
 		replyEvent := &event.Event{
@@ -1427,7 +1427,7 @@ func TestHandleEvent_ReplyIntegration(t *testing.T) {
 			HomeserverURL: homeserverURL,
 		}
 
-		service := NewCommandService(client, botUserID)
+		service := NewCommandService(client, botUserID, nil)
 		service.SetReplyAIHandler(mockReplyHandler)
 
 		// 创建带 HTML 格式的回复消息
@@ -1616,7 +1616,7 @@ func TestHandleEvent_ReplyToOriginalMessage(t *testing.T) {
 				HomeserverURL: homeserverURL,
 			}
 
-			service := NewCommandService(client, botUserID)
+			service := NewCommandService(client, botUserID, nil)
 
 			mockHandler := &mockCommandHandler{
 				handleFunc: func(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {

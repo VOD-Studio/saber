@@ -17,6 +17,16 @@ import (
 	"rua.plus/saber/internal/mcp"
 )
 
+// BuildInfo 包含构建时的版本信息。
+type BuildInfo struct {
+	Version   string
+	GitCommit string
+	GitBranch string
+	BuildTime string
+	GoVersion string
+	Platform  string
+}
+
 // CommandHandler 定义处理机器人命令的接口。
 type CommandHandler interface {
 	// Handle 处理带有给定参数的命令。
@@ -41,18 +51,25 @@ type CommandService struct {
 	client         *mautrix.Client
 	botID          id.UserID
 	directChatAI   CommandHandler
-	mentionAI      CommandHandler  // 群聊 mention AI 处理器
-	replyAI        CommandHandler  // 回复消息 AI 处理器
-	mentionService *MentionService // Mention 服务
+	mentionAI      CommandHandler
+	replyAI        CommandHandler
+	mentionService *MentionService
+	buildInfo      *BuildInfo
 }
 
 // NewCommandService 创建一个新的命令服务。
-func NewCommandService(client *mautrix.Client, botID id.UserID) *CommandService {
+func NewCommandService(client *mautrix.Client, botID id.UserID, info *BuildInfo) *CommandService {
 	return &CommandService{
-		commands: make(map[string]CommandInfo),
-		client:   client,
-		botID:    botID,
+		commands:  make(map[string]CommandInfo),
+		client:    client,
+		botID:     botID,
+		buildInfo: info,
 	}
+}
+
+// GetBuildInfo 返回构建信息。
+func (s *CommandService) GetBuildInfo() *BuildInfo {
+	return s.buildInfo
 }
 
 // RegisterCommand 注册一个不带描述的命令处理器。
@@ -878,10 +895,51 @@ func (c *HelpCommand) Handle(ctx context.Context, userID id.UserID, roomID id.Ro
 	return c.service.SendFormattedText(ctx, roomID, htmlBuilder.String(), plainBuilder.String())
 }
 
-// RegisterBuiltinCommands 注册默认命令（!ping, !help）。
+// VersionCommand 显示构建版本信息。
+type VersionCommand struct {
+	service *CommandService
+}
+
+// NewVersionCommand 创建一个新的版本命令处理器。
+func NewVersionCommand(service *CommandService) *VersionCommand {
+	return &VersionCommand{service: service}
+}
+
+// Handle 实现 CommandHandler，生成 HTML 表格格式的版本信息。
+func (c *VersionCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
+	info := c.service.GetBuildInfo()
+	if info == nil {
+		return c.service.SendText(ctx, roomID, "版本信息不可用")
+	}
+
+	var html strings.Builder
+	html.WriteString("<h3>📦 Saber 版本信息</h3>")
+	html.WriteString("<table><thead><tr><th>项目</th><th>值</th></tr></thead><tbody>")
+	fmt.Fprintf(&html, "<tr><td><strong>版本</strong></td><td><code>%s</code></td></tr>", info.Version)
+	fmt.Fprintf(&html, "<tr><td><strong>Git 提交</strong></td><td><code>%s</code></td></tr>", info.GitCommit)
+	fmt.Fprintf(&html, "<tr><td><strong>Git 分支</strong></td><td><code>%s</code></td></tr>", info.GitBranch)
+	fmt.Fprintf(&html, "<tr><td><strong>构建时间</strong></td><td><code>%s</code></td></tr>", info.BuildTime)
+	fmt.Fprintf(&html, "<tr><td><strong>Go 版本</strong></td><td><code>%s</code></td></tr>", info.GoVersion)
+	fmt.Fprintf(&html, "<tr><td><strong>平台</strong></td><td><code>%s</code></td></tr>", info.Platform)
+	html.WriteString("</tbody></table>")
+
+	var plain strings.Builder
+	plain.WriteString("📦 Saber 版本信息\n\n")
+	fmt.Fprintf(&plain, "版本: %s\n", info.Version)
+	fmt.Fprintf(&plain, "Git 提交: %s\n", info.GitCommit)
+	fmt.Fprintf(&plain, "Git 分支: %s\n", info.GitBranch)
+	fmt.Fprintf(&plain, "构建时间: %s\n", info.BuildTime)
+	fmt.Fprintf(&plain, "Go 版本: %s\n", info.GoVersion)
+	fmt.Fprintf(&plain, "平台: %s\n", info.Platform)
+
+	return c.service.SendFormattedText(ctx, roomID, html.String(), plain.String())
+}
+
+// RegisterBuiltinCommands 注册默认命令（!ping, !help, !version）。
 func RegisterBuiltinCommands(service *CommandService) {
 	service.RegisterCommandWithDesc("ping", "检查机器人是否在线", NewPingCommand(service))
 	service.RegisterCommandWithDesc("help", "列出可用命令", NewHelpCommand(service))
+	service.RegisterCommandWithDesc("version", "显示版本信息", NewVersionCommand(service))
 }
 
 // MCPListCommand lists all available MCP servers and tools.
