@@ -220,7 +220,7 @@ func TestOnMember(t *testing.T) {
 				Type:   event.StateMember,
 				RoomID: roomID,
 				Sender: senderID,
-				// StateKey is nil
+				// StateKey 为 nil
 				Content: event.Content{
 					Parsed: &event.MemberEventContent{
 						Membership: event.MembershipInvite,

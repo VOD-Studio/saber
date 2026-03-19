@@ -92,7 +92,7 @@ func TestSystemError_Unwrap(t *testing.T) {
 		t.Errorf("Unwrap() = %v, want %v", unwrapped, innerErr)
 	}
 
-	// Test with nil error
+	// 测试 nil 错误
 	sysErrNil := &SystemError{
 		Op:      "Test",
 		Err:     nil,
@@ -219,7 +219,7 @@ func TestValidateToolInput(t *testing.T) {
 			schema: map[string]any{
 				"required": "not an array", // Invalid type
 			},
-			wantErr: false, // Should not error on invalid schema
+			wantErr: false, // 无效 schema 不应报错
 		},
 		{
 			name: "required field with non-string items",
@@ -229,7 +229,7 @@ func TestValidateToolInput(t *testing.T) {
 			schema: map[string]any{
 				"required": []interface{}{123, true}, // Non-string items
 			},
-			wantErr: false, // Should skip non-string items
+			wantErr: false, // 应跳过非字符串项
 		},
 	}
 

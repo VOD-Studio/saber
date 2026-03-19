@@ -126,7 +126,7 @@ func TestContextManager_AddMessage(t *testing.T) {
 				{RoleUser, "Message 4"},
 				{RoleUser, "Message 5"},
 			},
-			wantCount: 3, // Should keep only last 3
+			wantCount: 3, // 应该只保留最后 3 条
 		},
 		{
 			name:   "all role types",

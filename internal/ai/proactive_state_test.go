@@ -73,7 +73,7 @@ func TestStateTracker_BasicOperations(t *testing.T) {
 		st := NewStateTracker()
 		roomID := id.RoomID("!test:example.org")
 
-		st.GetState(roomID) // Create state
+		st.GetState(roomID) // 创建状态
 		if len(st.ListActiveRooms()) != 1 {
 			t.Fatal("Should have 1 active room")
 		}

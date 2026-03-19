@@ -16,6 +16,7 @@ import (
 var BuiltinServers = []string{
 	"web_fetch",
 	"web_search",
+	"js_sandbox",
 }
 
 // BuiltinServerInfo 包含内置服务器的元信息。
@@ -48,6 +49,13 @@ func BuiltinServersInfo() []BuiltinServerInfo {
 				{Name: "web_search", Description: "搜索互联网获取相关信息"},
 			},
 		},
+		{
+			Name:        "js_sandbox",
+			Description: "JavaScript 沙箱执行",
+			Tools: []ToolInfo{
+				{Name: "run_js", Description: "在安全沙箱中执行 JavaScript 代码"},
+			},
+		},
 	}
 }
 
@@ -60,6 +68,8 @@ func CreateBuiltinServer(ctx context.Context, name string, cfg *config.BuiltinCo
 		server = NewWebFetchServer()
 	case "web_search":
 		server = NewWebSearchServerWithConfig(cfg.WebSearch)
+	case "js_sandbox":
+		server = NewJSSandboxServerWithConfig(&cfg.JSSandbox)
 	default:
 		return nil, nil, fmt.Errorf("未知的内置服务器: %s", name)
 	}

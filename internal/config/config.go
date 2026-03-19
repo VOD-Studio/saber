@@ -92,6 +92,7 @@ type MCPConfig struct {
 // BuiltinConfig 存储内置 MCP 工具配置
 type BuiltinConfig struct {
 	WebSearch WebSearchConfig `yaml:"web_search"` // web_search 工具配置
+	JSSandbox JSSandboxConfig `yaml:"js_sandbox"` // js_sandbox 工具配置
 }
 
 // WebSearchConfig 存储 web_search 工具配置
@@ -99,6 +100,14 @@ type WebSearchConfig struct {
 	Instances      []string `yaml:"instances"`       // SearXNG 实例列表
 	MaxResults     int      `yaml:"max_results"`     // 最大返回结果数
 	TimeoutSeconds int      `yaml:"timeout_seconds"` // 请求超时时间（秒）
+}
+
+// JSSandboxConfig 存储 js_sandbox 工具配置
+type JSSandboxConfig struct {
+	Enabled         bool `yaml:"enabled"`           // 是否启用 JS 沙箱
+	TimeoutMs       int  `yaml:"timeout_ms"`        // 执行超时时间（毫秒）
+	MaxMemoryMB     int  `yaml:"max_memory_mb"`     // 最大内存限制（MB）
+	MaxOutputLength int  `yaml:"max_output_length"` // 最大输出长度（字符）
 }
 
 // ServerConfig 存储单个 MCP 服务器配置
@@ -273,6 +282,16 @@ func DefaultDecisionConfig() DecisionConfig {
 		Model:          "",
 		Temperature:    0.8,
 		PromptTemplate: "",
+	}
+}
+
+// DefaultJSSandboxConfig 返回带有合理默认值的 JS 沙箱配置
+func DefaultJSSandboxConfig() JSSandboxConfig {
+	return JSSandboxConfig{
+		Enabled:         true,
+		TimeoutMs:       5000,
+		MaxMemoryMB:     64,
+		MaxOutputLength: 10000,
 	}
 }
 
@@ -497,6 +516,7 @@ func DefaultConfig() *Config {
 					MaxResults:     5,
 					TimeoutSeconds: 20,
 				},
+				JSSandbox: DefaultJSSandboxConfig(),
 			},
 		},
 	}

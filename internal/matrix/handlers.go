@@ -942,7 +942,7 @@ func RegisterBuiltinCommands(service *CommandService) {
 	service.RegisterCommandWithDesc("version", "显示版本信息", NewVersionCommand(service))
 }
 
-// MCPListCommand lists all available MCP servers and tools.
+// MCPListCommand 列出所有可用的 MCP 服务器和工具。
 type MCPListCommand struct {
 	service *CommandService
 	mcp     *mcp.Manager

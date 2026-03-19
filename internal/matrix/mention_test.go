@@ -333,7 +333,7 @@ func TestParseMention_DisplayName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			svc := NewMentionService(&mautrix.Client{}, botID)
-			// Mock the display name by directly setting it (bypassing Init)
+			// 通过直接设置模拟显示名称（绕过 Init）
 			svc.mu.Lock()
 			svc.displayName = tt.displayName
 			svc.mu.Unlock()
@@ -534,7 +534,7 @@ func TestMentionService_BoundaryCases(t *testing.T) {
 			name:  "nil content in ParseMention",
 			setup: func(svc *MentionService) {},
 			testFunc: func(svc *MentionService) error {
-				// This should not panic
+				// 这不应该 panic
 				_, _ = svc.ParseMention("test", nil)
 				return nil
 			},
@@ -571,11 +571,11 @@ func TestMentionService_BoundaryCases(t *testing.T) {
 		{
 			name: "init before and after",
 			setup: func(svc *MentionService) {
-				// Initially no display name
+				// 初始时没有显示名称
 				if svc.GetDisplayName() != "" {
 					return
 				}
-				// Mock Init to set display name
+				// 模拟 Init 设置显示名称
 				svc.mu.Lock()
 				svc.displayName = "InitializedBot"
 				svc.mu.Unlock()
@@ -595,15 +595,15 @@ func TestMentionService_BoundaryCases(t *testing.T) {
 				svc.mu.Unlock()
 			},
 			testFunc: func(svc *MentionService) error {
-				// Test empty message
+				// 测试空消息
 				result := svc.StripMentionPrefix("")
 				if result != "" {
 					return fmt.Errorf("empty message should return empty")
 				}
 
-				// Test message with only mention
+				// 测试仅包含 mention 的消息
 				result = svc.StripMentionPrefix("@Bot")
-				if result != "@Bot" { // Should return original since no content after
+				if result != "@Bot" { // 应该返回原始内容，因为后面没有其他内容
 					return fmt.Errorf("mention-only message should return original")
 				}
 

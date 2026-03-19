@@ -122,10 +122,10 @@ func TestProactiveManagerLifecycle(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Test Start
+	// 测试 Start
 	manager.Start(ctx)
 
-	// Test Stop
+	// 测试 Stop
 	manager.Stop()
 }
 
@@ -146,10 +146,10 @@ func TestProactiveManagerDisabled(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Start should return immediately when disabled
+	// Start 在禁用时应立即返回
 	manager.Start(ctx)
 
-	// Stop should not panic
+	// Stop 不应该 panic
 	manager.Stop()
 }
 
@@ -222,7 +222,7 @@ func TestProactiveManagerShutdownWithContext(t *testing.T) {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
 
-	// Create a context that can be cancelled
+	// 创建一个可取消的上下文
 	ctx, cancel := context.WithCancel(context.Background())
 
 	manager.Start(ctx)
@@ -448,7 +448,7 @@ func TestGenerateWelcomeMessage_AIDisabled(t *testing.T) {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
 
-	// Verify manager was created successfully
+	// 验证管理器创建成功
 	if manager == nil {
 		t.Error("NewProactiveManager() returned nil manager")
 	}
@@ -499,7 +499,7 @@ func TestTriggerCoordinator_NewCoordinator(t *testing.T) {
 		t.Fatal("NewTriggerCoordinator() returned nil")
 	}
 
-	// Verify getters
+	// 验证 getter 方法
 	if coordinator.GetSilenceTrigger() != silenceTrigger {
 		t.Error("GetSilenceTrigger() did not return the expected trigger")
 	}
@@ -520,7 +520,7 @@ func TestTriggerCoordinator_NilParameters(t *testing.T) {
 	stateTracker := NewStateTracker()
 	roomService := &matrix.RoomService{}
 
-	// Create valid default triggers for tests
+	// 为测试创建有效的默认触发器
 	defaultSilence, _ := NewSilenceTrigger(&cfg.Silence, stateTracker, roomService)
 	defaultSchedule, _ := NewScheduleTrigger(&cfg.Schedule)
 	defaultLimiter, _ := NewRateLimiter(cfg, stateTracker)
@@ -657,14 +657,14 @@ func TestTriggerCoordinator_CheckAndTrigger(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Test with no silent rooms - should return empty slice (not nil)
+	// 测试无静默房间 - 应返回空切片（非 nil）
 	results := coordinator.CheckAndTrigger(ctx)
 	if results == nil && len(results) == 0 {
-		// Empty slice is acceptable, but nil is not
+		// 空切片可接受，但 nil 不行
 		t.Error("CheckAndTrigger() returned nil, want empty slice")
 	}
 
-	// Test with silence disabled
+	// 测试静默检测禁用的情况
 	cfg.Silence.Enabled = false
 	coordinator2, err := NewTriggerCoordinator(cfg, silenceTrigger, scheduleTrigger, rateLimiter, stateTracker)
 	if err != nil {
@@ -726,7 +726,7 @@ func TestTriggerCoordinator_HandleSilenceTrigger(t *testing.T) {
 
 	ctx := context.Background()
 
-	// This should not panic and should handle empty rooms gracefully
+	// 这不应该 panic，应优雅处理空房间
 	manager.handleSilenceTrigger(ctx)
 }
 
@@ -754,11 +754,11 @@ func TestTriggerCoordinator_HandleScheduleTrigger(t *testing.T) {
 
 	ctx := context.Background()
 
-	// This should not panic
+	// 这不应该 panic
 	manager.handleScheduleTrigger(ctx)
 }
 
-// mockRoomListerTest implements RoomLister interface for testing in proactive_test.go.
+// mockRoomListerTest 实现 RoomLister 接口，用于 proactive_test.go 中的测试。
 type mockRoomListerTest struct {
 	rooms []matrix.RoomInfo
 }

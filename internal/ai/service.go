@@ -91,8 +91,8 @@ func (s *Service) executeToolCallingLoop(
 			return resp.Content, nil
 		}
 
-		// Add assistant message with tool calls to history FIRST
-		// This is required for the AI to see its previous tool calls
+		// 先将带工具调用的助手消息添加到历史记录
+		// 这是 AI 查看其之前工具调用所必需的
 		currentMessages = append(currentMessages, openai.ChatCompletionMessage{
 			Role:      openai.ChatMessageRoleAssistant,
 			Content:   resp.Content,
@@ -454,7 +454,7 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 		req.Model = model
 		slog.Debug("发送AI请求", "model", model, "base_url", s.globalConfig.BaseURL)
 
-		// Check if we should use tool calling
+		// 检查是否应该使用工具调用
 		var tools []openai.Tool
 		useToolCalling := false
 		if s.mcpManager != nil && s.mcpManager.IsEnabled() {
@@ -510,14 +510,14 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 			var chatErr error
 
 			if useToolCalling {
-				// Use tool calling loop
+				// 使用工具调用循环
 				finalContent, chatErr = s.executeToolCallingLoop(ctx, messages, model, tools)
 				if chatErr == nil {
-					// Create a dummy usage for tool calling responses
+					// 为工具调用响应创建空的 usage
 					usage = openai.Usage{}
 				}
 			} else {
-				// Use direct chat completion
+				// 使用直接聊天完成
 				resp, err := client.CreateChatCompletion(ctx, req)
 				if err != nil {
 					chatErr = err

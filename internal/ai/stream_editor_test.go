@@ -486,7 +486,7 @@ func TestStreamEditor_EditInterval(t *testing.T) {
 	_ = editor.Update(ctx, "content 3")
 
 	calls := mock.getSendTextWithRelatesToCalls()
-	expectedCalls := 3 // start + 2 edits (third skipped due to interval)
+	expectedCalls := 3 // 启动 + 2 次编辑（第三次因间隔跳过）
 	if len(calls) != expectedCalls {
 		t.Errorf("expected %d calls, got %d", expectedCalls, len(calls))
 	}
