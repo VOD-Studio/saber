@@ -11,7 +11,7 @@ BUILD_DIR := bin
 MAIN_FILE := main.go
 
 # 生产构建标志
-LDFLAGS := -s -w \
+LDFLAGS := -s -w -v \
 	-X 'main.version=$(VERSION)' \
 	-X 'main.gitCommit=$(GIT_COMMIT)' \
 	-X 'main.gitBranch=$(GIT_BRANCH)' \
