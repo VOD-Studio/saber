@@ -5,6 +5,9 @@
 package main
 
 import (
+	// 注册 SQLite 驱动 (纯 Go 或 CGO，取决于构建标签)
+	_ "rua.plus/saber/internal/db"
+
 	"rua.plus/saber/internal/bot"
 	"rua.plus/saber/internal/matrix"
 )
