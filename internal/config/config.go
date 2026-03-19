@@ -598,7 +598,6 @@ ai:
     # creative:
     #   model: "gpt-4o"
     #   temperature: 0.9
-
   # 请求超时时间（秒）
   timeout_seconds: 30
   # 在私聊中自动回复（无需 !ai 前缀）
@@ -607,7 +606,6 @@ ai:
   group_chat_mention_reply: true
   # 回复机器人消息时自动回复（用于连续对话）
   reply_to_bot_reply: true
-
   # 主动聊天配置
   proactive:
     # 是否启用主动聊天
