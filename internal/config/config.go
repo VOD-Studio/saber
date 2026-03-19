@@ -639,6 +639,24 @@ ai:
 mcp:
   # 启用 MCP 功能
   enabled: true
+  # 外部 MCP 服务器配置（可选）
+  # servers:
+  #   # stdio 类型服务器示例
+  #   filesystem:
+  #     type: stdio
+  #     enabled: true
+  #     command: "/path/to/mcp-server-filesystem"
+  #     args: ["--root", "/home/user/documents"]
+  #     timeout_seconds: 30
+  #     # env:
+  #     #   DEBUG: "1"
+  #   # http 类型服务器示例
+  #   remote-server:
+  #     type: http
+  #     enabled: false
+  #     url: "https://mcp.example.com/api"
+  #     token: "your-bearer-token"
+  #     timeout_seconds: 30
   # 内置工具配置
   builtin:
     # web_search 搜索工具配置
@@ -651,6 +669,16 @@ mcp:
       max_results: 5
       # 请求超时时间（秒，默认 20）
       timeout_seconds: 20
+    # js_sandbox JS 沙箱工具配置
+    js_sandbox:
+      # 是否启用 JS 沙箱（默认启用）
+      enabled: true
+      # 执行超时时间（毫秒，默认 5000）
+      timeout_ms: 5000
+      # 最大内存限制 MB（默认 64）
+      max_memory_mb: 64
+      # 最大输出长度（字符，默认 10000）
+      max_output_length: 10000
 `
 }
 
