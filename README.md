@@ -550,13 +550,47 @@ export GOFLAGS="-tags=goolm"
 ### 构建命令
 
 ```bash
-make build     # 构建二进制文件
-make run       # 使用 go run 运行
-make test      # 运行测试
-make fmt       # 格式化代码
-make lint      # 运行代码检查
-make clean     # 清理构建产物
+make build       # 构建二进制文件（可能使用 CGO）
+make build-prod  # 生产构建（纯 Go，静态链接，无 CGO）
+make run         # 使用 go run 运行
+make test        # 运行测试
+make fmt         # 格式化代码
+make lint        # 运行代码检查
+make clean       # 清理构建产物
 ```
+
+### 构建模式说明
+
+项目支持两种 SQLite 实现，通过 CGO 开关选择：
+
+| 命令 | CGO | SQLite 驱动 | 适用场景 |
+|------|-----|-------------|----------|
+| `make build` | 自动检测 | `mattn/go-sqlite3` (CGO) | 开发环境 |
+| `make build-prod` | 禁用 | `modernc/sqlite` (纯 Go) | 生产部署、容器化 |
+
+**推荐生产环境使用 `make build-prod`**：
+
+- 纯 Go 构建，无需 C 编译器
+- 静态链接，可在任意 Linux 发行版运行（包括 Alpine）
+- 构建更快，二进制更小
+- 跨平台部署更简单
+
+**`build-prod` 构建参数**：
+
+```bash
+CGO_ENABLED=0 go build -tags goolm -trimpath \
+  -ldflags="-s -w -X 'main.version=...'" \
+  -gcflags="-l=4" -o bin/saber .
+```
+
+| 参数 | 作用 |
+|------|------|
+| `CGO_ENABLED=0` | 禁用 CGO，强制纯 Go 编译 |
+| `-tags goolm` | 使用纯 Go 的 E2EE 实现 |
+| `-trimpath` | 移除文件系统路径，可复现构建 |
+| `-ldflags="-s -w"` | 移除符号表和调试信息，减小体积 |
+| `-ldflags="-X ..."` | 运行时注入版本、Git commit 等信息 |
+| `-gcflags="-l=4"` | 激进内联优化，提升性能 |
 
 ### 使用 E2EE 构建
 
