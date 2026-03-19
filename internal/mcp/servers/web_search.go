@@ -93,7 +93,7 @@ func NewWebSearchServerWithConfig(cfg config.WebSearchConfig) *mcp.Server {
 		Version: "1.0.0",
 	}, nil)
 
-	mcp.AddTool[SearchInput, SearchOutput](server, &mcp.Tool{
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "web_search",
 		Description: "搜索互联网获取相关信息",
 	}, handleWebSearch)
