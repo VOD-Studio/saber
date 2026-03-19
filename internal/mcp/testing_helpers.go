@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/modelcontextprotocol/go-sdk/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"maunium.net/go/mautrix/id"
 
@@ -30,7 +29,7 @@ type MockTool struct {
 	// Description 是工具描述。
 	Description string
 	// InputSchema 是工具的输入参数 schema。
-	InputSchema *jsonschema.Schema
+	InputSchema map[string]any
 	// Handler 是工具的处理函数。
 	Handler func(ctx context.Context, args map[string]any) (*MockToolResult, error)
 }
@@ -262,15 +261,15 @@ var TestFixtures = struct {
 	EchoTool: &MockTool{
 		Name:        "echo",
 		Description: "返回输入的消息",
-		InputSchema: &jsonschema.Schema{
-			Type: "object",
-			Properties: map[string]*jsonschema.Schema{
-				"message": {
-					Type:        "string",
-					Description: "要回显的消息",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"message": map[string]any{
+					"type":        "string",
+					"description": "要回显的消息",
 				},
 			},
-			Required: []string{"message"},
+			"required": []string{"message"},
 		},
 		Handler: func(ctx context.Context, args map[string]any) (*MockToolResult, error) {
 			message, _ := args["message"].(string)
@@ -286,8 +285,8 @@ var TestFixtures = struct {
 	ErrorTool: &MockTool{
 		Name:        "error_tool",
 		Description: "总是返回错误的工具",
-		InputSchema: &jsonschema.Schema{
-			Type: "object",
+		InputSchema: map[string]any{
+			"type": "object",
 		},
 		Handler: func(ctx context.Context, args map[string]any) (*MockToolResult, error) {
 			return nil, fmt.Errorf("intentional error for testing")
@@ -296,8 +295,8 @@ var TestFixtures = struct {
 	SlowTool: &MockTool{
 		Name:        "slow_tool",
 		Description: "模拟慢速响应的工具",
-		InputSchema: &jsonschema.Schema{
-			Type: "object",
+		InputSchema: map[string]any{
+			"type": "object",
 		},
 		Handler: func(ctx context.Context, args map[string]any) (*MockToolResult, error) {
 			// 模拟延迟（实际测试中应使用可控制的延迟）
@@ -313,8 +312,8 @@ var TestFixtures = struct {
 	ContextTool: &MockTool{
 		Name:        "context_tool",
 		Description: "返回调用上下文信息的工具",
-		InputSchema: &jsonschema.Schema{
-			Type: "object",
+		InputSchema: map[string]any{
+			"type": "object",
 		},
 		Handler: func(ctx context.Context, args map[string]any) (*MockToolResult, error) {
 			userID := GetUserFromContext(ctx)

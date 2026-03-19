@@ -43,7 +43,9 @@ func CreateStdioServer(ctx context.Context, name string, cfg *config.ServerConfi
 	}
 
 	// 创建 stdio 传输
-	transport := mcp.NewCommandTransport(cmd)
+	transport := &mcp.CommandTransport{
+		Command: cmd,
+	}
 
 	// 创建客户端
 	client := mcp.NewClient(&mcp.Implementation{
@@ -52,7 +54,7 @@ func CreateStdioServer(ctx context.Context, name string, cfg *config.ServerConfi
 	}, nil)
 
 	// 连接到服务器
-	session, err := client.Connect(cmdCtx, transport)
+	session, err := client.Connect(cmdCtx, transport, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("连接 stdio 服务器 %s 失败: %w", name, err)
 	}

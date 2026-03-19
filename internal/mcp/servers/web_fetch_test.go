@@ -6,8 +6,6 @@ import (
 	"net"
 	"strings"
 	"testing"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // TestIsPrivateIP_Loopback 测试回环地址检测。
@@ -586,11 +584,9 @@ func TestExtractText_WhitespaceCleanup(t *testing.T) {
 // TestHandleFetchURL_EmptyURL 测试空 URL 错误。
 func TestHandleFetchURL_EmptyURL(t *testing.T) {
 	ctx := context.Background()
-	params := &mcp.CallToolParamsFor[FetchInput]{
-		Arguments: FetchInput{URL: ""},
-	}
+	input := FetchInput{URL: ""}
 
-	_, err := handleFetchURL(ctx, nil, params)
+	_, _, err := handleFetchURL(ctx, nil, input)
 	if err == nil {
 		t.Error("Expected error for empty URL, got nil")
 	}
@@ -617,11 +613,9 @@ func TestHandleFetchURL_InvalidURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			params := &mcp.CallToolParamsFor[FetchInput]{
-				Arguments: FetchInput{URL: tt.url},
-			}
+			input := FetchInput{URL: tt.url}
 
-			_, err := handleFetchURL(ctx, nil, params)
+			_, _, err := handleFetchURL(ctx, nil, input)
 			if err == nil {
 				t.Errorf("Expected error for URL %q, got nil", tt.url)
 			}
@@ -645,11 +639,9 @@ func TestHandleFetchURL_MissingHost(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			params := &mcp.CallToolParamsFor[FetchInput]{
-				Arguments: FetchInput{URL: tt.url},
-			}
+			input := FetchInput{URL: tt.url}
 
-			_, err := handleFetchURL(ctx, nil, params)
+			_, _, err := handleFetchURL(ctx, nil, input)
 			if err == nil {
 				t.Errorf("Expected error for URL %q, got nil", tt.url)
 			}
@@ -663,14 +655,12 @@ func TestHandleFetchURL_MissingHost(t *testing.T) {
 // TestHandleFetchURL_InvalidFormat 测试无效格式参数。
 func TestHandleFetchURL_InvalidFormat(t *testing.T) {
 	ctx := context.Background()
-	params := &mcp.CallToolParamsFor[FetchInput]{
-		Arguments: FetchInput{
-			URL:    "http://example.com",
-			Format: "invalid",
-		},
+	input := FetchInput{
+		URL:    "http://example.com",
+		Format: "invalid",
 	}
 
-	_, err := handleFetchURL(ctx, nil, params)
+	_, _, err := handleFetchURL(ctx, nil, input)
 	if err == nil {
 		t.Error("Expected error for invalid format, got nil")
 	}
@@ -704,11 +694,9 @@ func TestHandleFetchURL_SSRFBlocking(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			params := &mcp.CallToolParamsFor[FetchInput]{
-				Arguments: FetchInput{URL: tt.url},
-			}
+			input := FetchInput{URL: tt.url}
 
-			_, err := handleFetchURL(ctx, nil, params)
+			_, _, err := handleFetchURL(ctx, nil, input)
 			if err == nil {
 				t.Errorf("Expected SSRF blocking error for URL %q, got nil", tt.url)
 			}
@@ -725,11 +713,9 @@ func TestHandleFetchURL_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	params := &mcp.CallToolParamsFor[FetchInput]{
-		Arguments: FetchInput{URL: "http://example.com"},
-	}
+	input := FetchInput{URL: "http://example.com"}
 
-	_, err := handleFetchURL(ctx, nil, params)
+	_, _, err := handleFetchURL(ctx, nil, input)
 	if err == nil {
 		t.Error("Expected error for cancelled context, got nil")
 	}

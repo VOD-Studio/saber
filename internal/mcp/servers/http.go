@@ -37,16 +37,17 @@ func CreateHTTPServer(ctx context.Context, name string, cfg *config.ServerConfig
 		},
 	}
 
-	transport := mcp.NewStreamableClientTransport(cfg.URL, &mcp.StreamableClientTransportOptions{
+	transport := &mcp.StreamableClientTransport{
+		Endpoint:   cfg.URL,
 		HTTPClient: httpClient,
-	})
+	}
 
 	client := mcp.NewClient(&mcp.Implementation{
 		Name:    "saber-bot",
 		Version: "1.0.0",
 	}, nil)
 
-	session, err := client.Connect(ctx, transport)
+	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("连接 http 服务器 %s 失败: %w", name, err)
 	}

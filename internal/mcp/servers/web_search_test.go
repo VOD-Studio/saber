@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"rua.plus/saber/internal/config"
 )
 
@@ -742,23 +740,15 @@ func TestHandleWebSearch_EmptyQuery(t *testing.T) {
 	webSearchConfig.timeoutSeconds = 5
 
 	ctx := context.Background()
-	params := &mcp.CallToolParamsFor[SearchInput]{
-		Name: "web_search",
-		Arguments: SearchInput{
-			Query: "",
-		},
-	}
+	input := SearchInput{Query: ""}
 
-	result, err := handleWebSearch(ctx, nil, params)
+	_, result, err := handleWebSearch(ctx, nil, input)
 
 	if err == nil {
 		t.Error("Expected error for empty query")
 	}
-	if result != nil {
-		t.Error("Expected nil result for empty query")
-	}
-	if !strings.Contains(err.Error(), "query 参数不能为空") {
-		t.Errorf("Expected error about empty query, got %v", err)
+	if result.Query != "" {
+		t.Error("Expected empty query in result")
 	}
 }
 
@@ -827,23 +817,20 @@ func TestHandleWebSearch_NumClamping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			params := &mcp.CallToolParamsFor[SearchInput]{
-				Name: "web_search",
-				Arguments: SearchInput{
-					Query: "test",
-					Num:   tt.inputNum,
-				},
+			input := SearchInput{
+				Query: "test",
+				Num:   tt.inputNum,
 			}
 
-			result, err := handleWebSearch(ctx, nil, params)
+			_, result, err := handleWebSearch(ctx, nil, input)
 
 			if err != nil {
 				t.Errorf("Expected no error, got %v", err)
 				return
 			}
 
-			if len(result.StructuredContent.Results) != tt.expectedNum {
-				t.Errorf("Expected %d results, got %d", tt.expectedNum, len(result.StructuredContent.Results))
+			if len(result.Results) != tt.expectedNum {
+				t.Errorf("Expected %d results, got %d", tt.expectedNum, len(result.Results))
 			}
 		})
 	}
@@ -899,44 +886,33 @@ func TestHandleWebSearch_Success(t *testing.T) {
 	webSearchConfig.timeoutSeconds = 5
 
 	ctx := context.Background()
-	params := &mcp.CallToolParamsFor[SearchInput]{
-		Name: "web_search",
-		Arguments: SearchInput{
-			Query:    "golang testing",
-			Num:      5,
-			Language: "en",
-		},
+	input := SearchInput{
+		Query:    "golang testing",
+		Num:      5,
+		Language: "en",
 	}
 
-	result, err := handleWebSearch(ctx, nil, params)
+	_, result, err := handleWebSearch(ctx, nil, input)
 
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 		return
 	}
 
-	if result == nil {
-		t.Fatal("Expected non-nil result")
+	if result.Query != "golang testing" {
+		t.Errorf("Expected query 'golang testing', got %q", result.Query)
 	}
 
-	if result.StructuredContent.Query != "golang testing" {
-		t.Errorf("Expected query 'golang testing', got %q", result.StructuredContent.Query)
+	if len(result.Results) != 2 {
+		t.Errorf("Expected 2 results, got %d", len(result.Results))
 	}
 
-	if len(result.StructuredContent.Results) != 2 {
-		t.Errorf("Expected 2 results, got %d", len(result.StructuredContent.Results))
+	if result.Total != 2 {
+		t.Errorf("Expected total 2, got %d", result.Total)
 	}
 
-	if result.StructuredContent.Total != 2 {
-		t.Errorf("Expected total 2, got %d", result.StructuredContent.Total)
-	}
-
-	if result.StructuredContent.Source != mockServer.URL {
-		t.Errorf("Expected source to be mock server URL, got %q", result.StructuredContent.Source)
-	}
-
-	if result.IsError {
-		t.Error("Expected IsError to be false")
+	if result.Source != mockServer.URL {
+		t.Errorf("Expected source to be mock server URL, got %q", result.Source)
 	}
 }
 
@@ -948,21 +924,18 @@ func TestHandleWebSearch_SearchError(t *testing.T) {
 	webSearchConfig.timeoutSeconds = 5
 
 	ctx := context.Background()
-	params := &mcp.CallToolParamsFor[SearchInput]{
-		Name: "web_search",
-		Arguments: SearchInput{
-			Query: "test",
-			Num:   5,
-		},
+	input := SearchInput{
+		Query: "test",
+		Num:   5,
 	}
 
-	result, err := handleWebSearch(ctx, nil, params)
+	_, result, err := handleWebSearch(ctx, nil, input)
 
 	if err == nil {
 		t.Error("Expected error when search fails")
 	}
-	if result != nil {
-		t.Error("Expected nil result when search fails")
+	if result.Query != "" {
+		t.Error("Expected empty query in result")
 	}
 	if !strings.Contains(err.Error(), "搜索失败") {
 		t.Errorf("Expected error about search failure, got %v", err)

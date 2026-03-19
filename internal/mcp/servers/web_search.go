@@ -102,13 +102,10 @@ func NewWebSearchServerWithConfig(cfg config.WebSearchConfig) *mcp.Server {
 }
 
 // handleWebSearch 处理 web_search 工具调用。
-func handleWebSearch(ctx context.Context, session *mcp.ServerSession,
-	params *mcp.CallToolParamsFor[SearchInput]) (*mcp.CallToolResultFor[SearchOutput], error) {
-
-	input := params.Arguments
+func handleWebSearch(ctx context.Context, _ *mcp.CallToolRequest, input SearchInput) (*mcp.CallToolResult, SearchOutput, error) {
 
 	if input.Query == "" {
-		return nil, fmt.Errorf("query 参数不能为空")
+		return nil, SearchOutput{}, fmt.Errorf("query 参数不能为空")
 	}
 
 	if input.Num <= 0 {
@@ -120,17 +117,14 @@ func handleWebSearch(ctx context.Context, session *mcp.ServerSession,
 
 	results, source, err := searchWithSearXNG(ctx, input.Query, input.Num, input.Language)
 	if err != nil {
-		return nil, fmt.Errorf("搜索失败: %w", err)
+		return nil, SearchOutput{}, fmt.Errorf("搜索失败: %w", err)
 	}
 
-	return &mcp.CallToolResultFor[SearchOutput]{
-		StructuredContent: SearchOutput{
-			Query:   input.Query,
-			Results: results,
-			Total:   len(results),
-			Source:  source,
-		},
-		IsError: false,
+	return nil, SearchOutput{
+		Query:   input.Query,
+		Results: results,
+		Total:   len(results),
+		Source:  source,
 	}, nil
 }
 

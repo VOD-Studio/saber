@@ -90,7 +90,7 @@ func CreateBuiltinServer(ctx context.Context, name string, cfg *config.BuiltinCo
 		Version: "1.0.0",
 	}, nil)
 
-	session, err := client.Connect(ctx, clientTransport)
+	session, err := client.Connect(ctx, clientTransport, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("连接内置服务器失败: %w", err)
 	}

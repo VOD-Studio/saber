@@ -456,7 +456,7 @@ func createTestClient(server *mcp.Server) (*mcp.Client, *mcp.ClientSession, erro
 		Version: "1.0.0",
 	}, nil)
 
-	session, err := client.Connect(context.Background(), clientTransport)
+	session, err := client.Connect(context.Background(), clientTransport, nil)
 	if err != nil {
 		return nil, nil, err
 	}

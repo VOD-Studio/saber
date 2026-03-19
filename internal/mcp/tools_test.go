@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/modelcontextprotocol/go-sdk/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sashabaranov/go-openai"
 )
@@ -28,10 +27,10 @@ func TestConvertToOpenAITools(t *testing.T) {
 				{
 					Name:        "test_tool",
 					Description: "A test tool",
-					InputSchema: &jsonschema.Schema{
-						Type: "object",
-						Properties: map[string]*jsonschema.Schema{
-							"url": {Type: "string"},
+					InputSchema: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"url": map[string]any{"type": "string"},
 						},
 					},
 				},
@@ -44,12 +43,12 @@ func TestConvertToOpenAITools(t *testing.T) {
 				{
 					Name:        "tool1",
 					Description: "First tool",
-					InputSchema: &jsonschema.Schema{Type: "object"},
+					InputSchema: map[string]any{"type": "object"},
 				},
 				{
 					Name:        "tool2",
 					Description: "Second tool",
-					InputSchema: &jsonschema.Schema{Type: "object"},
+					InputSchema: map[string]any{"type": "object"},
 				},
 			},
 			expectedCount: 2,
@@ -182,8 +181,8 @@ func TestToolMeta(t *testing.T) {
 
 func TestConvertToOpenAITools_MetaPopulation(t *testing.T) {
 	tools := []mcp.Tool{
-		{Name: "tool_a", Description: "Tool A", InputSchema: &jsonschema.Schema{Type: "object"}},
-		{Name: "tool_b", Description: "Tool B", InputSchema: &jsonschema.Schema{Type: "object"}},
+		{Name: "tool_a", Description: "Tool A", InputSchema: map[string]any{"type": "object"}},
+		{Name: "tool_b", Description: "Tool B", InputSchema: map[string]any{"type": "object"}},
 	}
 
 	meta := make(map[string]ToolMeta)

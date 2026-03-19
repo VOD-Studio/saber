@@ -62,39 +62,37 @@ func NewWebFetchServer() *mcp.Server {
 	return server
 }
 
-func handleFetchURL(ctx context.Context, session *mcp.ServerSession, params *mcp.CallToolParamsFor[FetchInput]) (*mcp.CallToolResultFor[FetchOutput], error) {
-	input := params.Arguments
-
+func handleFetchURL(ctx context.Context, _ *mcp.CallToolRequest, input FetchInput) (*mcp.CallToolResult, FetchOutput, error) {
 	// 验证 URL
 	if input.URL == "" {
-		return nil, fmt.Errorf("url 参数不能为空")
+		return nil, FetchOutput{}, fmt.Errorf("url 参数不能为空")
 	}
 
 	// 使用 url.Parse 进行完整验证
 	u, err := url.Parse(input.URL)
 	if err != nil {
-		return nil, fmt.Errorf("url 格式无效: %w", err)
+		return nil, FetchOutput{}, fmt.Errorf("url 格式无效: %w", err)
 	}
 
 	// 仅允许 http/https 协议
 	switch u.Scheme {
 	case "http", "https":
 		if u.Host == "" {
-			return nil, fmt.Errorf("url 缺少主机名")
+			return nil, FetchOutput{}, fmt.Errorf("url 缺少主机名")
 		}
 	default:
-		return nil, fmt.Errorf("仅允许 http 和 https 协议，收到: %s", u.Scheme)
+		return nil, FetchOutput{}, fmt.Errorf("仅允许 http 和 https 协议，收到: %s", u.Scheme)
 	}
 
 	// SSRF 防护：检测并阻止私有 IP 地址
 	host := u.Hostname()
 	if err := validateHost(host); err != nil {
-		return nil, fmt.Errorf("地址验证失败: %w", err)
+		return nil, FetchOutput{}, fmt.Errorf("地址验证失败: %w", err)
 	}
 
 	// 验证并限制格式参数
 	if input.Format != "" && input.Format != "text" && input.Format != "html" {
-		return nil, fmt.Errorf("format 必须是 'text' 或 'html'，收到: %s", input.Format)
+		return nil, FetchOutput{}, fmt.Errorf("format 必须是 'text' 或 'html'，收到: %s", input.Format)
 	}
 	if input.Format == "" {
 		input.Format = "text"
@@ -118,7 +116,7 @@ func handleFetchURL(ctx context.Context, session *mcp.ServerSession, params *mcp
 	// 创建带上下文的请求
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", input.URL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("创建请求失败: %w", err)
+		return nil, FetchOutput{}, fmt.Errorf("创建请求失败: %w", err)
 	}
 
 	httpReq.Header.Set("User-Agent", "Saber-MCP-Bot/1.0")
@@ -127,7 +125,7 @@ func handleFetchURL(ctx context.Context, session *mcp.ServerSession, params *mcp
 	slog.Debug("正在获取 URL", "url", input.URL)
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("请求失败: %w", err)
+		return nil, FetchOutput{}, fmt.Errorf("请求失败: %w", err)
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
@@ -136,14 +134,14 @@ func handleFetchURL(ctx context.Context, session *mcp.ServerSession, params *mcp
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP 错误: %d %s", resp.StatusCode, resp.Status)
+		return nil, FetchOutput{}, fmt.Errorf("HTTP 错误: %d %s", resp.StatusCode, resp.Status)
 	}
 
 	// 限制响应体大小
 	limitedReader := io.LimitReader(resp.Body, maxResponseBody)
 	body, err := io.ReadAll(limitedReader)
 	if err != nil {
-		return nil, fmt.Errorf("读取响应失败: %w", err)
+		return nil, FetchOutput{}, fmt.Errorf("读取响应失败: %w", err)
 	}
 
 	// 转换 HTML 为文本
@@ -152,16 +150,11 @@ func handleFetchURL(ctx context.Context, session *mcp.ServerSession, params *mcp
 		content = extractText(content)
 	}
 
-	result := &mcp.CallToolResultFor[FetchOutput]{
-		StructuredContent: FetchOutput{
-			URL:     input.URL,
-			Content: content,
-			Status:  resp.Status,
-		},
-		IsError: false,
-	}
-
-	return result, nil
+	return nil, FetchOutput{
+		URL:     input.URL,
+		Content: content,
+		Status:  resp.Status,
+	}, nil
 }
 
 // validateHost 验证主机名，阻止对私有 IP 地址的访问（SSRF 防护）。

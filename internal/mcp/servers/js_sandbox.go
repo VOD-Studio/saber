@@ -61,16 +61,11 @@ func NewJSSandboxServerWithConfig(cfg *config.JSSandboxConfig) *mcp.Server {
 	return server
 }
 
-func (s *JSSandbox) handleRunJS(ctx context.Context, _ *mcp.ServerSession, params *mcp.CallToolParamsFor[JSInput]) (*mcp.CallToolResultFor[JSOutput], error) {
-	input := params.Arguments
-
+func (s *JSSandbox) handleRunJS(ctx context.Context, _ *mcp.CallToolRequest, input JSInput) (*mcp.CallToolResult, JSOutput, error) {
 	if input.Code == "" {
-		return &mcp.CallToolResultFor[JSOutput]{
-			StructuredContent: JSOutput{
-				Error: "code 参数不能为空",
-			},
-			IsError: true,
-		}, nil
+		return nil, JSOutput{
+			Error: "code 参数不能为空",
+		}, fmt.Errorf("code 参数不能为空")
 	}
 
 	s.mu.Lock()
@@ -98,7 +93,7 @@ func (s *JSSandbox) handleRunJS(ctx context.Context, _ *mcp.ServerSession, param
 	})
 
 	if err := s.disableDangerousAPIs(vm); err != nil {
-		return nil, fmt.Errorf("禁用危险 API 失败: %w", err)
+		return nil, JSOutput{}, fmt.Errorf("禁用危险 API 失败: %w", err)
 	}
 
 	var result interface{}
@@ -137,31 +132,22 @@ func (s *JSSandbox) handleRunJS(ctx context.Context, _ *mcp.ServerSession, param
 
 		if execErr != nil {
 			output.Error = execErr.Error()
-			return &mcp.CallToolResultFor[JSOutput]{
-				StructuredContent: output,
-				IsError:           true,
-			}, nil
+			return nil, output, execErr
 		}
 
 		output.Result = s.formatResult(result)
-		return &mcp.CallToolResultFor[JSOutput]{
-			StructuredContent: output,
-			IsError:           false,
-		}, nil
+		return nil, output, nil
 
 	case <-ctx.Done():
 		vm.Interrupt("context cancelled")
-		return nil, fmt.Errorf("执行被取消")
+		return nil, JSOutput{}, fmt.Errorf("执行被取消")
 
 	case <-time.After(time.Duration(s.cfg.TimeoutMs) * time.Millisecond):
 		vm.Interrupt("execution timeout")
 		<-done
-		return &mcp.CallToolResultFor[JSOutput]{
-			StructuredContent: JSOutput{
-				Error: fmt.Sprintf("执行超时（%d 毫秒）", s.cfg.TimeoutMs),
-			},
-			IsError: true,
-		}, nil
+		return nil, JSOutput{
+			Error: fmt.Sprintf("执行超时（%d 毫秒）", s.cfg.TimeoutMs),
+		}, fmt.Errorf("执行超时（%d 毫秒）", s.cfg.TimeoutMs)
 	}
 }
 
