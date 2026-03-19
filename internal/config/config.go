@@ -167,6 +167,7 @@ type DecisionConfig struct {
 	Model          string  `yaml:"model"`           // 用于决策的模型
 	Temperature    float64 `yaml:"temperature"`     // 决策温度（0-2）
 	PromptTemplate string  `yaml:"prompt_template"` // 决策提示词模板
+	StreamEnabled  bool    `yaml:"stream_enabled"`  // 是否启用流式请求（默认 true）
 }
 
 // UseTokenAuth 检查是否使用 Token 认证
@@ -282,6 +283,7 @@ func DefaultDecisionConfig() DecisionConfig {
 		Model:          "",
 		Temperature:    0.8,
 		PromptTemplate: "",
+		StreamEnabled:  true,
 	}
 }
 
@@ -632,6 +634,8 @@ ai:
       model: ""
       temperature: 0.8
       prompt_template: ""
+      # 是否启用流式请求（默认 true，可更快响应）
+      stream_enabled: true
 
 # MCP (Model Context Protocol) 配置
 mcp:

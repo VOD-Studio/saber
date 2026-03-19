@@ -623,6 +623,8 @@ type AIService interface {
 	GenerateSimpleResponse(ctx context.Context, systemPrompt, userMessage string) (string, error)
 	// GenerateSimpleResponseWithModel 使用指定模型生成响应。
 	GenerateSimpleResponseWithModel(ctx context.Context, modelName string, temperature float64, systemPrompt, userMessage string) (string, error)
+	// GenerateStreamingSimpleResponse 使用流式请求生成响应。
+	GenerateStreamingSimpleResponse(ctx context.Context, modelName string, temperature float64, systemPrompt, userMessage string) (string, error)
 }
 
 // NewDecisionEngine 创建并返回一个新的决策引擎实例。
@@ -669,9 +671,10 @@ func NewDecisionEngine(
 //
 // 它执行以下步骤：
 // 1. 构建决策提示词（使用 BuildDecisionPrompt）
-// 2. 调用 AI 服务获取决策响应
-// 3. 解析 JSON 响应（使用 ParseDecisionResponse）
-// 4. 返回决策结果
+// 2. 根据 StreamEnabled 配置选择流式或非流式请求
+// 3. 调用 AI 服务获取决策响应
+// 4. 解析 JSON 响应（使用 ParseDecisionResponse）
+// 5. 返回决策结果
 //
 // 参数:
 //   - ctx: 上下文，用于取消操作
@@ -711,8 +714,17 @@ func (e *DecisionEngine) Decide(ctx context.Context, decisionCtx *DecisionContex
 	// 构建系统提示词
 	systemPrompt := "你是一个聊天室活跃度助手。请根据房间状态判断是否应该主动发送消息。只返回 JSON 格式的决策结果。"
 
-	// 调用 AI 服务获取决策
-	response, err := e.aiService.GenerateSimpleResponseWithModel(ctx, modelName, temperature, systemPrompt, prompt)
+	var response string
+
+	// 根据配置选择流式或非流式请求
+	if e.config.StreamEnabled {
+		slog.Debug("使用流式请求进行AI决策", "model", modelName)
+		response, err = e.aiService.GenerateStreamingSimpleResponse(ctx, modelName, temperature, systemPrompt, prompt)
+	} else {
+		slog.Debug("使用非流式请求进行AI决策", "model", modelName)
+		response, err = e.aiService.GenerateSimpleResponseWithModel(ctx, modelName, temperature, systemPrompt, prompt)
+	}
+
 	if err != nil {
 		return false, "", fmt.Errorf("AI 决策请求失败：%w", err)
 	}

@@ -559,6 +559,70 @@ func (s *Service) GenerateSimpleResponseWithModel(ctx context.Context, modelName
 	return resp.Content, nil
 }
 
+// GenerateStreamingSimpleResponse 使用流式请求生成响应。
+//
+// 该方法使用流式请求方式获取 AI 响应，但内部收集所有内容后返回完整结果。
+// 适用于需要更快响应反馈的场景（如主动消息决策）。
+//
+// 参数:
+//   - ctx: 上下文，用于取消操作
+//   - modelName: 要使用的模型名称（为空则使用默认模型）
+//   - temperature: 生成温度（0 表示使用全局默认值）
+//   - systemPrompt: 系统提示词
+//   - userMessage: 用户消息
+//
+// 返回值:
+//   - string: AI 生成的响应内容
+//   - error: 生成过程中发生的错误
+func (s *Service) GenerateStreamingSimpleResponse(ctx context.Context, modelName string, temperature float64, systemPrompt, userMessage string) (string, error) {
+	if !s.IsEnabled() {
+		return "", fmt.Errorf("AI功能未启用")
+	}
+
+	if s.rateLimiter != nil {
+		if err := s.rateLimiter.Wait(ctx); err != nil {
+			return "", fmt.Errorf("AI请求速率限制: %w", err)
+		}
+	}
+
+	if modelName == "" {
+		modelName = s.globalConfig.DefaultModel
+	}
+
+	if temperature == 0 {
+		temperature = s.globalConfig.Temperature
+	}
+
+	client, err := s.getClient(modelName)
+	if err != nil {
+		return "", fmt.Errorf("获取AI客户端失败: %w", err)
+	}
+
+	messages := []openai.ChatCompletionMessage{
+		{Role: string(RoleSystem), Content: systemPrompt},
+		{Role: string(RoleUser), Content: userMessage},
+	}
+
+	req := ChatCompletionRequest{
+		Model:       modelName,
+		Messages:    messages,
+		Stream:      true,
+		MaxTokens:   s.globalConfig.MaxTokens,
+		Temperature: temperature,
+	}
+
+	slog.Debug("发送流式简单AI请求", "model", modelName, "temperature", temperature)
+
+	resp, err := client.CreateChatCompletion(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("AI请求失败: %w", err)
+	}
+
+	slog.Debug("流式简单AI响应成功", "model", modelName, "content_length", len(resp.Content))
+
+	return resp.Content, nil
+}
+
 func (s *Service) prependSystemPrompt(messages []openai.ChatCompletionMessage, prompt string) []openai.ChatCompletionMessage {
 	hasSystem := false
 	for _, msg := range messages {
