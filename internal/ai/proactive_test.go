@@ -15,36 +15,49 @@ func TestNewProactiveManager(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		config      *config.ProactiveConfig
-		aiService   *Service
-		roomService *matrix.RoomService
-		wantErr     bool
-		errContains string
+		name           string
+		config         *config.ProactiveConfig
+		aiService      *Service
+		roomService    *matrix.RoomService
+		globalAIConfig *config.AIConfig
+		wantErr        bool
+		errContains    string
 	}{
 		{
-			name:        "nil config",
-			config:      nil,
-			aiService:   nil,
-			roomService: nil,
-			wantErr:     true,
-			errContains: "主动聊天配置不能为空",
+			name:           "nil config",
+			config:         nil,
+			aiService:      nil,
+			roomService:    nil,
+			globalAIConfig: nil,
+			wantErr:        true,
+			errContains:    "主动聊天配置不能为空",
 		},
 		{
-			name:        "nil ai service",
-			config:      &config.ProactiveConfig{},
-			aiService:   nil,
-			roomService: nil,
-			wantErr:     true,
-			errContains: "AI 服务不能为空",
+			name:           "nil ai service",
+			config:         &config.ProactiveConfig{},
+			aiService:      nil,
+			roomService:    nil,
+			globalAIConfig: nil,
+			wantErr:        true,
+			errContains:    "AI 服务不能为空",
 		},
 		{
-			name:        "nil room service",
-			config:      &config.ProactiveConfig{},
-			aiService:   &Service{},
-			roomService: nil,
-			wantErr:     true,
-			errContains: "matrix 房间服务不能为空",
+			name:           "nil room service",
+			config:         &config.ProactiveConfig{},
+			aiService:      &Service{},
+			roomService:    nil,
+			globalAIConfig: nil,
+			wantErr:        true,
+			errContains:    "matrix 房间服务不能为空",
+		},
+		{
+			name:           "nil global ai config",
+			config:         &config.ProactiveConfig{},
+			aiService:      &Service{},
+			roomService:    &matrix.RoomService{},
+			globalAIConfig: nil,
+			wantErr:        true,
+			errContains:    "全局 AI 配置不能为空",
 		},
 		{
 			name: "valid config",
@@ -53,9 +66,10 @@ func TestNewProactiveManager(t *testing.T) {
 				MaxMessagesPerDay:  5,
 				MinIntervalMinutes: 60,
 			},
-			aiService:   &Service{},
-			roomService: &matrix.RoomService{},
-			wantErr:     false,
+			aiService:      &Service{},
+			roomService:    &matrix.RoomService{},
+			globalAIConfig: &config.AIConfig{},
+			wantErr:        false,
 		},
 	}
 
@@ -68,6 +82,7 @@ func TestNewProactiveManager(t *testing.T) {
 				tt.aiService,
 				tt.roomService,
 				nil,
+				tt.globalAIConfig,
 			)
 
 			if (err != nil) != tt.wantErr {
@@ -114,8 +129,9 @@ func TestProactiveManagerLifecycle(t *testing.T) {
 
 	aiService := &Service{}
 	roomService := &matrix.RoomService{}
+	globalAIConfig := &config.AIConfig{}
 
-	manager, err := NewProactiveManager(cfg, aiService, roomService, nil)
+	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -138,8 +154,9 @@ func TestProactiveManagerDisabled(t *testing.T) {
 
 	aiService := &Service{}
 	roomService := &matrix.RoomService{}
+	globalAIConfig := &config.AIConfig{}
 
-	manager, err := NewProactiveManager(cfg, aiService, roomService, nil)
+	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -177,8 +194,9 @@ func TestProactiveManagerShutdown(t *testing.T) {
 
 	aiService := &Service{}
 	roomService := &matrix.RoomService{}
+	globalAIConfig := &config.AIConfig{}
 
-	manager, err := NewProactiveManager(cfg, aiService, roomService, nil)
+	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -216,8 +234,9 @@ func TestProactiveManagerShutdownWithContext(t *testing.T) {
 
 	aiService := &Service{}
 	roomService := &matrix.RoomService{}
+	globalAIConfig := &config.AIConfig{}
 
-	manager, err := NewProactiveManager(cfg, aiService, roomService, nil)
+	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -272,8 +291,9 @@ func TestOnNewMember_Disabled(t *testing.T) {
 
 	aiService := &Service{}
 	roomService := &matrix.RoomService{}
+	globalAIConfig := &config.AIConfig{}
 
-	manager, err := NewProactiveManager(cfg, aiService, roomService, nil)
+	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -300,8 +320,9 @@ func TestOnNewMember_NewMemberDisabled(t *testing.T) {
 
 	aiService := &Service{}
 	roomService := &matrix.RoomService{}
+	globalAIConfig := &config.AIConfig{}
 
-	manager, err := NewProactiveManager(cfg, aiService, roomService, nil)
+	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -332,8 +353,9 @@ func TestOnNewMember_RateLimited(t *testing.T) {
 	aiService := &Service{}
 	roomService := &matrix.RoomService{}
 	stateTracker := NewStateTracker()
+	globalAIConfig := &config.AIConfig{}
 
-	manager, err := NewProactiveManager(cfg, aiService, roomService, stateTracker)
+	manager, err := NewProactiveManager(cfg, aiService, roomService, stateTracker, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -370,8 +392,9 @@ func TestCanSendMessage_DailyLimit(t *testing.T) {
 	aiService := &Service{}
 	roomService := &matrix.RoomService{}
 	stateTracker := NewStateTracker()
+	globalAIConfig := &config.AIConfig{}
 
-	manager, err := NewProactiveManager(cfg, aiService, roomService, stateTracker)
+	manager, err := NewProactiveManager(cfg, aiService, roomService, stateTracker, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -410,8 +433,9 @@ func TestCanSendMessage_MinInterval(t *testing.T) {
 	aiService := &Service{}
 	roomService := &matrix.RoomService{}
 	stateTracker := NewStateTracker()
+	globalAIConfig := &config.AIConfig{}
 
-	manager, err := NewProactiveManager(cfg, aiService, roomService, stateTracker)
+	manager, err := NewProactiveManager(cfg, aiService, roomService, stateTracker, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -442,8 +466,9 @@ func TestGenerateWelcomeMessage_AIDisabled(t *testing.T) {
 
 	aiService := &Service{}
 	roomService := &matrix.RoomService{}
+	globalAIConfig := &config.AIConfig{}
 
-	manager, err := NewProactiveManager(cfg, aiService, roomService, nil)
+	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -695,8 +720,9 @@ func TestTriggerCoordinator_HandleSilenceTrigger(t *testing.T) {
 	mockRL := &mockRoomListerTest{rooms: []matrix.RoomInfo{}}
 	aiService := &Service{}
 	roomService := &matrix.RoomService{}
+	globalAIConfig := &config.AIConfig{}
 
-	manager, err := NewProactiveManager(cfg, aiService, roomService, stateTracker)
+	manager, err := NewProactiveManager(cfg, aiService, roomService, stateTracker, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -746,8 +772,9 @@ func TestTriggerCoordinator_HandleScheduleTrigger(t *testing.T) {
 	stateTracker := NewStateTracker()
 	aiService := &Service{}
 	roomService := &matrix.RoomService{}
+	globalAIConfig := &config.AIConfig{}
 
-	manager, err := NewProactiveManager(cfg, aiService, roomService, stateTracker)
+	manager, err := NewProactiveManager(cfg, aiService, roomService, stateTracker, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}

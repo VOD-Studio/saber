@@ -51,7 +51,8 @@ func TestProactiveManagerLifecycleIntegration(t *testing.T) {
 	}
 	mockRoomSVC := &matrix.RoomService{}
 	stateTracker := NewStateTracker()
-	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker)
+	globalAIConfig := &config.AIConfig{}
+	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -82,7 +83,8 @@ func TestProactiveManagerShutdownGracefulIntegration(t *testing.T) {
 	}
 	mockRoomSVC := &matrix.RoomService{}
 	stateTracker := NewStateTracker()
-	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker)
+	globalAIConfig := &config.AIConfig{}
+	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -108,7 +110,8 @@ func TestProactiveManagerDisabledInstanceIntegration(t *testing.T) {
 	t.Parallel()
 	cfg := &config.ProactiveConfig{Enabled: false}
 	mockRoomSVC := &matrix.RoomService{}
-	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, nil)
+	globalAIConfig := &config.AIConfig{}
+	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, nil, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -135,7 +138,8 @@ func TestProactiveManagerBackgroundTasksExitIntegration(t *testing.T) {
 	}
 	mockRoomSVC := &matrix.RoomService{}
 	stateTracker := NewStateTracker()
-	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker)
+	globalAIConfig := &config.AIConfig{}
+	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -159,7 +163,8 @@ func TestProactiveManagerConcurrencyIntegration(t *testing.T) {
 	}
 	mockRoomSVC := &matrix.RoomService{}
 	stateTracker := NewStateTracker()
-	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker)
+	globalAIConfig := &config.AIConfig{}
+	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -191,7 +196,8 @@ func TestProactiveManagerWithCancelContextIntegration(t *testing.T) {
 	}
 	mockRoomSVC := &matrix.RoomService{}
 	stateTracker := NewStateTracker()
-	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker)
+	globalAIConfig := &config.AIConfig{}
+	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -226,7 +232,8 @@ func TestProactiveManagerEmptyRoomsIntegration(t *testing.T) {
 	}
 	mockRoomSVC := &matrix.RoomService{}
 	stateTracker := NewStateTracker()
-	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker)
+	globalAIConfig := &config.AIConfig{}
+	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}
@@ -243,7 +250,8 @@ func TestProactiveManagerWithNilStateTrackerIntegration(t *testing.T) {
 		MinIntervalMinutes: 1,
 	}
 	mockRoomSVC := &matrix.RoomService{}
-	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, nil)
+	globalAIConfig := &config.AIConfig{}
+	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, nil, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() with nil StateTracker error = %v", err)
 	}
@@ -266,7 +274,8 @@ func TestProactiveManagerLongRunningIntegration(t *testing.T) {
 	}
 	mockRoomSVC := &matrix.RoomService{}
 	stateTracker := NewStateTracker()
-	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker)
+	globalAIConfig := &config.AIConfig{}
+	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker, globalAIConfig)
 	if err != nil {
 		t.Fatalf("NewProactiveManager() error = %v", err)
 	}

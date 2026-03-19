@@ -214,7 +214,7 @@ func Run(info matrix.BuildInfo) {
 		if cfg.AI.Proactive.Enabled {
 			slog.Info("正在初始化主动聊天管理器...")
 			roomService := matrix.NewRoomService(client)
-			proactiveManager, err = ai.NewProactiveManager(&cfg.AI.Proactive, aiService, roomService, nil)
+			proactiveManager, err = ai.NewProactiveManager(&cfg.AI.Proactive, aiService, roomService, nil, &cfg.AI)
 			if err != nil {
 				slog.Error("主动聊天管理器初始化失败", "error", err)
 				os.Exit(1)

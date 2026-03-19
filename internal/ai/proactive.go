@@ -22,11 +22,14 @@ import (
 // - 欢迎新成员加入
 // - 使用决策模型判断何时发送主动消息
 type ProactiveManager struct {
-	config       *config.ProactiveConfig
-	aiService    *Service
-	roomService  *matrix.RoomService
-	stateTracker *StateTracker
-	triggerCoord *TriggerCoordinator
+	config         *config.ProactiveConfig
+	aiService      *Service
+	roomService    *matrix.RoomService
+	stateTracker   *StateTracker
+	triggerCoord   *TriggerCoordinator
+	decisionEngine *DecisionEngine
+	globalAIConfig *config.AIConfig
+	decisionCache  *DecisionCache
 
 	stopChan chan struct{}
 	wg       sync.WaitGroup
@@ -39,6 +42,7 @@ type ProactiveManager struct {
 //   - aiService: AI 服务实例（必须非 nil）
 //   - roomService: Matrix 房间服务实例（必须非 nil）
 //   - stateTracker: 状态跟踪器实例（可选，为 nil 时使用默认值）
+//   - globalAIConfig: 全局 AI 配置（必须非 nil）
 //
 // 返回值:
 //   - *ProactiveManager: 创建的主动聊天管理器
@@ -48,6 +52,7 @@ func NewProactiveManager(
 	aiService *Service,
 	roomService *matrix.RoomService,
 	stateTracker *StateTracker,
+	globalAIConfig *config.AIConfig,
 ) (*ProactiveManager, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("主动聊天配置不能为空")
@@ -59,6 +64,10 @@ func NewProactiveManager(
 
 	if roomService == nil {
 		return nil, fmt.Errorf("matrix 房间服务不能为空")
+	}
+
+	if globalAIConfig == nil {
+		return nil, fmt.Errorf("全局 AI 配置不能为空")
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -92,13 +101,25 @@ func NewProactiveManager(
 		return nil, fmt.Errorf("创建触发协调器失败：%w", err)
 	}
 
+	// 创建决策引擎
+	decisionEngine, err := NewDecisionEngine(aiService, &cfg.Decision, globalAIConfig)
+	if err != nil {
+		return nil, fmt.Errorf("创建决策引擎失败：%w", err)
+	}
+
+	// 创建决策缓存（默认 TTL 5 分钟）
+	decisionCache := NewDecisionCache(5 * time.Minute)
+
 	manager := &ProactiveManager{
-		config:       cfg,
-		aiService:    aiService,
-		roomService:  roomService,
-		stateTracker: stateTracker,
-		triggerCoord: triggerCoord,
-		stopChan:     make(chan struct{}),
+		config:         cfg,
+		aiService:      aiService,
+		roomService:    roomService,
+		stateTracker:   stateTracker,
+		triggerCoord:   triggerCoord,
+		decisionEngine: decisionEngine,
+		globalAIConfig: globalAIConfig,
+		decisionCache:  decisionCache,
+		stopChan:       make(chan struct{}),
 	}
 
 	slog.Info("主动聊天管理器初始化完成",
@@ -208,6 +229,13 @@ func (m *ProactiveManager) runBackgroundTasks(ctx context.Context) {
 }
 
 // handleSilenceTrigger 处理静默触发。
+//
+// 它执行以下步骤：
+// 1. 检查静默触发器并获取需要触发的房间列表
+// 2. 对每个房间收集决策上下文
+// 3. 调用 AI 决策引擎判断是否发送消息
+// 4. 如果决定发送，则生成并发送消息
+// 5. 更新房间状态
 func (m *ProactiveManager) handleSilenceTrigger(ctx context.Context) {
 	if !m.config.Silence.Enabled {
 		return
@@ -215,15 +243,22 @@ func (m *ProactiveManager) handleSilenceTrigger(ctx context.Context) {
 
 	results := m.triggerCoord.checkSilenceTrigger(ctx)
 	for _, result := range results {
-		if result.ShouldTrigger {
-			slog.Info("静默触发器触发",
-				"room_id", result.RoomID,
-				"reason", result.Reason)
-			// TODO: 在任务 17 中实现实际的消息发送逻辑
-		} else {
+		if !result.ShouldTrigger {
 			slog.Debug("静默触发器触发但被速率限制",
 				"room_id", result.RoomID,
 				"reason", result.Reason)
+			continue
+		}
+
+		slog.Info("静默触发器触发",
+			"room_id", result.RoomID,
+			"reason", result.Reason)
+
+		// 处理单个房间的触发
+		if err := m.handleProactiveTrigger(ctx, result.RoomID, TriggerInactivity); err != nil {
+			slog.Warn("处理静默触发失败",
+				"room_id", result.RoomID,
+				"error", err)
 		}
 	}
 }
@@ -236,16 +271,126 @@ func (m *ProactiveManager) handleScheduleTrigger(ctx context.Context) {
 
 	results := m.triggerCoord.checkScheduleTrigger(ctx)
 	for _, result := range results {
-		if result.ShouldTrigger {
-			slog.Info("定时触发器触发",
-				"room_id", result.RoomID,
-				"reason", result.Reason)
-			// TODO: 在任务 17 中实现实际的消息发送逻辑
-		} else {
+		if !result.ShouldTrigger {
 			slog.Debug("定时触发器触发但被速率限制",
 				"room_id", result.RoomID,
 				"reason", result.Reason)
+			continue
 		}
+
+		slog.Info("定时触发器触发",
+			"room_id", result.RoomID,
+			"reason", result.Reason)
+
+		if err := m.handleProactiveTrigger(ctx, result.RoomID, TriggerScheduled); err != nil {
+			slog.Warn("处理定时触发失败",
+				"room_id", result.RoomID,
+				"error", err)
+		}
+	}
+}
+
+// handleProactiveTrigger 处理单个房间的主动聊天触发。
+//
+// 它执行以下步骤：
+// 1. 收集房间决策上下文
+// 2. 调用 AI 决策引擎判断是否发送消息
+// 3. 如果决定发送，则发送消息
+// 4. 更新房间状态
+//
+// 参数:
+//   - ctx: 上下文，用于取消操作
+//   - roomID: 目标房间 ID
+//   - triggerType: 触发类型
+//
+// 返回值:
+//   - error: 处理过程中的错误
+func (m *ProactiveManager) handleProactiveTrigger(ctx context.Context, roomID id.RoomID, triggerType TriggerType) error {
+	logger := slog.With("room_id", roomID, "trigger_type", triggerType)
+
+	// 收集决策上下文
+	decisionCtx, err := GatherDecisionContext(ctx, roomID, m.stateTracker, m.roomService, triggerType)
+	if err != nil {
+		return fmt.Errorf("收集决策上下文失败: %w", err)
+	}
+
+	logger.Debug("决策上下文收集完成",
+		"room_name", decisionCtx.RoomName,
+		"activity_level", decisionCtx.ActivityLevel,
+		"minutes_since_last", decisionCtx.MinutesSinceLast,
+		"messages_today", decisionCtx.MessagesToday)
+
+	// 检查缓存中是否有有效的决策
+	if cached, ok := m.decisionCache.Get(roomID, decisionCtx); ok {
+		logger.Debug("使用缓存的决策", "should_speak", cached.ShouldSpeak, "reason", cached.Reason)
+		if cached.ShouldSpeak && cached.Content != "" {
+			if err := m.SendMessage(ctx, roomID, cached.Content, false); err != nil {
+				return fmt.Errorf("发送缓存决策消息失败: %w", err)
+			}
+		}
+		return nil
+	}
+
+	// 调用决策引擎
+	shouldSpeak, content, err := m.decisionEngine.Decide(ctx, decisionCtx)
+	if err != nil {
+		return fmt.Errorf("AI 决策失败: %w", err)
+	}
+
+	// 缓存决策结果
+	m.decisionCache.Set(roomID, decisionCtx, &DecisionResponse{
+		ShouldSpeak: shouldSpeak,
+		Reason:      "AI 决策",
+		Content:     content,
+	})
+
+	if !shouldSpeak {
+		logger.Debug("AI 决定不发送消息", "reason", "AI 判断当前不适合发送消息")
+		return nil
+	}
+
+	// 如果有内容，直接发送
+	if content != "" {
+		logger.Info("AI 决定发送主动消息", "content_length", len(content))
+		if err := m.SendMessage(ctx, roomID, content, false); err != nil {
+			return fmt.Errorf("发送主动消息失败: %w", err)
+		}
+		return nil
+	}
+
+	// 如果没有内容，生成默认消息
+	defaultMsg := m.generateDefaultProactiveMessage(triggerType, decisionCtx)
+	logger.Info("AI 决定发送消息，使用默认内容")
+	if err := m.SendMessage(ctx, roomID, defaultMsg, false); err != nil {
+		return fmt.Errorf("发送默认消息失败: %w", err)
+	}
+
+	return nil
+}
+
+// generateDefaultProactiveMessage 生成默认的主动聊天消息。
+//
+// 当 AI 决定发送消息但未提供具体内容时使用此方法。
+//
+// 参数:
+//   - triggerType: 触发类型
+//   - decisionCtx: 决策上下文
+//
+// 返回值:
+//   - string: 生成的默认消息
+func (m *ProactiveManager) generateDefaultProactiveMessage(triggerType TriggerType, decisionCtx *DecisionContext) string {
+	switch triggerType {
+	case TriggerInactivity:
+		if decisionCtx.MinutesSinceLast > 120 {
+			return "大家好！房间静默有一段时间了，有什么有趣的话题想聊聊吗？"
+		}
+		return "大家好，有什么新鲜事吗？"
+	case TriggerScheduled:
+		return "大家好！又到了定时问候的时间，希望大家一切顺利！"
+	case TriggerNewUser:
+		return "欢迎新朋友加入！"
+	default:
+		return "大家好！"
 	}
 }
 
