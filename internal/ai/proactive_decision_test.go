@@ -104,7 +104,7 @@ func TestGatherDecisionContext(t *testing.T) {
 			stateProvider := &mockStateProvider{state: tt.state}
 			roomInfoProvider := &mockRoomInfoProvider{info: tt.roomInfo, err: tt.providerErr}
 
-			dc, err := GatherDecisionContext(ctx, roomID, stateProvider, roomInfoProvider, tt.triggerType)
+			dc, err := GatherDecisionContext(ctx, roomID, stateProvider, roomInfoProvider, tt.triggerType, 60)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GatherDecisionContext() error = %v, wantErr %v", err, tt.wantErr)

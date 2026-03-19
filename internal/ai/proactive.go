@@ -309,7 +309,8 @@ func (m *ProactiveManager) handleProactiveTrigger(ctx context.Context, roomID id
 	logger := slog.With("room_id", roomID, "trigger_type", triggerType)
 
 	// 收集决策上下文
-	decisionCtx, err := GatherDecisionContext(ctx, roomID, m.stateTracker, m.roomService, triggerType)
+	silenceThreshold := m.config.Silence.ThresholdMinutes
+	decisionCtx, err := GatherDecisionContext(ctx, roomID, m.stateTracker, m.roomService, triggerType, silenceThreshold)
 	if err != nil {
 		return fmt.Errorf("收集决策上下文失败: %w", err)
 	}
@@ -318,6 +319,7 @@ func (m *ProactiveManager) handleProactiveTrigger(ctx context.Context, roomID id
 		"room_name", decisionCtx.RoomName,
 		"activity_level", decisionCtx.ActivityLevel,
 		"minutes_since_last", decisionCtx.MinutesSinceLast,
+		"silence_threshold", decisionCtx.SilenceThresholdMinutes,
 		"messages_today", decisionCtx.MessagesToday)
 
 	// 检查缓存中是否有有效的决策
