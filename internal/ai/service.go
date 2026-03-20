@@ -918,6 +918,7 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 	// 检查是否有媒体信息
 	mediaInfo := matrix.GetMediaInfo(ctx)
 	var messages []openai.ChatCompletionMessage
+	hasImage := false
 
 	if mediaInfo != nil && mediaInfo.Type == "image" && s.mediaService != nil && s.globalConfig.Media.Enabled {
 		// 下载并编码图片
@@ -927,10 +928,18 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 			messages = s.buildTextMessages(roomID, userInput)
 		} else {
 			messages = s.buildMultimodalMessages(ctx, roomID, userInput, imageData)
+			hasImage = true
 			slog.Debug("构建多模态消息", "has_image", true)
 		}
 	} else {
 		messages = s.buildTextMessages(roomID, userInput)
+	}
+
+	// 如果有图片且配置了专用模型，使用专用模型
+	actualModel := modelName
+	if hasImage && s.globalConfig.Media.Model != "" {
+		actualModel = s.globalConfig.Media.Model
+		slog.Debug("使用图片识别专用模型", "media_model", actualModel, "default_model", modelName)
 	}
 
 	req := ChatCompletionRequest{
@@ -938,11 +947,11 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 		Stream:      s.globalConfig.StreamEnabled,
 		MaxTokens:   s.globalConfig.MaxTokens,
 		Temperature: s.globalConfig.Temperature,
-		Model:       modelName,
+		Model:       actualModel,
 	}
 
 	slog.Debug("AI请求准备完成",
-		"model", modelName,
+		"model", actualModel,
 		"messages_count", len(messages),
 		"messages", messages,
 		"stream", s.globalConfig.StreamEnabled,
@@ -958,7 +967,7 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 	}
 
 	fallbackHandler := &FallbackModelHandler{
-		MainModel:   modelName,
+		MainModel:   actualModel,
 		RetryConfig: retryConfig,
 	}
 

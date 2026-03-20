@@ -175,9 +175,10 @@ type DecisionConfig struct {
 
 // MediaConfig 存储媒体文件处理配置
 type MediaConfig struct {
-	Enabled    bool `yaml:"enabled"`     // 是否启用媒体文件处理
-	MaxSizeMB  int  `yaml:"max_size_mb"` // 最大文件大小（MB）
-	TimeoutSec int  `yaml:"timeout_sec"` // 处理超时时间（秒）
+	Enabled    bool   `yaml:"enabled"`     // 是否启用媒体文件处理
+	MaxSizeMB  int    `yaml:"max_size_mb"` // 最大文件大小（MB）
+	TimeoutSec int    `yaml:"timeout_sec"` // 处理超时时间（秒）
+	Model      string `yaml:"model"`       // 图片识别专用模型（留空则使用默认模型）
 }
 
 // UseTokenAuth 检查是否使用 Token 认证
@@ -304,6 +305,7 @@ func DefaultMediaConfig() MediaConfig {
 		Enabled:    true,
 		MaxSizeMB:  10,
 		TimeoutSec: 30,
+		Model:      "",
 	}
 }
 
@@ -682,6 +684,8 @@ ai:
     max_size_mb: 10
     # 处理超时时间（秒）
     timeout_sec: 30
+    # 图片识别专用模型（留空则使用默认模型）
+    # model: "gpt-4o"
 
 # MCP (Model Context Protocol) 配置
 mcp:
