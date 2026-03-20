@@ -168,11 +168,18 @@ func TestRun_VersionFlag(t *testing.T) {
 			output, err := cmd.CombinedOutput()
 
 			// 检查退出码
-			if exitErr, ok := err.(*exec.ExitError); ok {
+			if err == nil {
+				// 命令成功执行，退出码为 0
+				if tt.expectedExit != 0 {
+					t.Errorf("退出码 = 0, 期望 %d", tt.expectedExit)
+				}
+			} else if exitErr, ok := err.(*exec.ExitError); ok {
+				// 命令以非零退出码结束
 				if exitErr.ExitCode() != tt.expectedExit {
 					t.Errorf("退出码 = %d, 期望 %d", exitErr.ExitCode(), tt.expectedExit)
 				}
-			} else if err != nil {
+			} else {
+				// 其他类型的错误（如命令无法启动）
 				t.Fatalf("执行命令失败: %v", err)
 			}
 
@@ -223,11 +230,18 @@ func TestRun_GenerateConfigFlag(t *testing.T) {
 			cmd.Dir = tt.workDir
 			output, err := cmd.CombinedOutput()
 
-			if exitErr, ok := err.(*exec.ExitError); ok {
+			if err == nil {
+				// 命令成功执行，退出码为 0
+				if tt.expectedExit != 0 {
+					t.Errorf("退出码 = 0, 期望 %d", tt.expectedExit)
+				}
+			} else if exitErr, ok := err.(*exec.ExitError); ok {
+				// 命令以非零退出码结束
 				if exitErr.ExitCode() != tt.expectedExit {
 					t.Errorf("退出码 = %d, 期望 %d", exitErr.ExitCode(), tt.expectedExit)
 				}
-			} else if err != nil {
+			} else {
+				// 其他类型的错误（如命令无法启动）
 				t.Fatalf("执行命令失败: %v", err)
 			}
 
@@ -311,11 +325,18 @@ func TestRun_ConfigLoadFailure(t *testing.T) {
 			cmd.Dir = workDir
 			output, err := cmd.CombinedOutput()
 
-			if exitErr, ok := err.(*exec.ExitError); ok {
+			if err == nil {
+				// 命令成功执行，退出码为 0
+				if tt.expectedExit != 0 {
+					t.Errorf("退出码 = 0, 期望 %d\n输出: %s", tt.expectedExit, output)
+				}
+			} else if exitErr, ok := err.(*exec.ExitError); ok {
+				// 命令以非零退出码结束
 				if exitErr.ExitCode() != tt.expectedExit {
 					t.Errorf("退出码 = %d, 期望 %d\n输出: %s", exitErr.ExitCode(), tt.expectedExit, output)
 				}
-			} else if err != nil {
+			} else {
+				// 其他类型的错误（如命令无法启动）
 				t.Fatalf("执行命令失败: %v", err)
 			}
 
