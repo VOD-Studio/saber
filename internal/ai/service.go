@@ -39,6 +39,60 @@ const (
 	roomIDKey contextKey = "roomID"
 )
 
+// ResponseMode 表示 AI 响应模式。
+type ResponseMode int
+
+const (
+	// ResponseModeDirect 表示直接响应模式（非流式，无工具调用）。
+	ResponseModeDirect ResponseMode = iota
+	// ResponseModeStreaming 表示流式响应模式。
+	ResponseModeStreaming
+	// ResponseModeToolCalling 表示工具调用模式。
+	ResponseModeToolCalling
+	// ResponseModeStreamingWithTools 表示流式响应带工具调用模式。
+	ResponseModeStreamingWithTools
+)
+
+// String 返回响应模式的字符串表示。
+func (m ResponseMode) String() string {
+	switch m {
+	case ResponseModeDirect:
+		return "direct"
+	case ResponseModeStreaming:
+		return "streaming"
+	case ResponseModeToolCalling:
+		return "tool_calling"
+	case ResponseModeStreamingWithTools:
+		return "streaming_with_tools"
+	default:
+		return "unknown"
+	}
+}
+
+// ResponseContext 封装 AI 响应请求的上下文。
+type ResponseContext struct {
+	UserID      id.UserID
+	RoomID      id.RoomID
+	Messages    []openai.ChatCompletionMessage
+	Model       string
+	UseToolCall bool
+	Tools       []openai.Tool
+}
+
+// determineResponseMode 根据配置和工具调用状态决定响应模式。
+func determineResponseMode(streamEnabled, streamEdit, useToolCall bool) ResponseMode {
+	if streamEnabled && streamEdit {
+		if useToolCall {
+			return ResponseModeStreamingWithTools
+		}
+		return ResponseModeStreaming
+	}
+	if useToolCall {
+		return ResponseModeToolCalling
+	}
+	return ResponseModeDirect
+}
+
 // WithUserContext 将用户 ID 和房间 ID 添加到上下文中。
 //
 // 这允许在请求链中传递用户和房间信息，供后续处理使用。
@@ -663,6 +717,110 @@ func (s *Service) prependSystemPrompt(messages []openai.ChatCompletionMessage, p
 	return append(result, messages...)
 }
 
+// executeDirectResponse 执行直接（非流式）AI 响应。
+func (s *Service) executeDirectResponse(
+	ctx context.Context,
+	client *Client,
+	req ChatCompletionRequest,
+	respCtx *ResponseContext,
+) (*ChatCompletionResponse, error) {
+	roomID := respCtx.RoomID
+
+	if err := s.matrixService.StartTyping(ctx, roomID, 30000); err != nil {
+		slog.Warn("无法启动 typing indicator", "error", err)
+	}
+
+	resp, err := client.CreateChatCompletion(ctx, req)
+
+	if stopErr := s.matrixService.StopTyping(ctx, roomID); stopErr != nil {
+		slog.Warn("无法停止 typing indicator", "error", stopErr)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	slog.Debug("AI响应成功",
+		"model", resp.Model,
+		"content_length", len(resp.Content),
+		"prompt_tokens", resp.Usage.PromptTokens,
+		"completion_tokens", resp.Usage.CompletionTokens,
+		"total_tokens", resp.Usage.TotalTokens)
+
+	slog.Info("AI 响应", "model", resp.Model, "content", resp.Content)
+
+	eventID := matrix.GetEventID(ctx)
+	var sendErr error
+	if eventID != "" {
+		_, sendErr = s.matrixService.SendReply(ctx, roomID, resp.Content, eventID)
+	} else {
+		sendErr = s.matrixService.SendText(ctx, roomID, resp.Content)
+	}
+
+	if sendErr != nil {
+		slog.Error("发送 AI 响应失败", "error", sendErr)
+		return nil, fmt.Errorf("发送响应失败：%w", sendErr)
+	}
+
+	if s.contextManager != nil {
+		s.contextManager.AddMessage(roomID, RoleAssistant, resp.Content, s.matrixService.BotID())
+	}
+
+	return resp, nil
+}
+
+// executeStreamingResponse 执行流式 AI 响应。
+func (s *Service) executeStreamingResponse(
+	ctx context.Context,
+	client *Client,
+	req ChatCompletionRequest,
+	respCtx *ResponseContext,
+) error {
+	roomID := respCtx.RoomID
+
+	slog.Debug("使用流式响应模式", "char_threshold", s.globalConfig.StreamEdit.CharThreshold)
+
+	eventID := matrix.GetEventID(ctx)
+	editor := NewStreamEditor(s.matrixService, roomID, "", s.globalConfig.StreamEdit, eventID)
+	handler := NewSmartStreamHandler(editor, s.globalConfig.StreamEdit.CharThreshold, s.globalConfig.StreamEdit.TimeThresholdMs)
+
+	streamErr := client.CreateStreamingChatCompletion(ctx, req, handler)
+	if streamErr != nil {
+		slog.Error("流式AI请求失败", "model", req.Model, "error", streamErr)
+		return streamErr
+	}
+
+	slog.Debug("流式AI请求完成", "model", req.Model)
+	return nil
+}
+
+// prepareTools 准备 MCP 工具列表。
+func (s *Service) prepareTools() ([]openai.Tool, bool) {
+	if s.mcpManager == nil || !s.mcpManager.IsEnabled() {
+		return nil, false
+	}
+
+	mcpTools := s.mcpManager.ListTools()
+	if len(mcpTools) == 0 {
+		return nil, false
+	}
+
+	tools := make([]openai.Tool, 0, len(mcpTools))
+	for _, mcpTool := range mcpTools {
+		tools = append(tools, openai.Tool{
+			Type: "function",
+			Function: &openai.FunctionDefinition{
+				Name:        mcpTool.Name,
+				Description: mcpTool.Description,
+				Parameters:  mcpTool.InputSchema,
+			},
+		})
+	}
+
+	slog.Debug("启用工具调用", "tool_count", len(tools))
+	return tools, true
+}
+
 func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID id.RoomID, modelName string, args []string) error {
 	ctx = mcp.WithUserContext(ctx, userID, roomID)
 
@@ -737,127 +895,38 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 		req.Model = model
 		slog.Debug("发送AI请求", "model", model, "base_url", s.globalConfig.BaseURL)
 
-		// 检查是否应该使用工具调用
-		var tools []openai.Tool
-		useToolCalling := false
-		if s.mcpManager != nil && s.mcpManager.IsEnabled() {
-			mcpTools := s.mcpManager.ListTools()
-			if len(mcpTools) > 0 {
-				// Convert MCP tools to OpenAI tools
-				for _, mcpTool := range mcpTools {
-					tools = append(tools, openai.Tool{
-						Type: "function",
-						Function: &openai.FunctionDefinition{
-							Name:        mcpTool.Name,
-							Description: mcpTool.Description,
-							Parameters:  mcpTool.InputSchema,
-						},
-					})
-				}
-				useToolCalling = true
-				slog.Debug("启用工具调用", "tool_count", len(tools))
-			}
-		}
-
-		// If using tool calling, we need to add tools to the request
+		tools, useToolCalling := s.prepareTools()
 		if useToolCalling {
 			req.Tools = tools
 		}
 
-		// 决定使用流式还是非流式模式
-		if s.globalConfig.StreamEnabled && s.globalConfig.StreamEdit.Enabled {
-			if useToolCalling {
-				// 流式模式 + 工具调用：使用新的流式工具处理流程
-				slog.Debug("使用流式响应模式（含工具调用）", "tool_count", len(tools))
-				return s.executeStreamingWithToolCalling(ctx, client, req, roomID, messages, tools, model)
-			} else {
-				// 流式模式（无工具调用）
-				slog.Debug("使用流式响应模式", "char_threshold", s.globalConfig.StreamEdit.CharThreshold)
-				eventID := matrix.GetEventID(ctx)
-				editor := NewStreamEditor(s.matrixService, roomID, "", s.globalConfig.StreamEdit, eventID)
-				handler := NewSmartStreamHandler(editor, s.globalConfig.StreamEdit.CharThreshold, s.globalConfig.StreamEdit.TimeThresholdMs)
+		respCtx := &ResponseContext{
+			UserID:      userID,
+			RoomID:      roomID,
+			Messages:    messages,
+			Model:       model,
+			UseToolCall: useToolCalling,
+			Tools:       tools,
+		}
 
-				streamErr := client.CreateStreamingChatCompletion(ctx, req, handler)
-				if streamErr != nil {
-					slog.Error("流式AI请求失败", "model", model, "error", streamErr)
-					return nil, streamErr
-				}
+		mode := determineResponseMode(s.globalConfig.StreamEnabled, s.globalConfig.StreamEdit.Enabled, useToolCalling)
+		slog.Debug("响应模式", "mode", mode, "model", model)
 
-				slog.Debug("流式AI请求完成", "model", model)
-				return nil, nil
+		switch mode {
+		case ResponseModeStreamingWithTools:
+			return s.executeStreamingWithToolCalling(ctx, client, req, roomID, messages, tools, model)
+
+		case ResponseModeStreaming:
+			if err := s.executeStreamingResponse(ctx, client, req, respCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			// 非流式编辑模式：显示 typing indicator
-			if err := s.matrixService.StartTyping(ctx, roomID, 30000); err != nil {
-				slog.Warn("无法启动 typing indicator", "error", err)
-			}
+			return nil, nil
 
-			var finalContent string
-			var usage openai.Usage
-			var chatErr error
+		case ResponseModeToolCalling:
+			return s.executeDirectResponseWithTools(ctx, client, req, respCtx)
 
-			if useToolCalling {
-				// 使用工具调用循环
-				finalContent, chatErr = s.executeToolCallingLoop(ctx, messages, model, tools)
-				if chatErr == nil {
-					// 为工具调用响应创建空的 usage
-					usage = openai.Usage{}
-				}
-			} else {
-				// 使用直接聊天完成
-				resp, err := client.CreateChatCompletion(ctx, req)
-				if err != nil {
-					chatErr = err
-				} else {
-					finalContent = resp.Content
-					usage = resp.Usage
-				}
-			}
-
-			// 停止 typing indicator
-			if stopErr := s.matrixService.StopTyping(ctx, roomID); stopErr != nil {
-				slog.Warn("无法停止 typing indicator", "error", stopErr)
-			}
-
-			if chatErr != nil {
-				slog.Error("AI请求失败", "model", model, "error", chatErr)
-				return nil, chatErr
-			}
-
-			slog.Debug("AI响应成功",
-				"model", model,
-				"content_length", len(finalContent),
-				"content", finalContent,
-				"prompt_tokens", usage.PromptTokens,
-				"completion_tokens", usage.CompletionTokens,
-				"total_tokens", usage.TotalTokens)
-
-			slog.Info("AI 响应", "model", model, "content", finalContent)
-
-			// 如果上下文中有 EventID，使用回复模式（群聊场景）
-			eventID := matrix.GetEventID(ctx)
-			var sendErr error
-			if eventID != "" {
-				_, sendErr = s.matrixService.SendReply(ctx, roomID, finalContent, eventID)
-			} else {
-				sendErr = s.matrixService.SendText(ctx, roomID, finalContent)
-			}
-
-			if sendErr != nil {
-				slog.Error("发送 AI 响应失败", "error", sendErr)
-				return nil, fmt.Errorf("发送响应失败：%w", sendErr)
-			}
-
-			if s.contextManager != nil {
-				s.contextManager.AddMessage(roomID, RoleAssistant, finalContent, s.matrixService.BotID())
-			}
-
-			// Return a dummy response for the fallback handler
-			return &ChatCompletionResponse{
-				Content: finalContent,
-				Usage:   usage,
-				Model:   model,
-			}, nil
+		default:
+			return s.executeDirectResponse(ctx, client, req, respCtx)
 		}
 	})
 
@@ -868,6 +937,55 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 	}
 
 	return err
+}
+
+// executeDirectResponseWithTools 执行带工具调用的直接响应。
+func (s *Service) executeDirectResponseWithTools(
+	ctx context.Context,
+	client *Client,
+	req ChatCompletionRequest,
+	respCtx *ResponseContext,
+) (*ChatCompletionResponse, error) {
+	roomID := respCtx.RoomID
+
+	if err := s.matrixService.StartTyping(ctx, roomID, 30000); err != nil {
+		slog.Warn("无法启动 typing indicator", "error", err)
+	}
+
+	finalContent, chatErr := s.executeToolCallingLoop(ctx, respCtx.Messages, respCtx.Model, respCtx.Tools)
+
+	if stopErr := s.matrixService.StopTyping(ctx, roomID); stopErr != nil {
+		slog.Warn("无法停止 typing indicator", "error", stopErr)
+	}
+
+	if chatErr != nil {
+		slog.Error("AI请求失败", "model", respCtx.Model, "error", chatErr)
+		return nil, chatErr
+	}
+
+	slog.Info("AI 响应", "model", respCtx.Model, "content", finalContent)
+
+	eventID := matrix.GetEventID(ctx)
+	var sendErr error
+	if eventID != "" {
+		_, sendErr = s.matrixService.SendReply(ctx, roomID, finalContent, eventID)
+	} else {
+		sendErr = s.matrixService.SendText(ctx, roomID, finalContent)
+	}
+
+	if sendErr != nil {
+		slog.Error("发送 AI 响应失败", "error", sendErr)
+		return nil, fmt.Errorf("发送响应失败：%w", sendErr)
+	}
+
+	if s.contextManager != nil {
+		s.contextManager.AddMessage(roomID, RoleAssistant, finalContent, s.matrixService.BotID())
+	}
+
+	return &ChatCompletionResponse{
+		Content: finalContent,
+		Model:   respCtx.Model,
+	}, nil
 }
 
 // AICommand 处理默认的 AI 聊天命令。
