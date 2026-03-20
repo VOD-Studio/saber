@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -112,14 +113,15 @@ type JSSandboxConfig struct {
 
 // ServerConfig 存储单个 MCP 服务器配置
 type ServerConfig struct {
-	Type    string            `yaml:"type"`              // 服务器类型: builtin, stdio, http
-	Enabled bool              `yaml:"enabled"`           // 是否启用
-	Command string            `yaml:"command,omitempty"` // stdio: 可执行文件路径
-	Args    []string          `yaml:"args,omitempty"`    // stdio: 命令参数
-	Env     map[string]string `yaml:"env,omitempty"`     // stdio: 环境变量
-	URL     string            `yaml:"url,omitempty"`     // http: 服务器地址
-	Token   string            `yaml:"token,omitempty"`   // http: Bearer 认证令牌
-	Timeout int               `yaml:"timeout_seconds"`   // 调用超时（秒）
+	Type            string            `yaml:"type"`              // 服务器类型：builtin, stdio, http
+	Enabled         bool              `yaml:"enabled"`           // 是否启用
+	Command         string            `yaml:"command,omitempty"` // stdio: 可执行文件路径
+	Args            []string          `yaml:"args,omitempty"`    // stdio: 命令参数
+	Env             map[string]string `yaml:"env,omitempty"`     // stdio: 环境变量
+	URL             string            `yaml:"url,omitempty"`     // http: 服务器地址
+	Token           string            `yaml:"token,omitempty"`   // http: Bearer 认证令牌
+	Timeout         int               `yaml:"timeout_seconds"`   // 调用超时（秒）
+	AllowedCommands []string          `yaml:"allowed_commands"`  // stdio: 命令白名单（默认禁止所有）
 }
 
 // ModelConfig 存储特定模型配置
@@ -468,6 +470,16 @@ func Load(path string) (*Config, error) {
 		path = DefaultConfigPath()
 	}
 
+	// 检查文件权限
+	if info, err := os.Stat(path); err == nil {
+		perm := info.Mode().Perm()
+		if perm != 0o600 {
+			slog.Warn("配置文件权限过于宽松，建议设置为 0600",
+				"path", path,
+				"current_permission", fmt.Sprintf("%o", perm))
+		}
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
@@ -686,5 +698,5 @@ mcp:
 
 // GenerateExample 将示例配置写入文件。
 func GenerateExample(path string) error {
-	return os.WriteFile(path, []byte(ExampleConfig()), 0o644)
+	return os.WriteFile(path, []byte(ExampleConfig()), 0o600)
 }
