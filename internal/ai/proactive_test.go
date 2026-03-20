@@ -515,7 +515,8 @@ func TestTriggerCoordinator_NewCoordinator(t *testing.T) {
 		t.Fatalf("NewRateLimiter() error = %v", err)
 	}
 
-	coordinator, err := NewTriggerCoordinator(cfg, silenceTrigger, scheduleTrigger, rateLimiter, stateTracker)
+	mockRL := &mockRoomListerTest{}
+	coordinator, err := NewTriggerCoordinator(cfg, silenceTrigger, scheduleTrigger, rateLimiter, stateTracker, mockRL)
 	if err != nil {
 		t.Fatalf("NewTriggerCoordinator() error = %v", err)
 	}
@@ -612,12 +613,14 @@ func TestTriggerCoordinator_NilParameters(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			mockRL := &mockRoomListerTest{}
 			coordinator, err := NewTriggerCoordinator(
 				tt.cfg,
 				tt.silence,
 				tt.schedule,
 				tt.rateLimiter,
 				tt.stateTracker,
+				mockRL,
 			)
 
 			if (err != nil) != tt.wantErr {
@@ -675,7 +678,7 @@ func TestTriggerCoordinator_CheckAndTrigger(t *testing.T) {
 		t.Fatalf("NewRateLimiter() error = %v", err)
 	}
 
-	coordinator, err := NewTriggerCoordinator(cfg, silenceTrigger, scheduleTrigger, rateLimiter, stateTracker)
+	coordinator, err := NewTriggerCoordinator(cfg, silenceTrigger, scheduleTrigger, rateLimiter, stateTracker, mockRL)
 	if err != nil {
 		t.Fatalf("NewTriggerCoordinator() error = %v", err)
 	}
@@ -691,7 +694,8 @@ func TestTriggerCoordinator_CheckAndTrigger(t *testing.T) {
 
 	// 测试静默检测禁用的情况
 	cfg.Silence.Enabled = false
-	coordinator2, err := NewTriggerCoordinator(cfg, silenceTrigger, scheduleTrigger, rateLimiter, stateTracker)
+	mockRL2 := &mockRoomListerTest{}
+	coordinator2, err := NewTriggerCoordinator(cfg, silenceTrigger, scheduleTrigger, rateLimiter, stateTracker, mockRL2)
 	if err != nil {
 		t.Fatalf("NewTriggerCoordinator() error = %v", err)
 	}
@@ -743,7 +747,7 @@ func TestTriggerCoordinator_HandleSilenceTrigger(t *testing.T) {
 		t.Fatalf("NewRateLimiter() error = %v", err)
 	}
 
-	triggerCoord, err := NewTriggerCoordinator(cfg, silenceTrigger, scheduleTrigger, rateLimiter, stateTracker)
+	triggerCoord, err := NewTriggerCoordinator(cfg, silenceTrigger, scheduleTrigger, rateLimiter, stateTracker, mockRL)
 	if err != nil {
 		t.Fatalf("NewTriggerCoordinator() error = %v", err)
 	}

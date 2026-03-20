@@ -326,7 +326,8 @@ func TestTriggerCoordinatorIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRateLimiter() error = %v", err)
 	}
-	coordinator, err := NewTriggerCoordinator(cfg, silenceTrigger, scheduleTrigger, rateLimiter, stateTracker)
+	mockRL := &mockRoomListerTest{}
+	coordinator, err := NewTriggerCoordinator(cfg, silenceTrigger, scheduleTrigger, rateLimiter, stateTracker, mockRL)
 	if err != nil {
 		t.Fatalf("NewTriggerCoordinator() error = %v", err)
 	}
