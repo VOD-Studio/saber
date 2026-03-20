@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +29,10 @@ var sharedTransport = &http.Transport{
 	TLSHandshakeTimeout:   10 * time.Second,
 	ResponseHeaderTimeout: 10 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,
+	// 强制 TLS 1.2 或更高版本
+	TLSClientConfig: &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	},
 }
 
 // Client 是 AI 客户端的结构体，封装了 OpenAI 客户端和相关配置。

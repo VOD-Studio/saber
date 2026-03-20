@@ -2,6 +2,7 @@
 package servers
 
 import (
+	"crypto/tls"
 	"net"
 	"net/http"
 	"time"
@@ -21,6 +22,10 @@ var sharedHTTPClient = &http.Client{
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
+		// 强制 TLS 1.2 或更高版本
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
 	},
 }
 
