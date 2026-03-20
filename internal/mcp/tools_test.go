@@ -17,12 +17,12 @@ func TestConvertToOpenAITools(t *testing.T) {
 		expectedCount int
 	}{
 		{
-			name:          "empty tools",
+			name:          "空工具列表",
 			tools:         []mcp.Tool{},
 			expectedCount: 0,
 		},
 		{
-			name: "single tool",
+			name: "单个工具",
 			tools: []mcp.Tool{
 				{
 					Name:        "test_tool",
@@ -38,7 +38,7 @@ func TestConvertToOpenAITools(t *testing.T) {
 			expectedCount: 1,
 		},
 		{
-			name: "multiple tools",
+			name: "多个工具",
 			tools: []mcp.Tool{
 				{
 					Name:        "tool1",
@@ -54,7 +54,7 @@ func TestConvertToOpenAITools(t *testing.T) {
 			expectedCount: 2,
 		},
 		{
-			name: "tool with nil schema",
+			name: "Schema 为空的工具",
 			tools: []mcp.Tool{
 				{
 					Name:        "nil_schema_tool",
@@ -105,12 +105,12 @@ func TestConvertJSONSchema(t *testing.T) {
 		expectObject bool
 	}{
 		{
-			name:         "nil schema",
+			name:         "空 Schema",
 			schema:       nil,
 			expectObject: true,
 		},
 		{
-			name: "simple object schema",
+			name: "简单对象 Schema",
 			schema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -120,7 +120,7 @@ func TestConvertJSONSchema(t *testing.T) {
 			expectObject: false,
 		},
 		{
-			name: "schema with required fields",
+			name: "带必填字段的 Schema",
 			schema: map[string]any{
 				"type":     "object",
 				"required": []string{"url"},
@@ -128,7 +128,7 @@ func TestConvertJSONSchema(t *testing.T) {
 			expectObject: false,
 		},
 		{
-			name: "complex nested schema",
+			name: "复杂嵌套 Schema",
 			schema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

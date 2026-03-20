@@ -98,7 +98,7 @@ func TestSmartStreamHandler_OnComplete(t *testing.T) {
 		wantCalls    int
 	}{
 		{
-			name: "not started - starts and sends final",
+			name: "未开始 - 启动并发送最终消息",
 			setupHandler: func(h *SmartStreamHandler) {
 				h.hasStartedEditing = false
 			},
@@ -106,7 +106,7 @@ func TestSmartStreamHandler_OnComplete(t *testing.T) {
 			wantCalls:    2, // Start sends one, SendFinal sends another
 		},
 		{
-			name: "already started - just sends final",
+			name: "已开始 - 仅发送最终消息",
 			setupHandler: func(h *SmartStreamHandler) {
 				h.hasStartedEditing = true
 				h.editor.messageID = "$existing"

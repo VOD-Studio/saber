@@ -193,19 +193,19 @@ func TestJSSandboxErrorHandling(t *testing.T) {
 		code string
 	}{
 		{
-			name: "syntax error",
+			name: "语法错误",
 			code: "function {",
 		},
 		{
-			name: "runtime error",
+			name: "运行时错误",
 			code: "throw new Error('test error')",
 		},
 		{
-			name: "undefined variable",
+			name: "未定义变量",
 			code: "undefinedVariable.foo",
 		},
 		{
-			name: "type error",
+			name: "类型错误",
 			code: "null.foo",
 		},
 	}

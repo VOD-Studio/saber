@@ -14,13 +14,13 @@ func TestNewModelRegistry(t *testing.T) {
 		wantDefault    string
 	}{
 		{
-			name:           "nil config",
+			name:           "空配置",
 			cfg:            nil,
 			wantModelCount: 0,
 			wantDefault:    "",
 		},
 		{
-			name: "empty config",
+			name: "空配置对象",
 			cfg: &config.AIConfig{
 				DefaultModel: "",
 				Models:       make(map[string]config.ModelConfig),
@@ -29,7 +29,7 @@ func TestNewModelRegistry(t *testing.T) {
 			wantDefault:    "",
 		},
 		{
-			name: "only default model",
+			name: "仅默认模型",
 			cfg: &config.AIConfig{
 				DefaultModel: "gpt-4o-mini",
 				Models:       make(map[string]config.ModelConfig),
@@ -38,7 +38,7 @@ func TestNewModelRegistry(t *testing.T) {
 			wantDefault:    "gpt-4o-mini",
 		},
 		{
-			name: "default model and custom models",
+			name: "默认模型和自定义模型",
 			cfg: &config.AIConfig{
 				DefaultModel: "gpt-4o-mini",
 				Models: map[string]config.ModelConfig{
@@ -51,7 +51,7 @@ func TestNewModelRegistry(t *testing.T) {
 			wantDefault:    "gpt-4o-mini",
 		},
 		{
-			name: "default model not in models map",
+			name: "默认模型不在模型映射中",
 			cfg: &config.AIConfig{
 				DefaultModel: "default-model",
 				Models: map[string]config.ModelConfig{

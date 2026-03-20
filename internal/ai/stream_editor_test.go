@@ -112,7 +112,7 @@ func TestStreamEditor_Start(t *testing.T) {
 		mockErr    error
 	}{
 		{
-			name: "enabled with initial message",
+			name: "启用时有初始消息",
 			config: config.StreamEditConfig{
 				Enabled: true,
 			},
@@ -121,7 +121,7 @@ func TestStreamEditor_Start(t *testing.T) {
 			wantErr:    false,
 		},
 		{
-			name: "enabled with empty initial message",
+			name: "启用时无初始消息",
 			config: config.StreamEditConfig{
 				Enabled: true,
 			},
@@ -130,7 +130,7 @@ func TestStreamEditor_Start(t *testing.T) {
 			wantErr:    false,
 		},
 		{
-			name: "disabled",
+			name: "禁用状态",
 			config: config.StreamEditConfig{
 				Enabled: false,
 			},
@@ -139,7 +139,7 @@ func TestStreamEditor_Start(t *testing.T) {
 			wantErr:    false,
 		},
 		{
-			name: "send error",
+			name: "发送错误",
 			config: config.StreamEditConfig{
 				Enabled: true,
 			},
@@ -197,7 +197,7 @@ func TestStreamEditor_Update(t *testing.T) {
 		wantSendWithRel int
 	}{
 		{
-			name: "disabled - direct send",
+			name: "禁用状态 - 直接发送",
 			config: config.StreamEditConfig{
 				Enabled: false,
 			},
@@ -206,7 +206,7 @@ func TestStreamEditor_Update(t *testing.T) {
 			wantSendWithRel: 0,
 		},
 		{
-			name: "stopped - no action",
+			name: "已停止 - 无操作",
 			config: config.StreamEditConfig{
 				Enabled: true,
 			},
@@ -218,7 +218,7 @@ func TestStreamEditor_Update(t *testing.T) {
 			wantSendWithRel: 0,
 		},
 		{
-			name: "finalSent - no action",
+			name: "已发送最终消息 - 无操作",
 			config: config.StreamEditConfig{
 				Enabled: true,
 			},
@@ -230,7 +230,7 @@ func TestStreamEditor_Update(t *testing.T) {
 			wantSendWithRel: 0,
 		},
 		{
-			name: "no messageID - send new message",
+			name: "无消息 ID - 发送新消息",
 			config: config.StreamEditConfig{
 				Enabled:  true,
 				MaxEdits: 5,
@@ -240,7 +240,7 @@ func TestStreamEditor_Update(t *testing.T) {
 			wantSendWithRel: 1,
 		},
 		{
-			name: "max edits reached - no action",
+			name: "达到最大编辑次数 - 无操作",
 			config: config.StreamEditConfig{
 				Enabled:  true,
 				MaxEdits: 2,
@@ -254,7 +254,7 @@ func TestStreamEditor_Update(t *testing.T) {
 			wantSendWithRel: 0,
 		},
 		{
-			name: "interval too short - no action",
+			name: "间隔时间过短 - 无操作",
 			config: config.StreamEditConfig{
 				Enabled:        true,
 				MaxEdits:       5,
@@ -270,7 +270,7 @@ func TestStreamEditor_Update(t *testing.T) {
 			wantSendWithRel: 0,
 		},
 		{
-			name: "successful edit",
+			name: "成功编辑",
 			config: config.StreamEditConfig{
 				Enabled:        true,
 				MaxEdits:       5,
@@ -331,7 +331,7 @@ func TestStreamEditor_SendFinal(t *testing.T) {
 		wantErr     bool
 	}{
 		{
-			name: "first call - send final",
+			name: "首次调用 - 发送最终消息",
 			config: config.StreamEditConfig{
 				Enabled: true,
 			},
@@ -342,7 +342,7 @@ func TestStreamEditor_SendFinal(t *testing.T) {
 			wantCalls: 1,
 		},
 		{
-			name: "second call - idempotent",
+			name: "第二次调用 - 幂等",
 			config: config.StreamEditConfig{
 				Enabled: true,
 			},
@@ -354,7 +354,7 @@ func TestStreamEditor_SendFinal(t *testing.T) {
 			wantCalls: 0,
 		},
 		{
-			name: "disabled - direct send",
+			name: "禁用状态 - 直接发送",
 			config: config.StreamEditConfig{
 				Enabled: false,
 			},
@@ -362,7 +362,7 @@ func TestStreamEditor_SendFinal(t *testing.T) {
 			wantCalls: 0,
 		},
 		{
-			name: "no messageID - send new",
+			name: "无消息 ID - 发送新消息",
 			config: config.StreamEditConfig{
 				Enabled: true,
 			},

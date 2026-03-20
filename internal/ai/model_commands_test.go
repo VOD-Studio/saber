@@ -15,7 +15,7 @@ func TestModelsCommand_Registry(t *testing.T) {
 		wantModelsExist []string
 	}{
 		{
-			name: "no models configured",
+			name: "无模型配置",
 			cfg: &config.AIConfig{
 				Enabled:        true,
 				Provider:       "openai",
@@ -30,7 +30,7 @@ func TestModelsCommand_Registry(t *testing.T) {
 			wantModelsExist: nil,
 		},
 		{
-			name: "with models configured",
+			name: "有模型配置",
 			cfg: &config.AIConfig{
 				Enabled:        true,
 				Provider:       "openai",

@@ -181,7 +181,7 @@ func TestValidateToolInput(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "all required fields present",
+			name: "所有必填字段存在",
 			params: map[string]any{
 				"url":    "https://example.com",
 				"method": "GET",
@@ -192,7 +192,7 @@ func TestValidateToolInput(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "missing required field",
+			name: "缺少必填字段",
 			params: map[string]any{
 				"method": "GET",
 			},
@@ -202,7 +202,7 @@ func TestValidateToolInput(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "no required fields in schema",
+			name: "Schema 无必填字段",
 			params: map[string]any{
 				"optional": "value",
 			},
@@ -212,7 +212,7 @@ func TestValidateToolInput(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "required field with wrong type in schema",
+			name: "必填字段 Schema 类型错误",
 			params: map[string]any{
 				"url": "https://example.com",
 			},
@@ -222,7 +222,7 @@ func TestValidateToolInput(t *testing.T) {
 			wantErr: false, // 无效 schema 不应报错
 		},
 		{
-			name: "required field with non-string items",
+			name: "必填字段包含非字符串项",
 			params: map[string]any{
 				"url": "https://example.com",
 			},

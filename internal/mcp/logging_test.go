@@ -63,82 +63,82 @@ func TestSanitizeArgs(t *testing.T) {
 		expected map[string]any
 	}{
 		{
-			name:     "nil args",
+			name:     "空参数",
 			args:     nil,
 			expected: map[string]any{},
 		},
 		{
-			name:     "empty args",
+			name:     "空参数映射",
 			args:     map[string]any{},
 			expected: map[string]any{},
 		},
 		{
-			name:     "no sensitive fields",
+			name:     "无敏感字段",
 			args:     map[string]any{"url": "https://example.com", "count": 10},
 			expected: map[string]any{"url": "https://example.com", "count": 10},
 		},
 		{
-			name:     "password field",
+			name:     "password 字段",
 			args:     map[string]any{"password": "secret123"},
 			expected: map[string]any{"password": "[REDACTED]"},
 		},
 		{
-			name:     "token field",
+			name:     "token 字段",
 			args:     map[string]any{"token": "abc123"},
 			expected: map[string]any{"token": "[REDACTED]"},
 		},
 		{
-			name:     "api_key field",
+			name:     "api_key 字段",
 			args:     map[string]any{"api_key": "sk-123"},
 			expected: map[string]any{"api_key": "[REDACTED]"},
 		},
 		{
-			name:     "apikey field",
+			name:     "apikey 字段",
 			args:     map[string]any{"apikey": "sk-456"},
 			expected: map[string]any{"apikey": "[REDACTED]"},
 		},
 		{
-			name:     "secret field",
+			name:     "secret 字段",
 			args:     map[string]any{"secret": "mysecret"},
 			expected: map[string]any{"secret": "[REDACTED]"},
 		},
 		{
-			name:     "authorization field",
+			name:     "authorization 字段",
 			args:     map[string]any{"authorization": "Bearer token"},
 			expected: map[string]any{"authorization": "[REDACTED]"},
 		},
 		{
-			name:     "auth field",
+			name:     "auth 字段",
 			args:     map[string]any{"auth": "credentials"},
 			expected: map[string]any{"auth": "[REDACTED]"},
 		},
 		{
-			name:     "credential field",
+			name:     "credential 字段",
 			args:     map[string]any{"credential": "creds"},
 			expected: map[string]any{"credential": "[REDACTED]"},
 		},
 		{
-			name:     "private_key field",
+			name:     "private_key 字段",
 			args:     map[string]any{"private_key": "key123"},
 			expected: map[string]any{"private_key": "[REDACTED]"},
 		},
 		{
-			name:     "privatekey field",
+			name:     "privatekey 字段",
 			args:     map[string]any{"privatekey": "key456"},
 			expected: map[string]any{"privatekey": "[REDACTED]"},
 		},
 		{
-			name:     "access_token field",
+			name:     "access_token 字段",
 			args:     map[string]any{"access_token": "token123"},
 			expected: map[string]any{"access_token": "[REDACTED]"},
 		},
 		{
-			name:     "refresh_token field",
+			name:     "refresh_token 字段",
 			args:     map[string]any{"refresh_token": "refresh123"},
 			expected: map[string]any{"refresh_token": "[REDACTED]"},
 		},
 		{
-			name: "mixed sensitive and non-sensitive",
+			name: "混合敏感和非敏感字段",
 			args: map[string]any{
 				"url":      "https://example.com",
 				"api_key":  "sk-123",

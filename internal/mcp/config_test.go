@@ -15,7 +15,7 @@ func TestValidateServerConfig(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "disabled server",
+			name: "禁用服务器",
 			cfg: &config.ServerConfig{
 				Enabled: false,
 				Type:    "any",
@@ -23,7 +23,7 @@ func TestValidateServerConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "builtin server enabled",
+			name: "内置服务器已启用",
 			cfg: &config.ServerConfig{
 				Enabled: true,
 				Type:    ServerTypeBuiltin,
@@ -31,7 +31,7 @@ func TestValidateServerConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "stdio server with command",
+			name: "Stdio 服务器有命令",
 			cfg: &config.ServerConfig{
 				Enabled: true,
 				Type:    ServerTypeStdio,
@@ -40,7 +40,7 @@ func TestValidateServerConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "stdio server without command",
+			name: "Stdio 服务器无命令",
 			cfg: &config.ServerConfig{
 				Enabled: true,
 				Type:    ServerTypeStdio,
@@ -49,7 +49,7 @@ func TestValidateServerConfig(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "http server with url",
+			name: "HTTP 服务器有 URL",
 			cfg: &config.ServerConfig{
 				Enabled: true,
 				Type:    ServerTypeHTTP,
@@ -58,7 +58,7 @@ func TestValidateServerConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "http server without url",
+			name: "HTTP 服务器无 URL",
 			cfg: &config.ServerConfig{
 				Enabled: true,
 				Type:    ServerTypeHTTP,
@@ -67,7 +67,7 @@ func TestValidateServerConfig(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "unknown server type",
+			name: "未知服务器类型",
 			cfg: &config.ServerConfig{
 				Enabled: true,
 				Type:    "unknown",

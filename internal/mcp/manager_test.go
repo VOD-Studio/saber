@@ -18,19 +18,19 @@ func TestNewManager(t *testing.T) {
 		expectedEnable bool
 	}{
 		{
-			name:           "nil config",
+			name:           "空配置",
 			cfg:            nil,
 			expectedEnable: false,
 		},
 		{
-			name: "disabled config",
+			name: "禁用配置",
 			cfg: &config.MCPConfig{
 				Enabled: false,
 			},
 			expectedEnable: false,
 		},
 		{
-			name: "enabled config",
+			name: "启用配置",
 			cfg: &config.MCPConfig{
 				Enabled: true,
 			},
@@ -86,12 +86,12 @@ func TestManager_ListServers(t *testing.T) {
 		expectedCount int
 	}{
 		{
-			name:          "nil config",
+			name:          "空配置",
 			cfg:           nil,
 			expectedCount: 0,
 		},
 		{
-			name: "empty servers",
+			name: "空服务器列表",
 			cfg: &config.MCPConfig{
 				Enabled: true,
 				Servers: map[string]config.ServerConfig{},
@@ -99,7 +99,7 @@ func TestManager_ListServers(t *testing.T) {
 			expectedCount: 0,
 		},
 		{
-			name: "one server",
+			name: "单个服务器",
 			cfg: &config.MCPConfig{
 				Enabled: true,
 				Servers: map[string]config.ServerConfig{
@@ -109,7 +109,7 @@ func TestManager_ListServers(t *testing.T) {
 			expectedCount: 1,
 		},
 		{
-			name: "multiple servers",
+			name: "多个服务器",
 			cfg: &config.MCPConfig{
 				Enabled: true,
 				Servers: map[string]config.ServerConfig{

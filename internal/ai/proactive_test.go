@@ -24,7 +24,7 @@ func TestNewProactiveManager(t *testing.T) {
 		errContains    string
 	}{
 		{
-			name:           "nil config",
+			name:           "空配置",
 			config:         nil,
 			aiService:      nil,
 			roomService:    nil,
@@ -33,7 +33,7 @@ func TestNewProactiveManager(t *testing.T) {
 			errContains:    "主动聊天配置不能为空",
 		},
 		{
-			name:           "nil ai service",
+			name:           "空 AI 服务",
 			config:         &config.ProactiveConfig{},
 			aiService:      nil,
 			roomService:    nil,
@@ -42,7 +42,7 @@ func TestNewProactiveManager(t *testing.T) {
 			errContains:    "AI 服务不能为空",
 		},
 		{
-			name:           "nil room service",
+			name:           "空房间服务",
 			config:         &config.ProactiveConfig{},
 			aiService:      &Service{},
 			roomService:    nil,
@@ -51,7 +51,7 @@ func TestNewProactiveManager(t *testing.T) {
 			errContains:    "matrix 房间服务不能为空",
 		},
 		{
-			name:           "nil global ai config",
+			name:           "空全局 AI 配置",
 			config:         &config.ProactiveConfig{},
 			aiService:      &Service{},
 			roomService:    &matrix.RoomService{},
@@ -60,7 +60,7 @@ func TestNewProactiveManager(t *testing.T) {
 			errContains:    "全局 AI 配置不能为空",
 		},
 		{
-			name: "valid config",
+			name: "有效配置",
 			config: &config.ProactiveConfig{
 				Enabled:            false,
 				MaxMessagesPerDay:  5,

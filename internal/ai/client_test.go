@@ -21,7 +21,7 @@ func TestNewClientWithModel(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valid openai config",
+			name: "有效 OpenAI 配置",
 			config: &config.ModelConfig{
 				Model:    "gpt-4",
 				Provider: "openai",
@@ -31,7 +31,7 @@ func TestNewClientWithModel(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "valid azure config",
+			name: "有效 Azure 配置",
 			config: &config.ModelConfig{
 				Model:    "gpt-4",
 				Provider: "azure",
@@ -41,7 +41,7 @@ func TestNewClientWithModel(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "valid azure-openai config",
+			name: "有效 Azure-OpenAI 配置",
 			config: &config.ModelConfig{
 				Model:    "gpt-4",
 				Provider: "azure-openai",
@@ -51,12 +51,12 @@ func TestNewClientWithModel(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "nil config",
+			name:    "空配置",
 			config:  nil,
 			wantErr: true,
 		},
 		{
-			name: "custom base url",
+			name: "自定义 BaseURL",
 			config: &config.ModelConfig{
 				Model:    "gpt-4",
 				Provider: "openai",

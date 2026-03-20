@@ -15,7 +15,7 @@ func TestMediaInfo(t *testing.T) {
 		wantType string
 	}{
 		{
-			name: "image type",
+			name: "图片类型",
 			info: &MediaInfo{
 				Type:     "image",
 				URL:      "mxc://example.com/image123",
@@ -25,7 +25,7 @@ func TestMediaInfo(t *testing.T) {
 			wantType: "image",
 		},
 		{
-			name: "video type",
+			name: "视频类型",
 			info: &MediaInfo{
 				Type:     "video",
 				URL:      "mxc://example.com/video123",
@@ -35,7 +35,7 @@ func TestMediaInfo(t *testing.T) {
 			wantType: "video",
 		},
 		{
-			name: "audio type",
+			name: "音频类型",
 			info: &MediaInfo{
 				Type:     "audio",
 				URL:      "mxc://example.com/audio123",
@@ -45,7 +45,7 @@ func TestMediaInfo(t *testing.T) {
 			wantType: "audio",
 		},
 		{
-			name: "file type",
+			name: "文件类型",
 			info: &MediaInfo{
 				Type:     "file",
 				URL:      "mxc://example.com/file123",
@@ -75,7 +75,7 @@ func TestExtractMediaInfo(t *testing.T) {
 		want    *MediaInfo
 	}{
 		{
-			name: "image message",
+			name: "图片消息",
 			content: &event.MessageEventContent{
 				MsgType: event.MsgImage,
 				Body:    "这是一张图片",
@@ -93,7 +93,7 @@ func TestExtractMediaInfo(t *testing.T) {
 			},
 		},
 		{
-			name: "video message",
+			name: "视频消息",
 			content: &event.MessageEventContent{
 				MsgType: event.MsgVideo,
 				Body:    "这是一个视频",
@@ -114,7 +114,7 @@ func TestExtractMediaInfo(t *testing.T) {
 			},
 		},
 		{
-			name: "audio message",
+			name: "音频消息",
 			content: &event.MessageEventContent{
 				MsgType: event.MsgAudio,
 				Body:    "这是一段音频",
@@ -133,7 +133,7 @@ func TestExtractMediaInfo(t *testing.T) {
 			},
 		},
 		{
-			name: "file message",
+			name: "文件消息",
 			content: &event.MessageEventContent{
 				MsgType: event.MsgFile,
 				Body:    "这是一个文件",
@@ -151,7 +151,7 @@ func TestExtractMediaInfo(t *testing.T) {
 			},
 		},
 		{
-			name: "encrypted file",
+			name: "加密文件",
 			content: &event.MessageEventContent{
 				MsgType: event.MsgImage,
 				Body:    "加密图片",
@@ -172,7 +172,7 @@ func TestExtractMediaInfo(t *testing.T) {
 			},
 		},
 		{
-			name: "text message (not media)",
+			name: "文本消息（非媒体）",
 			content: &event.MessageEventContent{
 				MsgType: event.MsgText,
 				Body:    "这是文本消息",
@@ -185,7 +185,7 @@ func TestExtractMediaInfo(t *testing.T) {
 			want:    nil,
 		},
 		{
-			name: "missing mime type",
+			name: "缺少 MIME 类型",
 			content: &event.MessageEventContent{
 				MsgType: event.MsgImage,
 				Body:    "无 MIME 类型",

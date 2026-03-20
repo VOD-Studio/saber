@@ -25,15 +25,15 @@ func TestNewContextManager(t *testing.T) {
 		config config.ContextConfig
 	}{
 		{
-			name:   "default config",
+			name:   "默认配置",
 			config: config.DefaultContextConfig(),
 		},
 		{
-			name:   "empty config",
+			name:   "空配置",
 			config: config.ContextConfig{},
 		},
 		{
-			name: "custom config",
+			name: "自定义配置",
 			config: config.ContextConfig{
 				Enabled:       true,
 				MaxMessages:   100,
@@ -42,7 +42,7 @@ func TestNewContextManager(t *testing.T) {
 			},
 		},
 		{
-			name: "zero values",
+			name: "零值配置",
 			config: config.ContextConfig{
 				Enabled:       false,
 				MaxMessages:   0,
@@ -253,7 +253,7 @@ func TestContextManager_GetContext(t *testing.T) {
 			wantContent: nil,
 		},
 		{
-			name: "existing room with messages",
+			name: "存在消息的房间",
 			setup: func(cm *ContextManager) {
 				cm.AddMessage(roomID, RoleUser, "Hello", userID)
 				cm.AddMessage(roomID, RoleAssistant, "Hi!", userID)
@@ -264,7 +264,7 @@ func TestContextManager_GetContext(t *testing.T) {
 			wantContent: []string{"Hello", "Hi!"},
 		},
 		{
-			name: "cleared room",
+			name: "已清除的房间",
 			setup: func(cm *ContextManager) {
 				cm.AddMessage(roomID, RoleUser, "Hello", userID)
 				cm.ClearContext(roomID)
@@ -316,7 +316,7 @@ func TestContextManager_ClearContext(t *testing.T) {
 		wantLen int
 	}{
 		{
-			name: "clear existing room",
+			name: "清除已存在的房间",
 			setup: func(cm *ContextManager) {
 				cm.AddMessage(roomID, RoleUser, "Hello", userID)
 				cm.AddMessage(roomID, RoleUser, "World", userID)
@@ -331,7 +331,7 @@ func TestContextManager_ClearContext(t *testing.T) {
 			wantLen: 0,
 		},
 		{
-			name: "clear and re-add",
+			name: "清除并重新添加",
 			setup: func(cm *ContextManager) {
 				cm.AddMessage(roomID, RoleUser, "Before clear", userID)
 			},
@@ -339,7 +339,7 @@ func TestContextManager_ClearContext(t *testing.T) {
 			wantLen: 0,
 		},
 		{
-			name: "clear then add new message",
+			name: "清除后添加新消息",
 			setup: func(cm *ContextManager) {
 				cm.AddMessage(roomID, RoleUser, "Before clear", userID)
 				cm.ClearContext(roomID)
@@ -387,7 +387,7 @@ func TestContextManager_GetContextSize(t *testing.T) {
 			minTokens: 0,
 		},
 		{
-			name: "single short message",
+			name: "单条短消息",
 			setup: func(cm *ContextManager) {
 				cm.AddMessage(roomID, RoleUser, "Hi", userID)
 			},
@@ -395,7 +395,7 @@ func TestContextManager_GetContextSize(t *testing.T) {
 			minTokens: 1, // len("Hi") = 2, tokens ~= 2/0.75 = 2.67 -> 2
 		},
 		{
-			name: "multiple messages",
+			name: "多条消息",
 			setup: func(cm *ContextManager) {
 				cm.AddMessage(roomID, RoleUser, "Hello world", userID)
 				cm.AddMessage(roomID, RoleAssistant, "Hi there!", userID)
@@ -404,7 +404,7 @@ func TestContextManager_GetContextSize(t *testing.T) {
 			minTokens: 10, // Combined length ~20 chars, tokens ~= 26
 		},
 		{
-			name: "long message",
+			name: "长消息",
 			setup: func(cm *ContextManager) {
 				longMsg := strings.Repeat("x", 100)
 				cm.AddMessage(roomID, RoleUser, longMsg, userID)
@@ -450,14 +450,14 @@ func TestContextManager_ListActiveRooms(t *testing.T) {
 			wantLen: 0,
 		},
 		{
-			name: "single room",
+			name: "单个房间",
 			setup: func(cm *ContextManager) {
 				cm.AddMessage("!room1:example.com", RoleUser, "Hello", userID)
 			},
 			wantLen: 1,
 		},
 		{
-			name: "multiple rooms",
+			name: "多个房间",
 			setup: func(cm *ContextManager) {
 				cm.AddMessage("!room1:example.com", RoleUser, "Hello", userID)
 				cm.AddMessage("!room2:example.com", RoleUser, "World", userID)
@@ -466,7 +466,7 @@ func TestContextManager_ListActiveRooms(t *testing.T) {
 			wantLen: 3,
 		},
 		{
-			name: "after clear",
+			name: "清除后",
 			setup: func(cm *ContextManager) {
 				roomID := id.RoomID("!room1:example.com")
 				cm.AddMessage(roomID, RoleUser, "Hello", userID)

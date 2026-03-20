@@ -517,7 +517,7 @@ func TestMentionService_BoundaryCases(t *testing.T) {
 		testFunc func(*MentionService) error
 	}{
 		{
-			name: "empty string mention check",
+			name: "空字符串提及检查",
 			setup: func(svc *MentionService) {
 				svc.mu.Lock()
 				svc.displayName = "Saber"
@@ -540,7 +540,7 @@ func TestMentionService_BoundaryCases(t *testing.T) {
 			},
 		},
 		{
-			name: "very long message",
+			name: "超长消息",
 			setup: func(svc *MentionService) {
 				svc.mu.Lock()
 				svc.displayName = "Saber"
@@ -555,7 +555,7 @@ func TestMentionService_BoundaryCases(t *testing.T) {
 			},
 		},
 		{
-			name: "unicode special characters",
+			name: "Unicode 特殊字符",
 			setup: func(svc *MentionService) {
 				svc.mu.Lock()
 				svc.displayName = "派蒙⚡️"
@@ -569,7 +569,7 @@ func TestMentionService_BoundaryCases(t *testing.T) {
 			},
 		},
 		{
-			name: "init before and after",
+			name: "初始化前后",
 			setup: func(svc *MentionService) {
 				// 初始时没有显示名称
 				if svc.GetDisplayName() != "" {
@@ -588,7 +588,7 @@ func TestMentionService_BoundaryCases(t *testing.T) {
 			},
 		},
 		{
-			name: "strip prefix edge cases",
+			name: "去除前缀边界情况",
 			setup: func(svc *MentionService) {
 				svc.mu.Lock()
 				svc.displayName = "Bot"
@@ -743,7 +743,7 @@ func TestParseMentions(t *testing.T) {
 			wantRoom:    false,
 		},
 		{
-			name: "MSC 3952 with user mentions",
+			name: "MSC 3952 用户提及",
 			evt: &event.Event{
 				Content: event.Content{
 					Parsed: &event.MessageEventContent{
@@ -757,7 +757,7 @@ func TestParseMentions(t *testing.T) {
 			wantRoom:    false,
 		},
 		{
-			name: "MSC 3952 with @room",
+			name: "MSC 3952 @room 提及",
 			evt: &event.Event{
 				Content: event.Content{
 					Parsed: &event.MessageEventContent{
@@ -771,7 +771,7 @@ func TestParseMentions(t *testing.T) {
 			wantRoom:    true,
 		},
 		{
-			name: "MSC 3952 empty mentions",
+			name: "MSC 3952 空提及",
 			evt: &event.Event{
 				Content: event.Content{
 					Parsed: &event.MessageEventContent{
@@ -783,7 +783,7 @@ func TestParseMentions(t *testing.T) {
 			wantRoom:    false,
 		},
 		{
-			name: "HTML pills mentions",
+			name: "HTML Pills 提及",
 			evt: &event.Event{
 				Content: event.Content{
 					Parsed: &event.MessageEventContent{
@@ -796,7 +796,7 @@ func TestParseMentions(t *testing.T) {
 			wantRoom:    false,
 		},
 		{
-			name: "HTML pills empty formatted body",
+			name: "HTML Pills 空格式化正文",
 			evt: &event.Event{
 				Content: event.Content{
 					Parsed: &event.MessageEventContent{
@@ -809,7 +809,7 @@ func TestParseMentions(t *testing.T) {
 			wantRoom:    false,
 		},
 		{
-			name: "non-HTML format",
+			name: "非 HTML 格式",
 			evt: &event.Event{
 				Content: event.Content{
 					Parsed: &event.MessageEventContent{
@@ -822,7 +822,7 @@ func TestParseMentions(t *testing.T) {
 			wantRoom:    false,
 		},
 		{
-			name: "combined mentions with deduplication",
+			name: "组合提及去重",
 			evt: &event.Event{
 				Content: event.Content{
 					Parsed: &event.MessageEventContent{
@@ -839,7 +839,7 @@ func TestParseMentions(t *testing.T) {
 			wantRoom:    true,
 		},
 		{
-			name: "combined mentions with duplicate users",
+			name: "组合提及重复用户",
 			evt: &event.Event{
 				Content: event.Content{
 					Parsed: &event.MessageEventContent{
@@ -855,7 +855,7 @@ func TestParseMentions(t *testing.T) {
 			wantRoom:    false,
 		},
 		{
-			name: "invalid message content type",
+			name: "无效消息内容类型",
 			evt: &event.Event{
 				Content: event.Content{
 					Parsed: "not a message event content",
@@ -865,7 +865,7 @@ func TestParseMentions(t *testing.T) {
 			wantRoom:    false,
 		},
 		{
-			name: "nil content parsed",
+			name: "空内容解析",
 			evt: &event.Event{
 				Content: event.Content{
 					Parsed: nil,

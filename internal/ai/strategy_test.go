@@ -25,7 +25,7 @@ func TestOpenAIStrategy_CreateClientConfig(t *testing.T) {
 		wantName string
 	}{
 		{
-			name: "with custom base url",
+			name: "使用自定义 BaseURL",
 			config: &config.ModelConfig{
 				APIKey:  "test-key",
 				BaseURL: "https://custom.api.com/v1",
@@ -34,7 +34,7 @@ func TestOpenAIStrategy_CreateClientConfig(t *testing.T) {
 			wantName: "openai",
 		},
 		{
-			name: "without base url",
+			name: "使用默认 BaseURL",
 			config: &config.ModelConfig{
 				APIKey: "test-key",
 			},
@@ -110,7 +110,7 @@ func TestClientFactory_CreateClientConfig(t *testing.T) {
 		wantType string // "openai" or "azure"
 	}{
 		{
-			name: "openai provider",
+			name: "OpenAI 提供商",
 			config: &config.ModelConfig{
 				Provider: "openai",
 				APIKey:   "test-key",
@@ -119,7 +119,7 @@ func TestClientFactory_CreateClientConfig(t *testing.T) {
 			wantType: "openai",
 		},
 		{
-			name: "azure provider",
+			name: "Azure 提供商",
 			config: &config.ModelConfig{
 				Provider: "azure",
 				APIKey:   "test-key",
@@ -128,7 +128,7 @@ func TestClientFactory_CreateClientConfig(t *testing.T) {
 			wantType: "azure",
 		},
 		{
-			name: "azure-openai alias",
+			name: "Azure-OpenAI 别名",
 			config: &config.ModelConfig{
 				Provider: "azure-openai",
 				APIKey:   "test-key",
@@ -137,7 +137,7 @@ func TestClientFactory_CreateClientConfig(t *testing.T) {
 			wantType: "azure",
 		},
 		{
-			name: "unknown provider defaults to openai",
+			name: "未知提供商默认使用 OpenAI",
 			config: &config.ModelConfig{
 				Provider: "unknown",
 				APIKey:   "test-key",
@@ -146,7 +146,7 @@ func TestClientFactory_CreateClientConfig(t *testing.T) {
 			wantType: "openai",
 		},
 		{
-			name: "ollama uses openai strategy",
+			name: "Ollama 使用 OpenAI 策略",
 			config: &config.ModelConfig{
 				Provider: "ollama",
 				APIKey:   "dummy",
