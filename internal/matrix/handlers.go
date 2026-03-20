@@ -263,6 +263,172 @@ func (s *CommandService) parseMentionCommand(body string) *ParsedCommand {
 	}
 }
 
+// handleDirectChat 处理私聊消息自动回复。
+//
+// 当消息来自私聊房间（只有2个成员）且 directChatAI 处理器已设置时，
+// 自动触发 AI 回复。
+//
+// 参数:
+//   - ctx: 上下文
+//   - sender: 消息发送者 ID
+//   - roomID: 房间 ID
+//   - body: 消息内容
+//
+// 返回值:
+//   - handled: 是否已处理
+//   - error: 处理过程中发生的错误
+func (s *CommandService) handleDirectChat(ctx context.Context, sender id.UserID, roomID id.RoomID, body string) (handled bool, err error) {
+	if s.directChatAI == nil || !s.isDirectChat(ctx, roomID) {
+		return false, nil
+	}
+
+	slog.Info("Direct chat auto-reply triggered",
+		"sender", sender.String(),
+		"room", roomID.String())
+
+	args := []string{body}
+	if err := s.directChatAI.Handle(ctx, sender, roomID, args); err != nil {
+		slog.Error("Direct chat AI handler failed",
+			"sender", sender.String(),
+			"room", roomID.String(),
+			"error", err)
+		return true, s.reportError(ctx, roomID, "ai", err)
+	}
+
+	return true, nil
+}
+
+// handleReply 处理回复消息。
+//
+// 当消息是回复机器人发送的消息时，触发 replyAI 处理器。
+// 会自动清理回复内容中的引用前缀，并可能包含被回复消息的上下文。
+//
+// 参数:
+//   - ctx: 上下文
+//   - sender: 消息发送者 ID
+//   - roomID: 房间 ID
+//   - content: 消息内容对象
+//
+// 返回值:
+//   - handled: 是否已处理
+//   - error: 处理过程中发生的错误
+func (s *CommandService) handleReply(ctx context.Context, sender id.UserID, roomID id.RoomID, content *event.MessageEventContent) (handled bool, err error) {
+	if s.replyAI == nil || content.RelatesTo == nil || content.RelatesTo.GetReplyTo() == "" {
+		return false, nil
+	}
+
+	replyToEventID := content.RelatesTo.GetReplyTo()
+	slog.Debug("检测到回复消息", "reply_to", replyToEventID.String())
+
+	if !s.isReplyToBot(ctx, roomID, replyToEventID) {
+		return false, nil
+	}
+
+	cleanedBody := event.TrimReplyFallbackText(content.Body)
+
+	replyContext := ""
+	if evt, err := s.client.GetEvent(ctx, roomID, replyToEventID); err == nil {
+		if msgContent, ok := evt.Content.Parsed.(*event.MessageEventContent); ok {
+			replyContext = msgContent.Body
+		}
+	}
+
+	slog.Info("回复消息触发 AI 回复",
+		"sender", sender.String(),
+		"room", roomID.String(),
+		"reply_to", replyToEventID.String(),
+		"reply_context", replyContext,
+		"message", cleanedBody)
+
+	args := []string{cleanedBody}
+	if replyContext != "" {
+		args = []string{fmt.Sprintf("[引用消息]\n%s\n\n[回复]\n%s", replyContext, cleanedBody)}
+	}
+
+	if err := s.replyAI.Handle(ctx, sender, roomID, args); err != nil {
+		slog.Error("回复消息处理失败", "error", err)
+		return true, s.reportError(ctx, roomID, "ai", err)
+	}
+
+	return true, nil
+}
+
+// handleGroupMention 处理群聊中的提及消息。
+//
+// 当群聊消息中包含对机器人的 @mention 时，触发 mentionAI 处理器。
+// 使用 MentionService 解析多种 mention 格式。
+//
+// 参数:
+//   - ctx: 上下文
+//   - sender: 消息发送者 ID
+//   - roomID: 房间 ID
+//   - content: 消息内容对象
+//
+// 返回值:
+//   - handled: 是否已处理
+//   - error: 处理过程中发生的错误
+func (s *CommandService) handleGroupMention(ctx context.Context, sender id.UserID, roomID id.RoomID, content *event.MessageEventContent) (handled bool, err error) {
+	if s.mentionAI == nil || s.mentionService == nil || s.isDirectChat(ctx, roomID) {
+		return false, nil
+	}
+
+	msg, ok := s.mentionService.ParseMention(content.Body, content)
+	if !ok {
+		return false, nil
+	}
+
+	slog.Info("群聊 mention 触发 AI 回复",
+		"sender", sender.String(),
+		"room", roomID.String(),
+		"message", msg)
+
+	args := []string{msg}
+	if err := s.mentionAI.Handle(ctx, sender, roomID, args); err != nil {
+		slog.Error("群聊 mention 处理失败", "error", err)
+		return true, s.reportError(ctx, roomID, "ai", err)
+	}
+
+	return true, nil
+}
+
+// handleCommand 处理命令消息。
+//
+// 解析消息中的命令并执行对应的处理器。
+// 命令格式支持 `!command args` 或 `@bot:command args`。
+//
+// 参数:
+//   - ctx: 上下文
+//   - sender: 消息发送者 ID
+//   - roomID: 房间 ID
+//   - parsed: 解析后的命令对象
+//
+// 返回值:
+//   - handled: 是否已处理
+//   - error: 处理过程中发生的错误
+func (s *CommandService) handleCommand(ctx context.Context, sender id.UserID, roomID id.RoomID, parsed *ParsedCommand) (handled bool, err error) {
+	cmdInfo, ok := s.GetCommand(parsed.Command)
+	if !ok {
+		slog.Debug("Unknown command", "command", parsed.Command)
+		return false, nil
+	}
+
+	slog.Info("Executing command",
+		"command", parsed.Command,
+		"sender", sender.String(),
+		"room", roomID.String(),
+		"args", parsed.Args)
+
+	if err := cmdInfo.Handler.Handle(ctx, sender, roomID, parsed.Args); err != nil {
+		slog.Error("Command execution failed",
+			"command", parsed.Command,
+			"sender", sender.String(),
+			"error", err)
+		return true, s.reportError(ctx, roomID, parsed.Command, err)
+	}
+
+	return true, nil
+}
+
 // HandleEvent 处理 Matrix 事件并分发命令。
 // 它只处理消息事件，忽略来自机器人自身的事件。
 func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) error {
@@ -304,105 +470,25 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 	// 解析命令
 	parsed := s.ParseCommand(content.Body)
 
-	// 如果不是命令，检查是否需要私聊自动回复
-	if parsed == nil {
-		if s.directChatAI != nil && s.isDirectChat(ctx, roomID) {
-			slog.Info("Direct chat auto-reply triggered",
-				"sender", sender.String(),
-				"room", roomID.String())
-
-			args := []string{content.Body}
-			err := s.directChatAI.Handle(ctx, sender, roomID, args)
-			if err != nil {
-				slog.Error("Direct chat AI handler failed",
-					"sender", sender.String(),
-					"room", roomID.String(),
-					"error", err)
-				return s.reportError(ctx, roomID, "ai", err)
-			}
-		}
-
-		// 回复消息响应（优先于 mention 检测，避免回复引用中的 mention 误触发）
-		if s.replyAI != nil && content.RelatesTo != nil && content.RelatesTo.GetReplyTo() != "" {
-			replyToEventID := content.RelatesTo.GetReplyTo()
-			slog.Debug("检测到回复消息", "reply_to", replyToEventID.String(), "replyAI", s.replyAI != nil)
-			if s.isReplyToBot(ctx, roomID, replyToEventID) {
-				cleanedBody := event.TrimReplyFallbackText(content.Body)
-
-				replyContext := ""
-				if evt, err := s.client.GetEvent(ctx, roomID, replyToEventID); err == nil {
-					if msgContent, ok := evt.Content.Parsed.(*event.MessageEventContent); ok {
-						replyContext = msgContent.Body
-					}
-				}
-
-				slog.Info("回复消息触发 AI 回复",
-					"sender", sender.String(),
-					"room", roomID.String(),
-					"reply_to", replyToEventID.String(),
-					"reply_context", replyContext,
-					"message", cleanedBody)
-
-				args := []string{cleanedBody}
-				if replyContext != "" {
-					args = []string{fmt.Sprintf("[引用消息]\n%s\n\n[回复]\n%s", replyContext, cleanedBody)}
-				}
-
-				if err := s.replyAI.Handle(ctx, sender, roomID, args); err != nil {
-					slog.Error("回复消息处理失败", "error", err)
-					return s.reportError(ctx, roomID, "ai", err)
-				}
-				return nil
-			}
-		} else if content.RelatesTo != nil {
-			slog.Debug("回复消息条件不满足",
-				"replyAI", s.replyAI != nil,
-				"relatesTo", content.RelatesTo != nil,
-				"replyTo", content.RelatesTo.GetReplyTo())
-		}
-
-		// 群聊 mention 响应
-		if s.mentionAI != nil && s.mentionService != nil && !s.isDirectChat(ctx, roomID) {
-			if msg, ok := s.mentionService.ParseMention(content.Body, content); ok {
-				slog.Info("群聊 mention 触发 AI 回复",
-					"sender", sender.String(),
-					"room", roomID.String(),
-					"message", msg)
-
-				args := []string{msg}
-				if err := s.mentionAI.Handle(ctx, sender, roomID, args); err != nil {
-					slog.Error("群聊 mention 处理失败", "error", err)
-					return s.reportError(ctx, roomID, "ai", err)
-				}
-			}
-		}
-		return nil
+	// 命令处理
+	if parsed != nil {
+		_, err := s.handleCommand(ctx, sender, roomID, parsed)
+		return err
 	}
 
-	// 查找命令
-	cmdInfo, ok := s.GetCommand(parsed.Command)
-	if !ok {
-		slog.Debug("Unknown command", "command", parsed.Command)
-		return nil
+	// 私聊自动回复
+	if handled, err := s.handleDirectChat(ctx, sender, roomID, content.Body); handled {
+		return err
 	}
 
-	// 记录命令执行
-	slog.Info("Executing command",
-		"command", parsed.Command,
-		"sender", sender.String(),
-		"room", roomID.String(),
-		"args", parsed.Args)
+	// 回复消息处理（优先于 mention 检测，避免回复引用中的 mention 误触发）
+	if handled, err := s.handleReply(ctx, sender, roomID, content); handled {
+		return err
+	}
 
-	// 执行命令
-	err := cmdInfo.Handler.Handle(ctx, sender, roomID, parsed.Args)
-	if err != nil {
-		slog.Error("Command execution failed",
-			"command", parsed.Command,
-			"sender", sender.String(),
-			"error", err)
-
-		// 向房间报告错误
-		return s.reportError(ctx, roomID, parsed.Command, err)
+	// 群聊 mention 响应
+	if handled, err := s.handleGroupMention(ctx, sender, roomID, content); handled {
+		return err
 	}
 
 	return nil
