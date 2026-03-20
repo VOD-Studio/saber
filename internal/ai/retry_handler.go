@@ -84,6 +84,9 @@ type RetryConfigWrapper struct {
 
 	// FallbackModels 备用模型列表
 	FallbackModels []string
+
+	// CircuitBreaker 熔断器（可选）
+	CircuitBreaker *CircuitBreaker
 }
 
 // WithRetry 使用指数退避执行操作。
@@ -96,6 +99,31 @@ type RetryConfigWrapper struct {
 //   - interface{}: 操作结果
 //   - error: 操作错误
 func (rc *RetryConfigWrapper) WithRetry(ctx context.Context, operation func() (any, error)) (any, error) {
+	// 如果配置了熔断器，使用熔断器保护
+	if rc.CircuitBreaker != nil {
+		return rc.withCircuitBreaker(ctx, operation)
+	}
+	return rc.withRetryInternal(ctx, operation)
+}
+
+// withCircuitBreaker 在熔断器保护下执行操作。
+func (rc *RetryConfigWrapper) withCircuitBreaker(ctx context.Context, operation func() (any, error)) (any, error) {
+	if !rc.CircuitBreaker.Allow() {
+		return nil, fmt.Errorf("circuit breaker is open: %w", ErrCircuitOpen)
+	}
+
+	result, err := rc.withRetryInternal(ctx, operation)
+	if err != nil {
+		rc.CircuitBreaker.RecordFailure()
+		return nil, err
+	}
+
+	rc.CircuitBreaker.RecordSuccess()
+	return result, nil
+}
+
+// withRetryInternal 内部重试逻辑。
+func (rc *RetryConfigWrapper) withRetryInternal(ctx context.Context, operation func() (any, error)) (any, error) {
 	var lastErr error
 	delay := rc.InitialDelay
 
