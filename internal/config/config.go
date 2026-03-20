@@ -674,6 +674,14 @@ ai:
       prompt_template: ""
       # 是否启用流式请求（默认 true，可更快响应）
       stream_enabled: true
+  # 媒体文件处理配置
+  media:
+    # 是否启用媒体处理（如图片理解）
+    enabled: true
+    # 最大文件大小（MB）
+    max_size_mb: 10
+    # 处理超时时间（秒）
+    timeout_sec: 30
 
 # MCP (Model Context Protocol) 配置
 mcp:
