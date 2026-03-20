@@ -23,7 +23,7 @@ func createTestAIConfig() *config.AIConfig {
 
 // TestNewService_NilConfig 测试空配置错误。
 func TestNewService_NilConfig(t *testing.T) {
-	_, err := NewService(nil, nil, nil)
+	_, err := NewService(nil, nil, nil, nil)
 	if err == nil {
 		t.Error("expected error for nil config")
 	}
@@ -35,7 +35,7 @@ func TestNewService_InvalidConfig(t *testing.T) {
 	cfg.Enabled = true
 	cfg.Provider = ""
 
-	_, err := NewService(&cfg, nil, nil)
+	_, err := NewService(&cfg, nil, nil, nil)
 	if err == nil {
 		t.Error("expected error for invalid config")
 	}
@@ -46,7 +46,7 @@ func TestNewService_DisabledConfig(t *testing.T) {
 	cfg := config.DefaultAIConfig()
 	cfg.Enabled = false
 
-	service, err := NewService(&cfg, nil, nil)
+	service, err := NewService(&cfg, nil, nil, nil)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestNewService_DisabledConfig(t *testing.T) {
 func TestNewService_ValidConfig(t *testing.T) {
 	cfg := createTestAIConfig()
 
-	service, err := NewService(cfg, nil, nil)
+	service, err := NewService(cfg, nil, nil, nil)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestNewService_ContextEnabled(t *testing.T) {
 	cfg := createTestAIConfig()
 	cfg.Context.Enabled = true
 
-	service, err := NewService(cfg, nil, nil)
+	service, err := NewService(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestNewService_ContextDisabled(t *testing.T) {
 	cfg := createTestAIConfig()
 	cfg.Context.Enabled = false
 
-	service, err := NewService(cfg, nil, nil)
+	service, err := NewService(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestNewService_ContextDisabled(t *testing.T) {
 // TestService_GetClient_Caching 测试客户端缓存。
 func TestService_GetClient_Caching(t *testing.T) {
 	cfg := createTestAIConfig()
-	service, _ := NewService(cfg, nil, nil)
+	service, _ := NewService(cfg, nil, nil, nil)
 
 	client1, err := service.getClient("gpt-4")
 	if err != nil {
@@ -124,7 +124,7 @@ func TestService_GetClient_Caching(t *testing.T) {
 // TestService_GetClient_DifferentModels 测试不同模型返回不同客户端。
 func TestService_GetClient_DifferentModels(t *testing.T) {
 	cfg := createTestAIConfig()
-	service, _ := NewService(cfg, nil, nil)
+	service, _ := NewService(cfg, nil, nil, nil)
 
 	client1, err := service.getClient("gpt-4")
 	if err != nil {
@@ -144,7 +144,7 @@ func TestService_GetClient_DifferentModels(t *testing.T) {
 // TestService_GetClient_Concurrency 测试并发客户端创建。
 func TestService_GetClient_Concurrency(t *testing.T) {
 	cfg := createTestAIConfig()
-	service, _ := NewService(cfg, nil, nil)
+	service, _ := NewService(cfg, nil, nil, nil)
 
 	const goroutines = 50
 	var wg sync.WaitGroup
@@ -174,7 +174,7 @@ func TestService_IsEnabled(t *testing.T) {
 	t.Run("enabled", func(t *testing.T) {
 		cfg := createTestAIConfig()
 		cfg.Enabled = true
-		service, _ := NewService(cfg, nil, nil)
+		service, _ := NewService(cfg, nil, nil, nil)
 
 		if !service.IsEnabled() {
 			t.Error("service should be enabled")
@@ -184,7 +184,7 @@ func TestService_IsEnabled(t *testing.T) {
 	t.Run("disabled", func(t *testing.T) {
 		cfg := createTestAIConfig()
 		cfg.Enabled = false
-		service, _ := NewService(cfg, nil, nil)
+		service, _ := NewService(cfg, nil, nil, nil)
 
 		if service.IsEnabled() {
 			t.Error("service should be disabled")
@@ -195,7 +195,7 @@ func TestService_IsEnabled(t *testing.T) {
 // TestAICommand_New 测试 AICommand 创建。
 func TestAICommand_New(t *testing.T) {
 	cfg := createTestAIConfig()
-	service, _ := NewService(cfg, nil, nil)
+	service, _ := NewService(cfg, nil, nil, nil)
 
 	cmd := NewAICommand(service)
 	if cmd == nil {
@@ -206,7 +206,7 @@ func TestAICommand_New(t *testing.T) {
 // TestMultiModelAICommand_New 测试 MultiModelAICommand 创建。
 func TestMultiModelAICommand_New(t *testing.T) {
 	cfg := createTestAIConfig()
-	service, _ := NewService(cfg, nil, nil)
+	service, _ := NewService(cfg, nil, nil, nil)
 
 	cmd := NewMultiModelAICommand(service, "gpt-3.5-turbo")
 	if cmd == nil {
@@ -217,7 +217,7 @@ func TestMultiModelAICommand_New(t *testing.T) {
 // TestClearContextCommand_New 测试 ClearContextCommand 创建。
 func TestClearContextCommand_New(t *testing.T) {
 	cfg := createTestAIConfig()
-	service, _ := NewService(cfg, nil, nil)
+	service, _ := NewService(cfg, nil, nil, nil)
 
 	cmd := NewClearContextCommand(service)
 	if cmd == nil {
@@ -228,7 +228,7 @@ func TestClearContextCommand_New(t *testing.T) {
 // TestContextInfoCommand_New 测试 ContextInfoCommand 创建。
 func TestContextInfoCommand_New(t *testing.T) {
 	cfg := createTestAIConfig()
-	service, _ := NewService(cfg, nil, nil)
+	service, _ := NewService(cfg, nil, nil, nil)
 
 	cmd := NewContextInfoCommand(service)
 	if cmd == nil {
@@ -240,7 +240,7 @@ func TestContextInfoCommand_New(t *testing.T) {
 func TestService_ContextIntegration(t *testing.T) {
 	cfg := createTestAIConfig()
 	cfg.Context.Enabled = true
-	service, _ := NewService(cfg, nil, nil)
+	service, _ := NewService(cfg, nil, nil, nil)
 
 	roomID := id.RoomID("!room:example.com")
 	userID := id.UserID("@user:example.com")
@@ -269,7 +269,7 @@ func TestService_ContextIntegration(t *testing.T) {
 func TestService_Concurrency(t *testing.T) {
 	cfg := createTestAIConfig()
 	cfg.Context.Enabled = true
-	service, _ := NewService(cfg, nil, nil)
+	service, _ := NewService(cfg, nil, nil, nil)
 
 	const goroutines = 50
 	var wg sync.WaitGroup
@@ -307,7 +307,7 @@ func TestService_Concurrency(t *testing.T) {
 func TestService_Stop(t *testing.T) {
 	cfg := createTestAIConfig()
 	cfg.Context.Enabled = true
-	service, _ := NewService(cfg, nil, nil)
+	service, _ := NewService(cfg, nil, nil, nil)
 
 	// 验证 contextManager 已初始化
 	if service.contextManager == nil {

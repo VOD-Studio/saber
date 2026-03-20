@@ -51,7 +51,7 @@ func TestModelsCommand_Registry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			service, err := NewService(tt.cfg, nil, nil)
+			service, err := NewService(tt.cfg, nil, nil, nil)
 			if err != nil {
 				t.Fatalf("NewService error: %v", err)
 			}
@@ -92,7 +92,7 @@ func TestSwitchModelCommand_Registry(t *testing.T) {
 	}
 
 	t.Run("switch to existing model", func(t *testing.T) {
-		service, err := NewService(cfg, nil, nil)
+		service, err := NewService(cfg, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
@@ -111,7 +111,7 @@ func TestSwitchModelCommand_Registry(t *testing.T) {
 	})
 
 	t.Run("switch to any model", func(t *testing.T) {
-		service, err := NewService(cfg, nil, nil)
+		service, err := NewService(cfg, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
@@ -130,7 +130,7 @@ func TestSwitchModelCommand_Registry(t *testing.T) {
 	})
 
 	t.Run("config default preserved", func(t *testing.T) {
-		service, err := NewService(cfg, nil, nil)
+		service, err := NewService(cfg, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
@@ -169,7 +169,7 @@ func TestCurrentModelCommand_Registry(t *testing.T) {
 	}
 
 	t.Run("initial state", func(t *testing.T) {
-		service, err := NewService(cfg, nil, nil)
+		service, err := NewService(cfg, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
@@ -188,7 +188,7 @@ func TestCurrentModelCommand_Registry(t *testing.T) {
 	})
 
 	t.Run("after switch", func(t *testing.T) {
-		service, err := NewService(cfg, nil, nil)
+		service, err := NewService(cfg, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}

@@ -419,13 +419,14 @@ type Service struct {
 	matrixService  *matrix.CommandService
 	contextManager *ContextManager
 	mcpManager     *mcp.Manager
+	mediaService   *matrix.MediaService
 	clients        map[string]*Client
 	clientsMu      sync.RWMutex
 	rateLimiter    *rate.Limiter
 	modelRegistry  *ModelRegistry
 }
 
-func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpManager *mcp.Manager) (*Service, error) {
+func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpManager *mcp.Manager, mediaService *matrix.MediaService) (*Service, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("AI配置不能为空")
 	}
@@ -449,6 +450,7 @@ func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpM
 		matrixService:  matrixService,
 		contextManager: contextManager,
 		mcpManager:     mcpManager,
+		mediaService:   mediaService,
 		clients:        make(map[string]*Client),
 		rateLimiter:    rateLimiter,
 		modelRegistry:  NewModelRegistry(cfg),
@@ -821,6 +823,76 @@ func (s *Service) prepareTools() ([]openai.Tool, bool) {
 	return tools, true
 }
 
+// buildTextMessages 构建纯文本消息列表。
+// 它从上下文管理器获取历史消息，并添加当前用户消息。
+//
+// 参数:
+//   - roomID: Matrix 房间 ID
+//   - userInput: 用户输入的文本
+//
+// 返回值:
+//   - []openai.ChatCompletionMessage: 构建的消息列表
+func (s *Service) buildTextMessages(roomID id.RoomID, userInput string) []openai.ChatCompletionMessage {
+	var messages []openai.ChatCompletionMessage
+	if s.contextManager != nil {
+		messages = s.contextManager.GetContext(roomID)
+	} else {
+		messages = []openai.ChatCompletionMessage{
+			{Role: string(RoleUser), Content: userInput},
+		}
+	}
+
+	if s.globalConfig.SystemPrompt != "" {
+		messages = s.prependSystemPrompt(messages, s.globalConfig.SystemPrompt)
+	}
+
+	return messages
+}
+
+// buildMultimodalMessages 构建多模态消息列表（文本 + 图片）。
+// 它从上下文管理器获取历史消息，并添加包含文本和图片的用户消息。
+//
+// 参数:
+//   - ctx: 上下文
+//   - roomID: Matrix 房间 ID
+//   - userInput: 用户输入的文本
+//   - imageData: Base64 Data URL 格式的图片数据
+//
+// 返回值:
+//   - []openai.ChatCompletionMessage: 构建的消息列表
+func (s *Service) buildMultimodalMessages(ctx context.Context, roomID id.RoomID, userInput, imageData string) []openai.ChatCompletionMessage {
+	var messages []openai.ChatCompletionMessage
+	if s.contextManager != nil {
+		messages = s.contextManager.GetContext(roomID)
+	}
+
+	// 构建当前用户消息（文本 + 图片）
+	userMessage := openai.ChatCompletionMessage{
+		Role: openai.ChatMessageRoleUser,
+		MultiContent: []openai.ChatMessagePart{
+			{
+				Type: openai.ChatMessagePartTypeText,
+				Text: userInput,
+			},
+			{
+				Type: openai.ChatMessagePartTypeImageURL,
+				ImageURL: &openai.ChatMessageImageURL{
+					URL:    imageData,
+					Detail: openai.ImageURLDetailAuto,
+				},
+			},
+		},
+	}
+
+	messages = append(messages, userMessage)
+
+	if s.globalConfig.SystemPrompt != "" {
+		messages = s.prependSystemPrompt(messages, s.globalConfig.SystemPrompt)
+	}
+
+	return messages
+}
+
 func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID id.RoomID, modelName string, args []string) error {
 	ctx = mcp.WithUserContext(ctx, userID, roomID)
 
@@ -843,17 +915,22 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 		s.contextManager.AddMessage(roomID, RoleUser, userInput, userID)
 	}
 
+	// 检查是否有媒体信息
+	mediaInfo := matrix.GetMediaInfo(ctx)
 	var messages []openai.ChatCompletionMessage
-	if s.contextManager != nil {
-		messages = s.contextManager.GetContext(roomID)
-	} else {
-		messages = []openai.ChatCompletionMessage{
-			{Role: string(RoleUser), Content: userInput},
-		}
-	}
 
-	if s.globalConfig.SystemPrompt != "" {
-		messages = s.prependSystemPrompt(messages, s.globalConfig.SystemPrompt)
+	if mediaInfo != nil && mediaInfo.Type == "image" && s.mediaService != nil && s.globalConfig.Media.Enabled {
+		// 下载并编码图片
+		imageData, err := s.mediaService.DownloadImage(ctx, mediaInfo)
+		if err != nil {
+			slog.Warn("下载图片失败，仅处理文本", "error", err)
+			messages = s.buildTextMessages(roomID, userInput)
+		} else {
+			messages = s.buildMultimodalMessages(ctx, roomID, userInput, imageData)
+			slog.Debug("构建多模态消息", "has_image", true)
+		}
+	} else {
+		messages = s.buildTextMessages(roomID, userInput)
 	}
 
 	req := ChatCompletionRequest{

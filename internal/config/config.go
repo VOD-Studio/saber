@@ -53,6 +53,7 @@ type AIConfig struct {
 	GroupChatMentionReply bool                   `yaml:"group_chat_mention_reply"` // 在群聊中 @mention 时自动回复（无需 !ai 前缀）
 	ReplyToBotReply       bool                   `yaml:"reply_to_bot_reply"`       // 回复机器人自己的回复（用于连续对话）
 	Proactive             ProactiveConfig        `yaml:"proactive"`                // 主动聊天配置
+	Media                 MediaConfig            `yaml:"media"`                    // 媒体文件处理配置
 }
 
 // ContextConfig 存储上下文管理配置
@@ -172,6 +173,13 @@ type DecisionConfig struct {
 	StreamEnabled  bool    `yaml:"stream_enabled"`  // 是否启用流式请求（默认 true）
 }
 
+// MediaConfig 存储媒体文件处理配置
+type MediaConfig struct {
+	Enabled    bool `yaml:"enabled"`     // 是否启用媒体文件处理
+	MaxSizeMB  int  `yaml:"max_size_mb"` // 最大文件大小（MB）
+	TimeoutSec int  `yaml:"timeout_sec"` // 处理超时时间（秒）
+}
+
 // UseTokenAuth 检查是否使用 Token 认证
 func (m *MatrixConfig) UseTokenAuth() bool {
 	return m.AccessToken != ""
@@ -204,6 +212,7 @@ func DefaultAIConfig() AIConfig {
 		GroupChatMentionReply: true,
 		ReplyToBotReply:       true,
 		Proactive:             DefaultProactiveConfig(),
+		Media:                 DefaultMediaConfig(),
 	}
 }
 
@@ -289,6 +298,15 @@ func DefaultDecisionConfig() DecisionConfig {
 	}
 }
 
+// DefaultMediaConfig 返回带有合理默认值的媒体配置
+func DefaultMediaConfig() MediaConfig {
+	return MediaConfig{
+		Enabled:    true,
+		MaxSizeMB:  10,
+		TimeoutSec: 30,
+	}
+}
+
 // DefaultJSSandboxConfig 返回带有合理默认值的 JS 沙箱配置
 func DefaultJSSandboxConfig() JSSandboxConfig {
 	return JSSandboxConfig{
@@ -338,6 +356,14 @@ func (a *AIConfig) Validate() error {
 	}
 	if a.TimeoutSeconds <= 0 {
 		return fmt.Errorf("timeout_seconds must be positive")
+	}
+	if a.Media.Enabled {
+		if a.Media.MaxSizeMB <= 0 {
+			return fmt.Errorf("media.max_size_mb must be positive")
+		}
+		if a.Media.TimeoutSec <= 0 {
+			return fmt.Errorf("media.timeout_sec must be positive")
+		}
 	}
 	return nil
 }

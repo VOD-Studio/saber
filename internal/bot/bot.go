@@ -28,6 +28,7 @@ type services struct {
 	commandService   *matrix.CommandService
 	eventHandler     *matrix.EventHandler
 	presence         *matrix.PresenceService
+	mediaService     *matrix.MediaService
 	client           *matrix.MatrixClient
 }
 
@@ -207,7 +208,12 @@ func (s *appState) initServices() bool {
 		matrix.RegisterMCPCommands(svc.commandService, svc.mcpManager)
 	}
 
-	aiService, err := ai.NewService(&s.cfg.AI, svc.commandService, svc.mcpManager)
+	// 创建媒体服务
+	mautrixClient := svc.client.GetClient()
+	maxSizeBytes := int64(s.cfg.AI.Media.MaxSizeMB) * 1024 * 1024
+	svc.mediaService = matrix.NewMediaService(mautrixClient, maxSizeBytes)
+
+	aiService, err := ai.NewService(&s.cfg.AI, svc.commandService, svc.mcpManager, svc.mediaService)
 	if err != nil {
 		slog.Error("AI服务初始化失败", "error", err)
 		os.Exit(1)

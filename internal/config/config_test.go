@@ -680,6 +680,104 @@ func TestDefaultProactiveConfigs(t *testing.T) {
 	})
 }
 
+func TestMediaConfig(t *testing.T) {
+	t.Run("DefaultMediaConfig", func(t *testing.T) {
+		cfg := DefaultMediaConfig()
+		if !cfg.Enabled {
+			t.Error("Default media should be enabled")
+		}
+		if cfg.MaxSizeMB != 10 {
+			t.Errorf("Default MaxSizeMB = %d, want 10", cfg.MaxSizeMB)
+		}
+		if cfg.TimeoutSec != 30 {
+			t.Errorf("Default TimeoutSec = %d, want 30", cfg.TimeoutSec)
+		}
+	})
+
+	t.Run("AIConfig 包含 Media 字段", func(t *testing.T) {
+		cfg := DefaultAIConfig()
+		if cfg.Media.Enabled != true {
+			t.Error("Default AI Media.Enabled should be true")
+		}
+		if cfg.Media.MaxSizeMB != 10 {
+			t.Errorf("Default AI Media.MaxSizeMB = %d, want 10", cfg.Media.MaxSizeMB)
+		}
+		if cfg.Media.TimeoutSec != 30 {
+			t.Errorf("Default AI Media.TimeoutSec = %d, want 30", cfg.Media.TimeoutSec)
+		}
+	})
+
+	t.Run("Media 配置验证 - 禁用时不验证", func(t *testing.T) {
+		cfg := AIConfig{
+			Enabled:        true,
+			Provider:       "openai",
+			BaseURL:        "https://api.openai.com/v1",
+			APIKey:         "key",
+			DefaultModel:   "gpt-4",
+			TimeoutSeconds: 30,
+			Media:          MediaConfig{Enabled: false, MaxSizeMB: -1, TimeoutSec: -1},
+		}
+		err := cfg.Validate()
+		if err != nil {
+			t.Errorf("Validate() should not error when media is disabled, got %v", err)
+		}
+	})
+
+	t.Run("Media 配置验证 - 有效配置", func(t *testing.T) {
+		cfg := AIConfig{
+			Enabled:        true,
+			Provider:       "openai",
+			BaseURL:        "https://api.openai.com/v1",
+			APIKey:         "key",
+			DefaultModel:   "gpt-4",
+			TimeoutSeconds: 30,
+			Media:          MediaConfig{Enabled: true, MaxSizeMB: 10, TimeoutSec: 30},
+		}
+		err := cfg.Validate()
+		if err != nil {
+			t.Errorf("Validate() error = %v", err)
+		}
+	})
+
+	t.Run("Media 配置验证 - MaxSizeMB 为负数", func(t *testing.T) {
+		cfg := AIConfig{
+			Enabled:        true,
+			Provider:       "openai",
+			BaseURL:        "https://api.openai.com/v1",
+			APIKey:         "key",
+			DefaultModel:   "gpt-4",
+			TimeoutSeconds: 30,
+			Media:          MediaConfig{Enabled: true, MaxSizeMB: -1, TimeoutSec: 30},
+		}
+		err := cfg.Validate()
+		if err == nil {
+			t.Error("Validate() should error when MaxSizeMB is negative")
+		}
+		if err != nil && !contains(err.Error(), "media.max_size_mb must be positive") {
+			t.Errorf("Validate() error = %v, want error containing 'media.max_size_mb must be positive'", err)
+		}
+	})
+
+	t.Run("Media 配置验证 - TimeoutSec 为负数", func(t *testing.T) {
+		cfg := AIConfig{
+			Enabled:        true,
+			Provider:       "openai",
+			BaseURL:        "https://api.openai.com/v1",
+			APIKey:         "key",
+			DefaultModel:   "gpt-4",
+			TimeoutSeconds: 30,
+			Media:          MediaConfig{Enabled: true, MaxSizeMB: 10, TimeoutSec: -1},
+		}
+		err := cfg.Validate()
+		if err == nil {
+			t.Error("Validate() should error when TimeoutSec is negative")
+		}
+		if err != nil && !contains(err.Error(), "media.timeout_sec must be positive") {
+			t.Errorf("Validate() error = %v, want error containing 'media.timeout_sec must be positive'", err)
+		}
+	})
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
 }
