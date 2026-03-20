@@ -1,4 +1,6 @@
-# AGENTS.md — Saber Matrix Bot Development Guide
+# AGENTS.md
+
+This file provides guidance to Qoder (qoder.com) when working with code in this repository.
 
 ## Project Overview
 
@@ -17,11 +19,17 @@ Module path: `rua.plus/saber`
 
 ```bash
 make build                              # → bin/saber
+make build-prod                         # 生产构建（纯 Go，静态链接）
 make test                               # 全部测试
 go test -v -tags goolm ./internal/ai -run TestService    # 单个测试函数
 go test -cover -race -tags goolm ./...  # 覆盖率 + 竞态检测
 make lint                               # golangci-lint
 make run                                # 运行应用
+```
+
+**编辑器配置**:
+```bash
+export GOFLAGS="-tags=goolm"
 ```
 
 ---
@@ -55,24 +63,46 @@ slog.Info("服务初始化完成", "provider", cfg.Provider)
 
 ## Architecture Patterns
 
+### 服务初始化流程
+
+应用启动遵循严格的初始化顺序 (`internal/bot/bot.go`):
+
+```
+Run() → initConfig() → initMatrixClient() → initServices() → setupEventHandlers() → startSync()
+```
+
+**服务依赖关系**:
+- `MCPManager` 先于 `AIService` 初始化（AI 服务依赖 MCP 工具）
+- `MediaService` 在 `AIService` 之前创建（处理图片消息）
+- `ProactiveManager` 最后初始化（依赖 AI 服务）
+
 ### HTTP 客户端共享
+
+所有 MCP 服务器共用一个 HTTP 客户端，复用连接池：
 
 ```go
 import "rua.plus/saber/internal/mcp/servers"
-client := servers.GetSharedHTTPClient()  // 复用连接池
+client := servers.GetSharedHTTPClient()
 ```
 
 ### Strategy 模式 (AI 客户端)
+
+支持多 AI 提供商，通过策略模式扩展：
 
 ```go
 type ClientStrategy interface {
     CreateClientConfig(cfg *config.ModelConfig) openai.ClientConfig
     Name() string
 }
-factory.RegisterStrategy(&MyProviderStrategy{})
+// 注册新策略
+factory.GetDefaultFactory().RegisterStrategy(&MyProviderStrategy{})
 ```
 
+内置策略: `openai` (兼容 Ollama/vLLM/LocalAI), `azure`
+
 ### Factory 模式 (MCP 服务器)
+
+MCP 服务器通过工厂模式创建，支持三种类型：
 
 ```go
 type MCPServerFactory interface {
@@ -81,12 +111,70 @@ type MCPServerFactory interface {
 }
 ```
 
+服务器类型: `builtin` (内置工具), `stdio` (子进程), `http` (远程服务)
+
 ### Circuit Breaker
+
+用于 AI 请求的熔断保护：
 
 ```go
 cb := NewCircuitBreaker(5, 30*time.Second)
 if !cb.Allow() { return ErrCircuitOpen }
+cb.RecordSuccess()  // 或 cb.RecordFailure()
 ```
+
+### 上下文传递模式
+
+请求上下文通过 `context.Value` 传递元数据：
+
+```go
+// 设置用户/房间上下文
+ctx = ai.WithUserContext(ctx, userID, roomID)
+ctx = matrix.WithEventID(ctx, eventID)
+ctx = matrix.WithMediaInfo(ctx, mediaInfo)
+
+// 获取上下文
+userID, ok := ai.GetUserFromContext(ctx)
+eventID := matrix.GetEventID(ctx)
+```
+
+### AI 响应模式
+
+AI 服务根据配置自动选择响应模式 (`internal/ai/service.go`):
+
+| 模式 | 条件 | 特点 |
+|------|------|------|
+| `ResponseModeDirect` | 非流式，无工具 | 单次请求-响应 |
+| `ResponseModeStreaming` | 流式，无工具 | 实时编辑消息 |
+| `ResponseModeToolCalling` | 非流式，有工具 | 工具调用循环 |
+| `ResponseModeStreamingWithTools` | 流式，有工具 | 流式 + 工具调用 |
+
+工具调用最多迭代 5 次 (`maxToolIterations`)。
+
+### 命令注册模式
+
+命令通过 `CommandService` 注册，支持多种触发方式：
+
+```go
+cs := matrix.NewCommandService(client, botUserID, &buildInfo)
+
+// 显式命令
+cs.RegisterCommandWithDesc("ai", "描述", handler)
+
+// 隐式触发
+cs.SetDirectChatAIHandler(handler)      // 私聊自动回复
+cs.SetMentionAIHandler(handler)          // @提及回复
+cs.SetReplyAIHandler(handler)            // 回复机器人消息
+```
+
+### SQLite 双驱动系统
+
+根据 CGO 开关选择不同驱动 (`internal/db/`):
+
+| 文件 | 构建条件 | 驱动 |
+|------|----------|------|
+| `sqlite_cgo.go` | CGO_ENABLED=1 | `mattn/go-sqlite3` |
+| `sqlite_nocgo.go` | CGO_ENABLED=0 | `modernc/sqlite` |
 
 ---
 
@@ -117,7 +205,9 @@ func TestValidate(t *testing.T) {
 
 **配置权限**: `0o600` | **认证优先**: access_token > password
 
-**stdio MCP**: 必须配置 `allowed_commands` | **HTML**: 使用 `SanitizeHTML()`
+**stdio MCP**: 必须配置 `allowed_commands` 白名单
+
+**HTML 输出**: 使用 `matrix.SanitizeHTML()` 防止 XSS
 
 ---
 

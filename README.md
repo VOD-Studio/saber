@@ -501,6 +501,9 @@ saber/
       flags.go            # 命令行标志解析
     config/
       config.go           # 配置加载和验证
+    db/
+      sqlite_cgo.go       # SQLite CGO 驱动（开发环境）
+      sqlite_nocgo.go     # SQLite 纯 Go 驱动（生产环境）
     matrix/
       client.go           # Matrix 客户端封装
       crypto.go           # E2EE 支持
@@ -510,20 +513,26 @@ saber/
       context.go          # 上下文工具
       mention.go          # 提及解析服务
       reply.go            # 回复工具
+      media.go            # 媒体上传和处理
     ai/
       service.go          # AI 服务编排
       client.go           # OpenAI 兼容客户端
+      strategy.go         # AI 提供商策略模式
+      model_registry.go   # 多模型注册管理
+      model_commands.go   # 模型特定命令处理
       context_manager.go  # 对话上下文管理
       stream_handler.go   # 流式响应处理
       stream_editor.go    # 流式消息编辑
       stream_tool_handler.go # 工具调用流处理
       retry_handler.go    # 重试逻辑和退避
+      circuit_breaker.go  # 熔断器模式
       proactive.go        # 主动聊天管理器
       proactive_triggers.go # 触发器实现（静默/定时）
       proactive_state.go  # 房间状态跟踪
       proactive_decision.go # AI 决策引擎
     mcp/
       manager.go          # MCP 管理器
+      factory.go          # MCP 服务器工厂模式
       config.go           # MCP 配置验证
       tools.go            # 工具管理
       middleware.go       # 中间件
@@ -531,6 +540,7 @@ saber/
       logging.go          # 日志中间件
       servers/
         builtin.go        # 内置服务器注册
+        shared_client.go  # 共享 HTTP 客户端
         web_fetch.go      # 网页抓取工具
         web_search.go     # 网络搜索工具
         js_sandbox.go     # JavaScript 沙箱
