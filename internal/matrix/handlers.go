@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/microcosm-cc/bluemonday"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
@@ -885,7 +886,7 @@ func (c *HelpCommand) Handle(ctx context.Context, userID id.UserID, roomID id.Ro
 			desc = "-"
 		}
 		fmt.Fprintf(&htmlBuilder, "<tr><td><code>!%s</code></td><td>%s</td></tr>",
-			cmd.Name, desc)
+			SanitizeHTML(cmd.Name), SanitizeHTML(desc))
 	}
 	htmlBuilder.WriteString("</tbody></table>")
 
@@ -976,7 +977,7 @@ func (c *MCPListCommand) Handle(ctx context.Context, userID id.UserID, roomID id
 		if srv.Enabled {
 			status = "✅ 启用"
 		}
-		fmt.Fprintf(&html, "<tr><td><code>%s</code></td><td>%s</td><td>%s</td></tr>", srv.Name, srv.Type, status)
+		fmt.Fprintf(&html, "<tr><td><code>%s</code></td><td>%s</td><td>%s</td></tr>", SanitizeHTML(srv.Name), SanitizeHTML(srv.Type), status)
 	}
 	html.WriteString("</tbody></table>")
 
@@ -987,7 +988,7 @@ func (c *MCPListCommand) Handle(ctx context.Context, userID id.UserID, roomID id
 			if desc == "" {
 				desc = "-"
 			}
-			fmt.Fprintf(&html, "<tr><td><code>%s</code></td><td>%s</td></tr>", tool.Name, desc)
+			fmt.Fprintf(&html, "<tr><td><code>%s</code></td><td>%s</td></tr>", SanitizeHTML(tool.Name), SanitizeHTML(desc))
 		}
 		html.WriteString("</tbody></table>")
 	}
@@ -1021,4 +1022,14 @@ func RegisterMCPCommands(service *CommandService, mcpMgr *mcp.Manager) {
 	if mcpMgr != nil {
 		service.RegisterCommandWithDesc("mcp-list", "列出所有 MCP 服务器和工具", NewMCPListCommand(service, mcpMgr))
 	}
+}
+
+// htmlPolicy 是 HTML 净化策略。
+// 允许基本的格式化标签，移除危险内容。
+var htmlPolicy = bluemonday.UGCPolicy()
+
+// SanitizeHTML 净化 HTML 内容，移除危险标签和属性。
+// 允许基本格式标签：b, i, code, a, pre, blockquote, p, br, ul, ol, li
+func SanitizeHTML(html string) string {
+	return htmlPolicy.Sanitize(html)
 }
