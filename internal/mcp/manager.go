@@ -41,7 +41,8 @@ type Manager struct {
 	enabled        bool
 	toolCache      []*mcp.Tool
 	toolCacheValid bool
-	toolToServer   map[string]string // 工具名到服务器名的映射
+	toolToServer   map[string]string
+	factories      map[string]MCPServerFactory
 }
 
 // NewManager 创建新的 MCP 管理器。
@@ -53,6 +54,7 @@ func NewManager(cfg *config.MCPConfig) *Manager {
 		rateLimiter:  NewRateLimiter(60), // 默认每分钟 60 次
 		enabled:      cfg != nil && cfg.Enabled,
 		toolToServer: make(map[string]string),
+		factories:    DefaultFactories(cfg),
 	}
 }
 
@@ -66,6 +68,7 @@ func NewManagerWithBuiltin(cfg *config.MCPConfig) *Manager {
 		rateLimiter:  NewRateLimiter(60),
 		enabled:      true,
 		toolToServer: make(map[string]string),
+		factories:    DefaultFactories(cfg),
 	}
 	return mgr
 }
@@ -101,9 +104,20 @@ func (m *Manager) InitBuiltinServers(ctx context.Context) error {
 	return nil
 }
 
+// RegisterFactory 注册自定义的服务器工厂。
+//
+// 如果已存在相同类型的工厂，新的工厂将覆盖旧的。
+// 这允许用户自定义或扩展服务器创建逻辑。
+func (m *Manager) RegisterFactory(factory MCPServerFactory) {
+	if m.factories == nil {
+		m.factories = make(map[string]MCPServerFactory)
+	}
+	m.factories[factory.Type()] = factory
+}
+
 // Init 初始化所有配置的 MCP 服务器。
 //
-// 它遍历配置中的所有服务器，根据类型创建相应的连接，
+// 它遍历配置中的所有服务器，根据类型使用对应的工厂创建连接，
 // 并将客户端和会话存储在内部映射中。
 // 单个服务器初始化失败不会阻止其他服务器的初始化。
 func (m *Manager) Init(ctx context.Context) error {
@@ -121,22 +135,13 @@ func (m *Manager) Init(ctx context.Context) error {
 			continue
 		}
 
-		var client *mcp.Client
-		var session *mcp.ClientSession
-		var err error
-
-		switch serverCfg.Type {
-		case ServerTypeBuiltin:
-			client, session, err = servers.CreateBuiltinServer(ctx, name, &m.config.Builtin)
-		case ServerTypeStdio:
-			client, session, err = servers.CreateStdioServer(ctx, name, &serverCfg)
-		case ServerTypeHTTP:
-			client, session, err = servers.CreateHTTPServer(ctx, name, &serverCfg)
-		default:
+		factory, ok := m.factories[serverCfg.Type]
+		if !ok {
 			slog.Error("未知的 MCP 服务器类型", "server", name, "type", serverCfg.Type)
 			continue
 		}
 
+		client, session, err := factory.Create(ctx, name, &serverCfg)
 		if err != nil {
 			slog.Error("创建 MCP 服务器失败", "server", name, "error", err)
 			continue
