@@ -135,20 +135,9 @@ func NewClientWithModel(cfg *config.ModelConfig) (*Client, error) {
 		"provider", cfg.Provider,
 		"base_url", cfg.BaseURL)
 
-	// 创建 OpenAI 客户端配置
-	var clientConfig openai.ClientConfig
-
-	// 处理 Azure OpenAI 提供商的特殊情况
-	if cfg.Provider == "azure" || cfg.Provider == "azure-openai" {
-		// 使用 Azure 配置
-		clientConfig = openai.DefaultAzureConfig(cfg.APIKey, cfg.BaseURL)
-	} else {
-		// 使用标准 OpenAI 配置
-		clientConfig = openai.DefaultConfig(cfg.APIKey)
-		if cfg.BaseURL != "" {
-			clientConfig.BaseURL = cfg.BaseURL
-		}
-	}
+	// 使用工厂创建客户端配置
+	factory := GetDefaultFactory()
+	clientConfig := factory.CreateClientConfig(cfg)
 
 	// 设置 HTTP 客户端
 	clientConfig.HTTPClient = httpClient
