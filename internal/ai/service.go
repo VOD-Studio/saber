@@ -451,6 +451,17 @@ func (s *Service) GetModelRegistry() *ModelRegistry {
 	return s.modelRegistry
 }
 
+// Stop 停止 AI 服务的所有后台任务。
+//
+// 必须在服务不再使用时调用，否则会导致 goroutine 泄漏。
+// 它会停止上下文管理器的后台清理 goroutine。
+func (s *Service) Stop() {
+	if s.contextManager != nil {
+		s.contextManager.Stop()
+		slog.Debug("AI 服务上下文管理器已停止")
+	}
+}
+
 // GenerateSimpleResponse 使用 AI 生成简单的响应。
 //
 // 该方法用于生成简单的 AI 响应，不涉及上下文管理或消息发送。

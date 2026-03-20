@@ -7,9 +7,18 @@ package db
 import (
 	"database/sql"
 	"database/sql/driver"
+	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
 
 	_ "modernc.org/sqlite"
+)
+
+var (
+	moderncDriver driver.Driver
+	driverOnce    sync.Once
+	driverErr     error
 )
 
 func init() {
@@ -24,8 +33,11 @@ type pragmaDriver struct{}
 
 // Open 实现 driver.Driver 接口。
 func (d *pragmaDriver) Open(name string) (driver.Conn, error) {
-	// 获取 modernc sqlite 驱动
-	underlyingDriver := getModerncDriver()
+	// 惰性获取底层驱动
+	underlyingDriver, err := getModerncDriver()
+	if err != nil {
+		return nil, fmt.Errorf("sqlite driver not available: %w", err)
+	}
 
 	// 修改 DSN 添加 PRAGMA
 	dsn := addPragmas(name)
@@ -34,16 +46,23 @@ func (d *pragmaDriver) Open(name string) (driver.Conn, error) {
 	return underlyingDriver.Open(dsn)
 }
 
-// getModerncDriver 返回 modernc.org/sqlite 的驱动实例。
-func getModerncDriver() driver.Driver {
-	// 打开一个临时连接来获取驱动实例
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		panic("db: failed to get modernc sqlite driver: " + err.Error())
-	}
-	defer db.Close()
+// getModerncDriver 惰性获取 modernc.org/sqlite 驱动实例。
+func getModerncDriver() (driver.Driver, error) {
+	driverOnce.Do(func() {
+		// 打开一个临时连接来获取驱动实例
+		db, err := sql.Open("sqlite", ":memory:")
+		if err != nil {
+			driverErr = fmt.Errorf("failed to open sqlite driver: %w", err)
+			slog.Error("SQLite 驱动初始化失败", "error", err)
+			return
+		}
+		defer db.Close()
 
-	return db.Driver()
+		moderncDriver = db.Driver()
+		slog.Debug("SQLite 驱动初始化成功")
+	})
+
+	return moderncDriver, driverErr
 }
 
 // addPragmas 向 DSN 添加必要的 PRAGMA 参数。

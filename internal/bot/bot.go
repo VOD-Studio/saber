@@ -299,6 +299,11 @@ func Run(info matrix.BuildInfo) {
 	slog.Info("Shutdown signal received", "signal", sig.String())
 
 	// 优雅关闭
+	if aiService != nil {
+		slog.Info("Stopping AI service...")
+		aiService.Stop()
+	}
+
 	if mcpManager != nil {
 		slog.Info("Closing MCP connections...")
 		if err := mcpManager.Close(); err != nil {

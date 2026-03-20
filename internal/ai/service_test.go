@@ -302,3 +302,22 @@ func TestService_Concurrency(t *testing.T) {
 
 	wg.Wait()
 }
+
+// TestService_Stop 测试 Stop 方法。
+func TestService_Stop(t *testing.T) {
+	cfg := createTestAIConfig()
+	cfg.Context.Enabled = true
+	service, _ := NewService(cfg, nil, nil)
+
+	// 验证 contextManager 已初始化
+	if service.contextManager == nil {
+		t.Fatal("contextManager should be initialized")
+	}
+
+	// 调用 Stop 方法
+	service.Stop()
+
+	// Stop 方法应该已经执行，但由于没有直接的可见效果，
+	// 我们主要验证它不会 panic 并且可以被调用多次
+	service.Stop() // 第二次调用应该也是安全的
+}

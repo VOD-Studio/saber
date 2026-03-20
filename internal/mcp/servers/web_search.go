@@ -130,14 +130,15 @@ func handleWebSearch(ctx context.Context, _ *mcp.CallToolRequest, input SearchIn
 
 // searchWithSearXNG 使用 SearXNG 实例进行搜索，支持多实例降级。
 func searchWithSearXNG(ctx context.Context, query string, maxResults int, language string) ([]SearchItem, string, error) {
-	client := &http.Client{
-		Timeout: time.Duration(webSearchConfig.timeoutSeconds) * time.Second,
-	}
+	// 创建带超时的上下文以尊重配置的超时设置
+	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(webSearchConfig.timeoutSeconds)*time.Second)
+	defer cancel()
 
+	client := GetSharedHTTPClient()
 	var lastErr error
 
 	for _, instance := range webSearchConfig.instances {
-		results, err := searchSearXNGInstance(ctx, client, instance, query, maxResults, language)
+		results, err := searchSearXNGInstance(timeoutCtx, client, instance, query, maxResults, language)
 		if err != nil {
 			lastErr = err
 			slog.Warn("SearXNG 实例搜索失败", "instance", instance, "error", err)

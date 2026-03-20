@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -62,6 +61,17 @@ func NewWebFetchServer() *mcp.Server {
 	return server
 }
 
+// cloneClientWithRedirect 创建一个带有自定义 CheckRedirect 函数的客户端克隆。
+func cloneClientWithRedirect(base *http.Client, checkRedirect func(*http.Request, []*http.Request) error) *http.Client {
+	// 克隆基础客户端，保留其 Transport 和其他设置
+	cloned := &http.Client{
+		Timeout:       base.Timeout,
+		Transport:     base.Transport,
+		CheckRedirect: checkRedirect,
+	}
+	return cloned
+}
+
 func handleFetchURL(ctx context.Context, _ *mcp.CallToolRequest, input FetchInput) (*mcp.CallToolResult, FetchOutput, error) {
 	// 验证 URL
 	if input.URL == "" {
@@ -98,20 +108,18 @@ func handleFetchURL(ctx context.Context, _ *mcp.CallToolRequest, input FetchInpu
 		input.Format = "text"
 	}
 
-	// 创建 HTTP 客户端
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return fmt.Errorf("重定向超过 10 次")
-			}
-			// 验证重定向目标
-			if err := validateHost(req.URL.Hostname()); err != nil {
-				return fmt.Errorf("重定向目标无效: %w", err)
-			}
-			return nil
-		},
-	}
+	// 获取共享客户端并克隆以添加自定义 CheckRedirect
+	baseClient := GetSharedHTTPClient()
+	client := cloneClientWithRedirect(baseClient, func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("重定向超过 10 次")
+		}
+		// 验证重定向目标
+		if err := validateHost(req.URL.Hostname()); err != nil {
+			return fmt.Errorf("重定向目标无效: %w", err)
+		}
+		return nil
+	})
 
 	// 创建带上下文的请求
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", input.URL, nil)

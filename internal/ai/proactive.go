@@ -96,7 +96,7 @@ func NewProactiveManager(
 	}
 
 	// 创建触发协调器
-	triggerCoord, err := NewTriggerCoordinator(cfg, silenceTrigger, scheduleTrigger, rateLimiter, stateTracker)
+	triggerCoord, err := NewTriggerCoordinator(cfg, silenceTrigger, scheduleTrigger, rateLimiter, stateTracker, roomService)
 	if err != nil {
 		return nil, fmt.Errorf("创建触发协调器失败：%w", err)
 	}
@@ -617,6 +617,7 @@ type TriggerCoordinator struct {
 	scheduleTrigger *ScheduleTrigger
 	rateLimiter     *RateLimiter
 	stateTracker    *StateTracker
+	roomLister      RoomLister // 新增：用于获取房间列表
 }
 
 // NewTriggerCoordinator 创建并返回一个新的触发协调器实例。
@@ -627,6 +628,7 @@ type TriggerCoordinator struct {
 //   - scheduleTrigger: 定时触发器（必须非 nil）
 //   - rateLimiter: 速率限制器（必须非 nil）
 //   - stateTracker: 状态跟踪器（必须非 nil）
+//   - roomLister: 房间列表获取接口（必须非 nil）
 //
 // 返回值:
 //   - *TriggerCoordinator: 创建的触发协调器
@@ -637,6 +639,7 @@ func NewTriggerCoordinator(
 	scheduleTrigger *ScheduleTrigger,
 	rateLimiter *RateLimiter,
 	stateTracker *StateTracker,
+	roomLister RoomLister, // 新增参数
 ) (*TriggerCoordinator, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("主动聊天配置不能为空")
@@ -658,12 +661,17 @@ func NewTriggerCoordinator(
 		return nil, fmt.Errorf("状态跟踪器不能为空")
 	}
 
+	if roomLister == nil {
+		return nil, fmt.Errorf("房间列表获取接口不能为空")
+	}
+
 	coordinator := &TriggerCoordinator{
 		config:          cfg,
 		silenceTrigger:  silenceTrigger,
 		scheduleTrigger: scheduleTrigger,
 		rateLimiter:     rateLimiter,
 		stateTracker:    stateTracker,
+		roomLister:      roomLister, // 新增
 	}
 
 	slog.Debug("触发协调器初始化完成",
@@ -760,10 +768,35 @@ func (tc *TriggerCoordinator) checkScheduleTrigger(ctx context.Context) []Trigge
 		return results
 	}
 
-	// 定时触发器触发，获取所有已加入的房间
-	// TODO: 需要从 RoomService 获取房间列表，这里先返回空结果
-	// 将在后续任务中实现完整的房间列表获取逻辑
-	slog.Debug("定时触发器触发，等待房间列表获取实现")
+	// 获取所有已加入的房间
+	rooms, err := tc.roomLister.GetJoinedRooms(ctx)
+	if err != nil {
+		slog.Error("获取已加入房间失败", "error", err)
+		return results
+	}
+
+	slog.Debug("定时触发器触发，检查房间列表",
+		"room_count", len(rooms),
+		"scheduled_times", tc.scheduleTrigger.GetScheduledTimes())
+
+	for _, room := range rooms {
+		result := TriggerResult{
+			TriggerType: "schedule",
+			RoomID:      room.ID,
+		}
+
+		// 应用速率限制
+		if !tc.rateLimiter.CanSpeak(room.ID) {
+			result.ShouldTrigger = false
+			result.Reason = "被速率限制阻止"
+			results = append(results, result)
+			continue
+		}
+
+		result.ShouldTrigger = true
+		result.Reason = "定时触发"
+		results = append(results, result)
+	}
 
 	return results
 }
