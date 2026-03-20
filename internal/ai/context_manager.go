@@ -37,6 +37,7 @@ type ContextManager struct {
 	config         config.ContextConfig
 	stopCleanup    chan struct{}
 	cleanupStopped sync.WaitGroup
+	stopOnce       sync.Once // 确保 Stop 只执行一次
 }
 
 // NewContextManager 创建并返回一个新的上下文管理器实例。
@@ -81,9 +82,12 @@ func (cm *ContextManager) startBackgroundCleanup() {
 }
 
 // Stop 停止后台清理 goroutine。
+// 此方法可以安全地多次调用，后续调用不会产生任何效果。
 func (cm *ContextManager) Stop() {
-	close(cm.stopCleanup)
-	cm.cleanupStopped.Wait()
+	cm.stopOnce.Do(func() {
+		close(cm.stopCleanup)
+		cm.cleanupStopped.Wait()
+	})
 }
 
 // AddMessage 向指定房间的上下文中添加新消息。
