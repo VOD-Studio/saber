@@ -5,11 +5,44 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"rua.plus/saber/internal/config"
 )
+
+// validateCommand 验证命令是否在白名单中。
+// 如果白名单为空，默认拒绝所有命令。
+func validateCommand(cfg *config.ServerConfig) error {
+	// 非 stdio 类型不需要验证
+	if cfg.Type != "stdio" {
+		return nil
+	}
+
+	// 空白名单拒绝所有
+	if len(cfg.AllowedCommands) == 0 {
+		return fmt.Errorf("命令 %q 被拒绝：未配置命令白名单", cfg.Command)
+	}
+
+	// 规范化路径进行比较
+	absCmd, err := filepath.Abs(cfg.Command)
+	if err != nil {
+		return fmt.Errorf("无法解析命令路径：%w", err)
+	}
+
+	for _, allowed := range cfg.AllowedCommands {
+		absAllowed, err := filepath.Abs(allowed)
+		if err != nil {
+			continue
+		}
+		if absCmd == absAllowed {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("命令 %q 不在白名单中", cfg.Command)
+}
 
 // CreateStdioServer 创建使用 stdio 传输的 MCP 服务器连接。
 //
@@ -19,6 +52,11 @@ func CreateStdioServer(ctx context.Context, name string, cfg *config.ServerConfi
 	// 验证命令字段
 	if cfg.Command == "" {
 		return nil, nil, fmt.Errorf("stdio 服务器 %s 缺少 command 字段", name)
+	}
+
+	// 验证命令白名单
+	if err := validateCommand(cfg); err != nil {
+		return nil, nil, fmt.Errorf("命令验证失败：%w", err)
 	}
 
 	// 创建命令上下文（带可选超时）
