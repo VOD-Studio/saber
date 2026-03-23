@@ -92,7 +92,7 @@ func TestContextReferencedMediaInfo(t *testing.T) {
 		newCtx := WithReferencedMediaInfo(ctx, mediaInfo)
 		got := GetReferencedMediaInfo(newCtx)
 		if got == nil {
-			t.Error("GetReferencedMediaInfo() = nil, want non-nil")
+			t.Fatal("GetReferencedMediaInfo() = nil, want non-nil")
 		}
 		if got.Type != "image" {
 			t.Errorf("GetReferencedMediaInfo().Type = %v, want image", got.Type)

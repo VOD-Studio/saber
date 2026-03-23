@@ -530,7 +530,7 @@ func (s *RoomServiceForTest) JoinRoom(ctx context.Context, roomIDOrAlias string)
 	}
 
 	// 验证标识符格式
-	if !(len(roomIDOrAlias) > 0 && (roomIDOrAlias[0] == '!' || roomIDOrAlias[0] == '#')) {
+	if len(roomIDOrAlias) == 0 || (roomIDOrAlias[0] != '!' && roomIDOrAlias[0] != '#') {
 		return nil, errors.New("invalid room identifier: must start with ! for room ID or # for alias")
 	}
 
