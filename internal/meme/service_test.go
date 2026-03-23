@@ -133,7 +133,9 @@ func TestService_Search(t *testing.T) {
 			}
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			if err := json.NewEncoder(w).Encode(resp); err != nil {
+				t.Errorf("failed to encode response: %v", err)
+			}
 		})
 		defer server.Close()
 
@@ -170,7 +172,9 @@ func TestService_Search(t *testing.T) {
 		server := createTestServer(func(w http.ResponseWriter, r *http.Request) {
 			resp := klipyResponse{Data: []klipyGIF{}}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			if err := json.NewEncoder(w).Encode(resp); err != nil {
+				t.Errorf("failed to encode response: %v", err)
+			}
 		})
 		defer server.Close()
 
@@ -194,7 +198,9 @@ func TestService_Search(t *testing.T) {
 	t.Run("API 错误", func(t *testing.T) {
 		server := createTestServer(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("internal server error"))
+			if _, err := w.Write([]byte("internal server error")); err != nil {
+				t.Errorf("failed to write response: %v", err)
+			}
 		})
 		defer server.Close()
 
@@ -244,7 +250,9 @@ func TestService_Search(t *testing.T) {
 			}
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			if err := json.NewEncoder(w).Encode(resp); err != nil {
+				t.Errorf("failed to encode response: %v", err)
+			}
 		})
 		defer server.Close()
 
@@ -281,7 +289,9 @@ func TestService_GetRandom(t *testing.T) {
 				},
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			if err := json.NewEncoder(w).Encode(resp); err != nil {
+				t.Errorf("failed to encode response: %v", err)
+			}
 		})
 		defer server.Close()
 
@@ -310,7 +320,9 @@ func TestService_GetRandom(t *testing.T) {
 		server := createTestServer(func(w http.ResponseWriter, r *http.Request) {
 			resp := klipyResponse{Data: []klipyGIF{}}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
+			if err := json.NewEncoder(w).Encode(resp); err != nil {
+				t.Errorf("failed to encode response: %v", err)
+			}
 		})
 		defer server.Close()
 
@@ -332,7 +344,9 @@ func TestService_DownloadImage(t *testing.T) {
 		testData := []byte("fake image data")
 
 		server := createTestServer(func(w http.ResponseWriter, r *http.Request) {
-			w.Write(testData)
+			if _, err := w.Write(testData); err != nil {
+				t.Errorf("failed to write response: %v", err)
+			}
 		})
 		defer server.Close()
 

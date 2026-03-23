@@ -123,7 +123,7 @@ func (s *Service) Search(ctx context.Context, query string, contentType ContentT
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -200,7 +200,7 @@ func (s *Service) DownloadImage(ctx context.Context, gif *GIF) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to download image: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download failed: status %d", resp.StatusCode)
