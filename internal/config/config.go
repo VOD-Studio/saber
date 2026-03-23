@@ -13,24 +13,31 @@ import (
 
 // Config 存储从 YAML 配置文件加载的应用程序配置
 type Config struct {
-	Matrix MatrixConfig `yaml:"matrix"`
-	AI     AIConfig     `yaml:"ai"`
-	MCP    MCPConfig    `yaml:"mcp"`
-	Meme   MemeConfig   `yaml:"meme"`
+	Matrix   MatrixConfig   `yaml:"matrix"`
+	AI       AIConfig       `yaml:"ai"`
+	MCP      MCPConfig      `yaml:"mcp"`
+	Meme     MemeConfig     `yaml:"meme"`
+	Shutdown ShutdownConfig `yaml:"shutdown"`
+}
+
+// ShutdownConfig 存储关闭配置
+type ShutdownConfig struct {
+	TimeoutSeconds int `yaml:"timeout_seconds"` // 关闭超时时间（秒）
 }
 
 // MatrixConfig 存储 Matrix 连接配置
 type MatrixConfig struct {
-	Homeserver      string   `yaml:"homeserver"`
-	UserID          string   `yaml:"user_id"`           // 完整的 Matrix ID，如 @user:matrix.org
-	DeviceID        string   `yaml:"device_id"`         // 设备标识符
-	DeviceName      string   `yaml:"device_name"`       // 设备显示名称
-	Password        string   `yaml:"password"`          // 密码登录（可选）
-	AccessToken     string   `yaml:"access_token"`      // Token 登录（可选，优先级高于密码）
-	AutoJoinRooms   []string `yaml:"auto_join_rooms"`   // 启动时自动加入的房间列表
-	EnableE2EE      bool     `yaml:"enable_e2ee"`       // 启用端到端加密（可选）
-	E2EESessionPath string   `yaml:"e2ee_session_path"` // 端到端加密会话文件路径（可选）
-	PickleKeyPath   string   `yaml:"pickle_key_path"`   // E2EE pickle 密钥文件路径（可选，默认为 e2ee_session_path + ".key")
+	Homeserver          string   `yaml:"homeserver"`
+	UserID              string   `yaml:"user_id"`               // 完整的 Matrix ID，如 @user:matrix.org
+	DeviceID            string   `yaml:"device_id"`             // 设备标识符
+	DeviceName          string   `yaml:"device_name"`           // 设备显示名称
+	Password            string   `yaml:"password"`              // 密码登录（可选）
+	AccessToken         string   `yaml:"access_token"`          // Token 登录（可选，优先级高于密码）
+	AutoJoinRooms       []string `yaml:"auto_join_rooms"`       // 启动时自动加入的房间列表
+	EnableE2EE          bool     `yaml:"enable_e2ee"`           // 启用端到端加密（可选）
+	E2EESessionPath     string   `yaml:"e2ee_session_path"`     // 端到端加密会话文件路径（可选）
+	PickleKeyPath       string   `yaml:"pickle_key_path"`       // E2EE pickle 密钥文件路径（可选，默认为 e2ee_session_path + ".key")
+	MaxConcurrentEvents int      `yaml:"max_concurrent_events"` // 最大并发事件处理数（默认 10）
 }
 
 // AIConfig 存储 AI 服务配置
@@ -48,6 +55,7 @@ type AIConfig struct {
 	StreamEnabled         bool                   `yaml:"stream_enabled"`           // 是否启用流式响应
 	StreamEdit            StreamEditConfig       `yaml:"stream_edit"`              // 流式编辑配置
 	Retry                 RetryConfig            `yaml:"retry"`                    // 重试配置
+	ToolCalling           ToolCallingConfig      `yaml:"tool_calling"`             // 工具调用配置
 	Models                map[string]ModelConfig `yaml:"models"`                   // 模型特定配置
 	TimeoutSeconds        int                    `yaml:"timeout_seconds"`          // 请求超时时间（秒）
 	DirectChatAutoReply   bool                   `yaml:"direct_chat_auto_reply"`   // 在私聊中自动回复（无需 !ai 前缀）
@@ -59,10 +67,11 @@ type AIConfig struct {
 
 // ContextConfig 存储上下文管理配置
 type ContextConfig struct {
-	Enabled       bool `yaml:"enabled"`        // 是否启用上下文管理
-	MaxMessages   int  `yaml:"max_messages"`   // 最大保留消息数
-	MaxTokens     int  `yaml:"max_tokens"`     // 最大 token 数
-	ExpiryMinutes int  `yaml:"expiry_minutes"` // 上下文过期时间（分钟）
+	Enabled           bool `yaml:"enabled"`             // 是否启用上下文管理
+	MaxMessages       int  `yaml:"max_messages"`        // 最大保留消息数
+	MaxTokens         int  `yaml:"max_tokens"`          // 最大 token 数
+	ExpiryMinutes     int  `yaml:"expiry_minutes"`      // 上下文过期时间（分钟）
+	InactiveRoomHours int  `yaml:"inactive_room_hours"` // 不活跃房间清理阈值（小时）
 }
 
 // StreamEditConfig 存储流式编辑配置
@@ -83,6 +92,11 @@ type RetryConfig struct {
 	BackoffFactor   float64  `yaml:"backoff_factor"`   // 退避因子
 	FallbackEnabled bool     `yaml:"fallback_enabled"` // 是否启用降级
 	FallbackModels  []string `yaml:"fallback_models"`  // 降级模型列表
+}
+
+// ToolCallingConfig 存储工具调用配置
+type ToolCallingConfig struct {
+	MaxIterations int `yaml:"max_iterations"` // 最大工具调用迭代次数（默认 5）
 }
 
 // MCPConfig 存储 MCP (Model Context Protocol) 集成配置
@@ -216,6 +230,7 @@ func DefaultAIConfig() AIConfig {
 		StreamEnabled:         true,
 		StreamEdit:            DefaultStreamEditConfig(),
 		Retry:                 DefaultRetryConfig(),
+		ToolCalling:           DefaultToolCallingConfig(),
 		Models:                make(map[string]ModelConfig),
 		TimeoutSeconds:        30,
 		DirectChatAutoReply:   true,
@@ -229,10 +244,11 @@ func DefaultAIConfig() AIConfig {
 // DefaultContextConfig 返回带有合理默认值的上下文配置
 func DefaultContextConfig() ContextConfig {
 	return ContextConfig{
-		Enabled:       true,
-		MaxMessages:   50,
-		MaxTokens:     8000,
-		ExpiryMinutes: 60,
+		Enabled:           true,
+		MaxMessages:       50,
+		MaxTokens:         8000,
+		ExpiryMinutes:     60,
+		InactiveRoomHours: 24,
 	}
 }
 
@@ -257,6 +273,13 @@ func DefaultRetryConfig() RetryConfig {
 		BackoffFactor:   2.0,
 		FallbackEnabled: true,
 		FallbackModels:  []string{},
+	}
+}
+
+// DefaultToolCallingConfig 返回带有合理默认值的工具调用配置
+func DefaultToolCallingConfig() ToolCallingConfig {
+	return ToolCallingConfig{
+		MaxIterations: 5,
 	}
 }
 
@@ -338,6 +361,13 @@ func DefaultJSSandboxConfig() JSSandboxConfig {
 	}
 }
 
+// DefaultShutdownConfig 返回带有合理默认值的关闭配置
+func DefaultShutdownConfig() ShutdownConfig {
+	return ShutdownConfig{
+		TimeoutSeconds: 30,
+	}
+}
+
 // Validate 验证配置是否有效
 func (m *MatrixConfig) Validate() error {
 	if m.Homeserver == "" {
@@ -351,6 +381,13 @@ func (m *MatrixConfig) Validate() error {
 	}
 	if m.EnableE2EE && m.E2EESessionPath == "" {
 		return fmt.Errorf("e2ee_session_path is required when enable_e2ee is true")
+	}
+	if m.MaxConcurrentEvents < 0 {
+		return fmt.Errorf("max_concurrent_events must be non-negative")
+	}
+	if m.MaxConcurrentEvents > 100 {
+		slog.Warn("max_concurrent_events is very high, this may cause resource issues",
+			"value", m.MaxConcurrentEvents)
 	}
 	return nil
 }
@@ -385,6 +422,54 @@ func (a *AIConfig) Validate() error {
 		if a.Media.TimeoutSec <= 0 {
 			return fmt.Errorf("media.timeout_sec must be positive")
 		}
+	}
+	// 验证工具调用配置
+	if err := a.ToolCalling.Validate(); err != nil {
+		return fmt.Errorf("tool_calling: %w", err)
+	}
+	// 验证所有模型配置
+	for name, modelCfg := range a.Models {
+		if err := modelCfg.Validate(); err != nil {
+			return fmt.Errorf("models[%s]: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// Validate 验证工具调用配置是否有效
+func (t *ToolCallingConfig) Validate() error {
+	if t.MaxIterations < 1 {
+		return fmt.Errorf("max_iterations must be at least 1")
+	}
+	if t.MaxIterations > 20 {
+		slog.Warn("max_iterations is very high, this may cause long response times",
+			"value", t.MaxIterations)
+	}
+	return nil
+}
+
+// Validate 验证关闭配置是否有效
+func (s *ShutdownConfig) Validate() error {
+	if s.TimeoutSeconds < 5 {
+		return fmt.Errorf("timeout_seconds must be at least 5 seconds")
+	}
+	if s.TimeoutSeconds > 300 {
+		slog.Warn("shutdown timeout is very long, this may delay application exit",
+			"timeout_seconds", s.TimeoutSeconds)
+	}
+	return nil
+}
+
+// Validate 验证模型配置是否有效
+func (m *ModelConfig) Validate() error {
+	if m.Model == "" {
+		return fmt.Errorf("model is required in ModelConfig")
+	}
+	if m.Temperature < 0 || m.Temperature > 2 {
+		return fmt.Errorf("temperature must be between 0 and 2")
+	}
+	if m.MaxTokens < 0 {
+		return fmt.Errorf("max_tokens must be non-negative")
 	}
 	return nil
 }
@@ -575,15 +660,16 @@ func LoadOrDefault(path string) (*Config, error) {
 func DefaultConfig() *Config {
 	return &Config{
 		Matrix: MatrixConfig{
-			Homeserver:      "https://matrix.org",
-			UserID:          "",
-			DeviceID:        "",
-			DeviceName:      "Saber Bot",
-			Password:        "",
-			AccessToken:     "",
-			EnableE2EE:      true,
-			E2EESessionPath: "./saber.session",
-			PickleKeyPath:   "",
+			Homeserver:          "https://matrix.org",
+			UserID:              "",
+			DeviceID:            "",
+			DeviceName:          "Saber Bot",
+			Password:            "",
+			AccessToken:         "",
+			EnableE2EE:          true,
+			E2EESessionPath:     "./saber.session",
+			PickleKeyPath:       "",
+			MaxConcurrentEvents: 10,
 		},
 		AI: DefaultAIConfig(),
 		MCP: MCPConfig{
@@ -597,7 +683,8 @@ func DefaultConfig() *Config {
 				JSSandbox: DefaultJSSandboxConfig(),
 			},
 		},
-		Meme: DefaultMemeConfig(),
+		Meme:     DefaultMemeConfig(),
+		Shutdown: DefaultShutdownConfig(),
 	}
 }
 
@@ -625,6 +712,8 @@ func ExampleConfig() string {
   enable_e2ee: true  # 启用端到端加密（默认启用）
   e2ee_session_path: "./saber.session"  # 加密会话文件路径
   # pickle_key_path: "./saber.session.key"  # pickle 密钥路径（可选，默认为 e2ee_session_path + ".key"）
+  # 最大并发事件处理数（默认 10）
+  max_concurrent_events: 10
 
 ai:
   # 启用 AI 功能
@@ -651,6 +740,8 @@ ai:
     max_messages: 50
     max_tokens: 8000
     expiry_minutes: 60
+    # 不活跃房间清理阈值（小时，默认 24）
+    inactive_room_hours: 24
   # 是否启用流式响应
   stream_enabled: true
   # 流式编辑配置
@@ -669,6 +760,10 @@ ai:
     backoff_factor: 2.0
     fallback_enabled: true
     fallback_models: []
+  # 工具调用配置
+  tool_calling:
+    # 最大工具调用迭代次数（默认 5）
+    max_iterations: 5
   # 多模型配置示例
   models: {}
     # fast:
@@ -779,6 +874,11 @@ meme:
   max_results: 5
   # 请求超时时间（秒，默认 10）
   timeout_seconds: 10
+
+# 关闭配置
+shutdown:
+  # 关闭超时时间（秒，默认 30）
+  timeout_seconds: 30
 `
 }
 

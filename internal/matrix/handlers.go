@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/microcosm-cc/bluemonday"
+	"golang.org/x/sync/semaphore"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
@@ -799,7 +800,8 @@ func (s *CommandService) StopTyping(ctx context.Context, roomID id.RoomID) error
 type EventHandler struct {
 	service          *CommandService
 	logger           *slog.Logger
-	startTime        time.Time // 机器人启动时间，用于过滤历史消息
+	startTime        time.Time           // 机器人启动时间，用于过滤历史消息
+	sem              *semaphore.Weighted // 并发限制信号量
 	proactiveManager interface {
 		OnNewMember(ctx context.Context, roomID id.RoomID, userID id.UserID) error
 		RecordUserMessage(roomID id.RoomID)
@@ -808,11 +810,20 @@ type EventHandler struct {
 
 // NewEventHandler 创建一个新的事件处理器。
 // 记录启动时间，用于过滤启动前的历史消息。
-func NewEventHandler(service *CommandService) *EventHandler {
+//
+// 参数:
+//   - service: 命令服务
+//   - maxConcurrent: 最大并发事件处理数
+func NewEventHandler(service *CommandService, maxConcurrent int) *EventHandler {
+	if maxConcurrent <= 0 {
+		maxConcurrent = 10 // 默认值
+	}
+
 	return &EventHandler{
 		service:   service,
 		logger:    slog.With("component", "event_handler"),
 		startTime: time.Now(),
+		sem:       semaphore.NewWeighted(int64(maxConcurrent)),
 	}
 }
 
@@ -859,6 +870,19 @@ func (h *EventHandler) OnMessage(ctx context.Context, evt *event.Event) {
 					"stack_trace", string(stack))
 			}
 		}()
+
+		// 获取信号量，限制并发
+		// 使用 context.Background() 避免因父上下文取消导致请求被拒绝
+		semCtx, semCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer semCancel()
+
+		if err := h.sem.Acquire(semCtx, 1); err != nil {
+			logger.Warn("无法获取并发槽位，跳过事件处理",
+				"error", err,
+				"event_id", evt.ID.String())
+			return
+		}
+		defer h.sem.Release(1)
 
 		// 创建独立上下文，带有 5 分钟超时
 		msgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)

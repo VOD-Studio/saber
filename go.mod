@@ -9,6 +9,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.4.1
 	github.com/sashabaranov/go-openai v1.41.2
 	go.mau.fi/util v0.9.7
+	golang.org/x/sync v0.20.0
 	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1
 	maunium.net/go/mautrix v0.26.4

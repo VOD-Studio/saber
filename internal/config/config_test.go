@@ -46,6 +46,10 @@ func TestMatrixConfigValidate(t *testing.T) {
 		{"缺少认证", MatrixConfig{Homeserver: "https://matrix.org", UserID: "@bot:matrix.org"}, true, "either password or access_token"},
 		{"E2EE 缺少 session path", MatrixConfig{Homeserver: "https://matrix.org", UserID: "@bot:matrix.org", AccessToken: "token", EnableE2EE: true}, true, "e2ee_session_path is required"},
 		{"E2EE 有效", MatrixConfig{Homeserver: "https://matrix.org", UserID: "@bot:matrix.org", AccessToken: "token", EnableE2EE: true, E2EESessionPath: "./session.db"}, false, ""},
+		{"MaxConcurrentEvents 为负数", MatrixConfig{Homeserver: "https://matrix.org", UserID: "@bot:matrix.org", AccessToken: "token", MaxConcurrentEvents: -1}, true, "max_concurrent_events must be non-negative"},
+		{"MaxConcurrentEvents 为 0 (有效)", MatrixConfig{Homeserver: "https://matrix.org", UserID: "@bot:matrix.org", AccessToken: "token", MaxConcurrentEvents: 0}, false, ""},
+		{"MaxConcurrentEvents 为 10 (有效)", MatrixConfig{Homeserver: "https://matrix.org", UserID: "@bot:matrix.org", AccessToken: "token", MaxConcurrentEvents: 10}, false, ""},
+		{"MaxConcurrentEvents 为 100 (有效)", MatrixConfig{Homeserver: "https://matrix.org", UserID: "@bot:matrix.org", AccessToken: "token", MaxConcurrentEvents: 100}, false, ""},
 	}
 
 	for _, tt := range tests {
@@ -70,17 +74,21 @@ func TestAIConfigValidate(t *testing.T) {
 		errMsg  string
 	}{
 		{"禁用时不验证", AIConfig{Enabled: false}, false, ""},
-		{"有效配置", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 30}, false, ""},
+		{"有效配置", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 5}}, false, ""},
 		{"缺少 provider", AIConfig{Enabled: true, BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4"}, true, "provider is required"},
 		{"缺少 base_url", AIConfig{Enabled: true, Provider: "openai", APIKey: "key", DefaultModel: "gpt-4"}, true, "base_url is required"},
 		{"缺少 api_key", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", DefaultModel: "gpt-4"}, true, "api_key is required"},
 		{"缺少 default_model", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}, true, "default_model is required"},
 		{"温度过低", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: -0.1}, true, "temperature must be between 0 and 2"},
 		{"温度过高", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: 2.1}, true, "temperature must be between 0 and 2"},
-		{"温度边界 0", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: 0, TimeoutSeconds: 30}, false, ""},
-		{"温度边界 2", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: 2, TimeoutSeconds: 30}, false, ""},
+		{"温度边界 0", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: 0, TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 5}}, false, ""},
+		{"温度边界 2", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: 2, TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 5}}, false, ""},
 		{"timeout 无效", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 0}, true, "timeout_seconds must be positive"},
 		{"timeout 负数", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: -1}, true, "timeout_seconds must be positive"},
+		{"tool_calling 迭代次数为0", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 0}}, true, "max_iterations must be at least 1"},
+		{"tool_calling 迭代次数为负数", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: -1}}, true, "max_iterations must be at least 1"},
+		{"tool_calling 迭代次数边界 1", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 1}}, false, ""},
+		{"tool_calling 迭代次数边界 20", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 20}}, false, ""},
 	}
 
 	for _, tt := range tests {
@@ -715,6 +723,7 @@ func TestMediaConfig(t *testing.T) {
 			APIKey:         "key",
 			DefaultModel:   "gpt-4",
 			TimeoutSeconds: 30,
+			ToolCalling:    ToolCallingConfig{MaxIterations: 5},
 			Media:          MediaConfig{Enabled: false, MaxSizeMB: -1, TimeoutSec: -1},
 		}
 		err := cfg.Validate()
@@ -731,6 +740,7 @@ func TestMediaConfig(t *testing.T) {
 			APIKey:         "key",
 			DefaultModel:   "gpt-4",
 			TimeoutSeconds: 30,
+			ToolCalling:    ToolCallingConfig{MaxIterations: 5},
 			Media:          MediaConfig{Enabled: true, MaxSizeMB: 10, TimeoutSec: 30},
 		}
 		err := cfg.Validate()
@@ -747,6 +757,7 @@ func TestMediaConfig(t *testing.T) {
 			APIKey:         "key",
 			DefaultModel:   "gpt-4",
 			TimeoutSeconds: 30,
+			ToolCalling:    ToolCallingConfig{MaxIterations: 5},
 			Media:          MediaConfig{Enabled: true, MaxSizeMB: -1, TimeoutSec: 30},
 		}
 		err := cfg.Validate()
@@ -766,6 +777,7 @@ func TestMediaConfig(t *testing.T) {
 			APIKey:         "key",
 			DefaultModel:   "gpt-4",
 			TimeoutSeconds: 30,
+			ToolCalling:    ToolCallingConfig{MaxIterations: 5},
 			Media:          MediaConfig{Enabled: true, MaxSizeMB: 10, TimeoutSec: -1},
 		}
 		err := cfg.Validate()
@@ -776,6 +788,94 @@ func TestMediaConfig(t *testing.T) {
 			t.Errorf("Validate() error = %v, want error containing 'media.timeout_sec must be positive'", err)
 		}
 	})
+}
+
+func TestShutdownConfigValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  ShutdownConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{"有效配置 - 默认值", ShutdownConfig{TimeoutSeconds: 30}, false, ""},
+		{"有效配置 - 最小值", ShutdownConfig{TimeoutSeconds: 5}, false, ""},
+		{"有效配置 - 最大值", ShutdownConfig{TimeoutSeconds: 300}, false, ""},
+		{"超时时间过短", ShutdownConfig{TimeoutSeconds: 4}, true, "timeout_seconds must be at least 5 seconds"},
+		{"超时时间为 0", ShutdownConfig{TimeoutSeconds: 0}, true, "timeout_seconds must be at least 5 seconds"},
+		{"超时时间为负数", ShutdownConfig{TimeoutSeconds: -1}, true, "timeout_seconds must be at least 5 seconds"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil && tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				t.Errorf("Validate() error = %v, want error containing %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+func TestToolCallingConfigValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  ToolCallingConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{"有效配置 - 默认值", ToolCallingConfig{MaxIterations: 5}, false, ""},
+		{"有效配置 - 最小值", ToolCallingConfig{MaxIterations: 1}, false, ""},
+		{"有效配置 - 最大值", ToolCallingConfig{MaxIterations: 20}, false, ""},
+		{"迭代次数为 0", ToolCallingConfig{MaxIterations: 0}, true, "max_iterations must be at least 1"},
+		{"迭代次数为负数", ToolCallingConfig{MaxIterations: -1}, true, "max_iterations must be at least 1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil && tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				t.Errorf("Validate() error = %v, want error containing %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+func TestModelConfigValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  ModelConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{"有效配置", ModelConfig{Model: "gpt-4o", Temperature: 0.7, MaxTokens: 4096}, false, ""},
+		{"缺少模型名称", ModelConfig{Temperature: 0.7}, true, "model is required"},
+		{"温度过低", ModelConfig{Model: "gpt-4o", Temperature: -0.1}, true, "temperature must be between 0 and 2"},
+		{"温度过高", ModelConfig{Model: "gpt-4o", Temperature: 2.1}, true, "temperature must be between 0 and 2"},
+		{"温度边界 0", ModelConfig{Model: "gpt-4o", Temperature: 0}, false, ""},
+		{"温度边界 2", ModelConfig{Model: "gpt-4o", Temperature: 2}, false, ""},
+		{"MaxTokens 为负数", ModelConfig{Model: "gpt-4o", MaxTokens: -1}, true, "max_tokens must be non-negative"},
+		{"MaxTokens 为 0 (有效)", ModelConfig{Model: "gpt-4o", MaxTokens: 0}, false, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil && tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				t.Errorf("Validate() error = %v, want error containing %q", err, tt.errMsg)
+			}
+		})
+	}
 }
 
 func contains(s, substr string) bool {

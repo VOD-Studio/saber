@@ -197,3 +197,288 @@ func TestExitCodeError_WithErrorsAs(t *testing.T) {
 		t.Errorf("ExitCodeError.Code = %d, want 1", target.Code)
 	}
 }
+
+// BotError 测试
+
+func TestBotError_Error(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *BotError
+		expected string
+	}{
+		{
+			name:     "带原因的错误",
+			err:      &BotError{Type: ErrorTypeConfig, Category: CategoryPermanent, Message: "配置错误", Cause: fmt.Errorf("文件不存在")},
+			expected: "[config] 配置错误: 文件不存在",
+		},
+		{
+			name:     "无原因的错误",
+			err:      &BotError{Type: ErrorTypeNetwork, Category: CategoryTransient, Message: "网络错误"},
+			expected: "[network] 网络错误",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.err.Error()
+			if got != tt.expected {
+				t.Errorf("Error() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestBotError_Unwrap(t *testing.T) {
+	cause := fmt.Errorf("底层错误")
+	err := &BotError{Type: ErrorTypeAI, Message: "AI 错误", Cause: cause}
+
+	unwrapped := err.Unwrap()
+	if unwrapped != cause {
+		t.Errorf("Unwrap() = %v, want %v", unwrapped, cause)
+	}
+
+	// 测试无原因的情况
+	errNoCause := &BotError{Type: ErrorTypeConfig, Message: "无原因错误"}
+	if errNoCause.Unwrap() != nil {
+		t.Error("Unwrap() for nil Cause should return nil")
+	}
+}
+
+func TestBotError_IsTransient(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *BotError
+		expected bool
+	}{
+		{"暂时性错误", &BotError{Category: CategoryTransient}, true},
+		{"永久性错误", &BotError{Category: CategoryPermanent}, false},
+		{"致命错误", &BotError{Category: CategoryFatal}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.err.IsTransient(); got != tt.expected {
+				t.Errorf("IsTransient() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestBotError_IsRecoverable(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *BotError
+		expected bool
+	}{
+		{"可恢复", &BotError{Recover: true}, true},
+		{"不可恢复", &BotError{Recover: false}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.err.IsRecoverable(); got != tt.expected {
+				t.Errorf("IsRecoverable() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNewConfigError(t *testing.T) {
+	cause := fmt.Errorf("yaml 解析失败")
+	err := NewConfigError("无法加载配置", cause)
+
+	if err.Type != ErrorTypeConfig {
+		t.Errorf("Type = %s, want %s", err.Type, ErrorTypeConfig)
+	}
+	if err.Category != CategoryPermanent {
+		t.Errorf("Category = %v, want %v", err.Category, CategoryPermanent)
+	}
+	if err.Message != "无法加载配置" {
+		t.Errorf("Message = %s, want 无法加载配置", err.Message)
+	}
+	if err.Cause != cause {
+		t.Errorf("Cause = %v, want %v", err.Cause, cause)
+	}
+	if err.Recover {
+		t.Error("Recover should be false for config errors")
+	}
+	if err.Hint != "检查配置文件格式和内容" {
+		t.Errorf("Hint = %s, want 检查配置文件格式和内容", err.Hint)
+	}
+}
+
+func TestNewNetworkError(t *testing.T) {
+	cause := fmt.Errorf("connection refused")
+	err := NewNetworkError("网络连接失败", cause)
+
+	if err.Type != ErrorTypeNetwork {
+		t.Errorf("Type = %s, want %s", err.Type, ErrorTypeNetwork)
+	}
+	if err.Category != CategoryTransient {
+		t.Errorf("Category = %v, want %v", err.Category, CategoryTransient)
+	}
+	if !err.Recover {
+		t.Error("Recover should be true for network errors")
+	}
+}
+
+func TestNewAuthError(t *testing.T) {
+	cause := fmt.Errorf("invalid token")
+	err := NewAuthError("认证失败", cause)
+
+	if err.Type != ErrorTypeAuth {
+		t.Errorf("Type = %s, want %s", err.Type, ErrorTypeAuth)
+	}
+	if err.Category != CategoryPermanent {
+		t.Errorf("Category = %v, want %v", err.Category, CategoryPermanent)
+	}
+	if err.Recover {
+		t.Error("Recover should be false for auth errors")
+	}
+}
+
+func TestNewAIError(t *testing.T) {
+	cause := fmt.Errorf("rate limit exceeded")
+
+	t.Run("暂时性 AI 错误", func(t *testing.T) {
+		err := NewAIError("AI 请求被限流", cause, CategoryTransient)
+
+		if err.Type != ErrorTypeAI {
+			t.Errorf("Type = %s, want %s", err.Type, ErrorTypeAI)
+		}
+		if err.Category != CategoryTransient {
+			t.Errorf("Category = %v, want %v", err.Category, CategoryTransient)
+		}
+		if !err.Recover {
+			t.Error("Recover should be true for transient AI errors")
+		}
+	})
+
+	t.Run("永久性 AI 错误", func(t *testing.T) {
+		err := NewAIError("API 密钥无效", cause, CategoryPermanent)
+
+		if err.Category != CategoryPermanent {
+			t.Errorf("Category = %v, want %v", err.Category, CategoryPermanent)
+		}
+		if err.Recover {
+			t.Error("Recover should be false for permanent AI errors")
+		}
+	})
+}
+
+func TestNewFatalError(t *testing.T) {
+	cause := fmt.Errorf("out of memory")
+	err := NewFatalError("致命错误", cause)
+
+	if err.Type != ErrorTypeInternal {
+		t.Errorf("Type = %s, want %s", err.Type, ErrorTypeInternal)
+	}
+	if err.Category != CategoryFatal {
+		t.Errorf("Category = %v, want %v", err.Category, CategoryFatal)
+	}
+	if err.Recover {
+		t.Error("Recover should be false for fatal errors")
+	}
+}
+
+func TestIsBotError(t *testing.T) {
+	t.Run("是 BotError", func(t *testing.T) {
+		err := NewConfigError("配置错误", nil)
+		botErr, ok := IsBotError(err)
+		if !ok {
+			t.Error("IsBotError should return true for BotError")
+		}
+		if botErr.Type != ErrorTypeConfig {
+			t.Errorf("Type = %s, want %s", botErr.Type, ErrorTypeConfig)
+		}
+	})
+
+	t.Run("不是 BotError", func(t *testing.T) {
+		err := fmt.Errorf("普通错误")
+		_, ok := IsBotError(err)
+		if ok {
+			t.Error("IsBotError should return false for non-BotError")
+		}
+	})
+
+	t.Run("包装的 BotError", func(t *testing.T) {
+		originalErr := NewNetworkError("网络错误", nil)
+		wrappedErr := fmt.Errorf("wrapped: %w", originalErr)
+
+		botErr, ok := IsBotError(wrappedErr)
+		if !ok {
+			t.Error("IsBotError should find wrapped BotError")
+		}
+		if botErr.Type != ErrorTypeNetwork {
+			t.Errorf("Type = %s, want %s", botErr.Type, ErrorTypeNetwork)
+		}
+	})
+}
+
+func TestShouldRetry(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{"暂时性错误应重试", NewNetworkError("网络错误", nil), true},
+		{"永久性错误不应重试", NewConfigError("配置错误", nil), false},
+		{"普通错误不应重试", fmt.Errorf("普通错误"), false},
+		{"nil 错误不应重试", nil, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ShouldRetry(tt.err); got != tt.expected {
+				t.Errorf("ShouldRetry() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetRecoveryHint(t *testing.T) {
+	t.Run("BotError 有提示", func(t *testing.T) {
+		err := NewConfigError("配置错误", nil)
+		hint := GetRecoveryHint(err)
+		if hint != "检查配置文件格式和内容" {
+			t.Errorf("Hint = %s, want 检查配置文件格式和内容", hint)
+		}
+	})
+
+	t.Run("普通错误无提示", func(t *testing.T) {
+		err := fmt.Errorf("普通错误")
+		hint := GetRecoveryHint(err)
+		if hint != "" {
+			t.Errorf("Hint = %s, want empty string", hint)
+		}
+	})
+
+	t.Run("nil 错误无提示", func(t *testing.T) {
+		hint := GetRecoveryHint(nil)
+		if hint != "" {
+			t.Errorf("Hint = %s, want empty string", hint)
+		}
+	})
+}
+
+func TestBotError_WithErrorsIs(t *testing.T) {
+	cause := fmt.Errorf("底层错误")
+	err := NewConfigError("配置错误", cause)
+
+	if !errors.Is(err, cause) {
+		t.Error("errors.Is should find the underlying error")
+	}
+}
+
+func TestBotError_WithErrorsAs(t *testing.T) {
+	originalErr := NewNetworkError("网络错误", nil)
+	wrappedErr := fmt.Errorf("wrapped: %w", originalErr)
+
+	var botErr *BotError
+	if !errors.As(wrappedErr, &botErr) {
+		t.Error("errors.As should find the underlying BotError")
+	}
+	if botErr.Type != ErrorTypeNetwork {
+		t.Errorf("Type = %s, want %s", botErr.Type, ErrorTypeNetwork)
+	}
+}
