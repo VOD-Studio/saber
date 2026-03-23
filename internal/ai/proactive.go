@@ -373,6 +373,9 @@ func (m *ProactiveManager) handleProactiveTrigger(ctx context.Context, roomID id
 // generateDefaultProactiveMessage 生成默认的主动聊天消息。
 //
 // 当 AI 决定发送消息但未提供具体内容时使用此方法。
+// 根据房间类型（私聊/群聊）使用不同的语气：
+//   - 私聊：使用亲密、个人化的语气
+//   - 群聊：使用面向群体的语气
 //
 // 参数:
 //   - triggerType: 触发类型
@@ -381,17 +384,31 @@ func (m *ProactiveManager) handleProactiveTrigger(ctx context.Context, roomID id
 // 返回值:
 //   - string: 生成的默认消息
 func (m *ProactiveManager) generateDefaultProactiveMessage(triggerType TriggerType, decisionCtx *DecisionContext) string {
+	isDirect := decisionCtx.IsDirect
+
 	switch triggerType {
 	case TriggerInactivity:
 		if decisionCtx.MinutesSinceLast > 120 {
+			if isDirect {
+				return "好久没聊天了，最近怎么样？有什么想分享的吗？"
+			}
 			return "大家好！房间静默有一段时间了，有什么有趣的话题想聊聊吗？"
+		}
+		if isDirect {
+			return "在忙什么呢？有什么新鲜事吗？"
 		}
 		return "大家好，有什么新鲜事吗？"
 	case TriggerScheduled:
+		if isDirect {
+			return "又是新的一天，希望你今天一切顺利！有什么想聊的吗？"
+		}
 		return "大家好！又到了定时问候的时间，希望大家一切顺利！"
 	case TriggerNewUser:
 		return "欢迎新朋友加入！"
 	default:
+		if isDirect {
+			return "你好！"
+		}
 		return "大家好！"
 	}
 }
