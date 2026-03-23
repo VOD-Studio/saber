@@ -70,15 +70,15 @@ func TestAIConfigValidate(t *testing.T) {
 		errMsg  string
 	}{
 		{"禁用时不验证", AIConfig{Enabled: false}, false, ""},
-		{"有效配置", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 30}, false, ""},
+		{"有效配置", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 5}}, false, ""},
 		{"缺少 provider", AIConfig{Enabled: true, BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4"}, true, "provider is required"},
 		{"缺少 base_url", AIConfig{Enabled: true, Provider: "openai", APIKey: "key", DefaultModel: "gpt-4"}, true, "base_url is required"},
 		{"缺少 api_key", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", DefaultModel: "gpt-4"}, true, "api_key is required"},
 		{"缺少 default_model", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}, true, "default_model is required"},
 		{"温度过低", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: -0.1}, true, "temperature must be between 0 and 2"},
 		{"温度过高", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: 2.1}, true, "temperature must be between 0 and 2"},
-		{"温度边界 0", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: 0, TimeoutSeconds: 30}, false, ""},
-		{"温度边界 2", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: 2, TimeoutSeconds: 30}, false, ""},
+		{"温度边界 0", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: 0, TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 5}}, false, ""},
+		{"温度边界 2", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: 2, TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 5}}, false, ""},
 		{"timeout 无效", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 0}, true, "timeout_seconds must be positive"},
 		{"timeout 负数", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: -1}, true, "timeout_seconds must be positive"},
 	}
@@ -715,6 +715,7 @@ func TestMediaConfig(t *testing.T) {
 			APIKey:         "key",
 			DefaultModel:   "gpt-4",
 			TimeoutSeconds: 30,
+			ToolCalling:    ToolCallingConfig{MaxIterations: 5},
 			Media:          MediaConfig{Enabled: false, MaxSizeMB: -1, TimeoutSec: -1},
 		}
 		err := cfg.Validate()
@@ -731,6 +732,7 @@ func TestMediaConfig(t *testing.T) {
 			APIKey:         "key",
 			DefaultModel:   "gpt-4",
 			TimeoutSeconds: 30,
+			ToolCalling:    ToolCallingConfig{MaxIterations: 5},
 			Media:          MediaConfig{Enabled: true, MaxSizeMB: 10, TimeoutSec: 30},
 		}
 		err := cfg.Validate()
@@ -747,6 +749,7 @@ func TestMediaConfig(t *testing.T) {
 			APIKey:         "key",
 			DefaultModel:   "gpt-4",
 			TimeoutSeconds: 30,
+			ToolCalling:    ToolCallingConfig{MaxIterations: 5},
 			Media:          MediaConfig{Enabled: true, MaxSizeMB: -1, TimeoutSec: 30},
 		}
 		err := cfg.Validate()
@@ -766,6 +769,7 @@ func TestMediaConfig(t *testing.T) {
 			APIKey:         "key",
 			DefaultModel:   "gpt-4",
 			TimeoutSeconds: 30,
+			ToolCalling:    ToolCallingConfig{MaxIterations: 5},
 			Media:          MediaConfig{Enabled: true, MaxSizeMB: 10, TimeoutSec: -1},
 		}
 		err := cfg.Validate()
