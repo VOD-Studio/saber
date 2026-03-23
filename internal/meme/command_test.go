@@ -206,22 +206,10 @@ func TestTypedMemeCommand_Handle_ServiceNotEnabled(t *testing.T) {
 }
 
 func TestNewMemeCommand(t *testing.T) {
-	mockSvc := &mockCommandService{}
-	svc := createTestService()
-
-	// 注意：client 为 nil 会导致 panic，这里仅测试结构
+	// 测试构造函数返回非 nil
 	cmd := NewMemeCommand(nil, nil, nil)
 	if cmd == nil {
 		t.Error("NewMemeCommand returned nil")
-	}
-
-	// 测试正常创建（不提供 client）
-	cmd2 := &MemeCommand{
-		service:    svc,
-		cmdService: mockSvc,
-	}
-	if cmd2 == nil {
-		t.Error("failed to create MemeCommand")
 	}
 }
 
@@ -230,7 +218,7 @@ func TestNewTypedMemeCommand(t *testing.T) {
 
 	cmd := NewTypedMemeCommand(nil, nil, svc, ContentTypeSticker)
 	if cmd == nil {
-		t.Error("NewTypedMemeCommand returned nil")
+		t.Fatal("NewTypedMemeCommand returned nil")
 	}
 
 	if cmd.contentType != ContentTypeSticker {
