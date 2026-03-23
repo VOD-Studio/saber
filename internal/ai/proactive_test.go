@@ -797,3 +797,191 @@ type mockRoomListerTest struct {
 func (m *mockRoomListerTest) GetJoinedRooms(ctx context.Context) ([]matrix.RoomInfo, error) {
 	return m.rooms, nil
 }
+
+// TestGenerateDefaultProactiveMessage_IsDirect 测试默认消息生成的私聊/群聊语气区分。
+//
+// 验证 generateDefaultProactiveMessage 方法根据 IsDirect 字段生成不同语气的消息：
+// - 私聊：使用亲密、个人化的语气（如"你好"、"最近怎么样"）
+// - 群聊：使用面向群体的语气（如"大家好"）
+func TestGenerateDefaultProactiveMessage_IsDirect(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.ProactiveConfig{
+		Enabled:            true,
+		MaxMessagesPerDay:  5,
+		MinIntervalMinutes: 60,
+	}
+
+	aiService := &Service{}
+	roomService := &matrix.RoomService{}
+	globalAIConfig := &config.AIConfig{}
+
+	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
+	if err != nil {
+		t.Fatalf("NewProactiveManager() error = %v", err)
+	}
+
+	tests := []struct {
+		name             string
+		triggerType      TriggerType
+		isDirect         bool
+		minutesSinceLast int
+		wantContains     string
+		wantNotContains  string
+	}{
+		{
+			name:             "私聊 - 静默触发 - 长时间",
+			triggerType:      TriggerInactivity,
+			isDirect:         true,
+			minutesSinceLast: 150,
+			wantContains:     "好久没聊天了",
+			wantNotContains:  "大家好",
+		},
+		{
+			name:             "群聊 - 静默触发 - 长时间",
+			triggerType:      TriggerInactivity,
+			isDirect:         false,
+			minutesSinceLast: 150,
+			wantContains:     "大家好",
+			wantNotContains:  "好久没聊天了",
+		},
+		{
+			name:             "私聊 - 静默触发 - 短时间",
+			triggerType:      TriggerInactivity,
+			isDirect:         true,
+			minutesSinceLast: 60,
+			wantContains:     "在忙什么",
+			wantNotContains:  "大家好",
+		},
+		{
+			name:             "群聊 - 静默触发 - 短时间",
+			triggerType:      TriggerInactivity,
+			isDirect:         false,
+			minutesSinceLast: 60,
+			wantContains:     "大家好",
+			wantNotContains:  "在忙什么",
+		},
+		{
+			name:             "私聊 - 定时触发",
+			triggerType:      TriggerScheduled,
+			isDirect:         true,
+			minutesSinceLast: 60,
+			wantContains:     "希望你今天一切顺利",
+			wantNotContains:  "大家好",
+		},
+		{
+			name:             "群聊 - 定时触发",
+			triggerType:      TriggerScheduled,
+			isDirect:         false,
+			minutesSinceLast: 60,
+			wantContains:     "大家好",
+			wantNotContains:  "希望你今天一切顺利",
+		},
+		{
+			name:             "私聊 - 默认触发",
+			triggerType:      TriggerManual,
+			isDirect:         true,
+			minutesSinceLast: 60,
+			wantContains:     "你好",
+			wantNotContains:  "大家好",
+		},
+		{
+			name:             "群聊 - 默认触发",
+			triggerType:      TriggerManual,
+			isDirect:         false,
+			minutesSinceLast: 60,
+			wantContains:     "大家好",
+			wantNotContains:  "你好",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decisionCtx := &DecisionContext{
+				IsDirect:         tt.isDirect,
+				MinutesSinceLast: tt.minutesSinceLast,
+			}
+
+			msg := manager.generateDefaultProactiveMessage(tt.triggerType, decisionCtx)
+
+			if !contains(msg, tt.wantContains) {
+				t.Errorf("generateDefaultProactiveMessage() = %q, want to contain %q", msg, tt.wantContains)
+			}
+
+			if tt.wantNotContains != "" && contains(msg, tt.wantNotContains) {
+				t.Errorf("generateDefaultProactiveMessage() = %q, should not contain %q", msg, tt.wantNotContains)
+			}
+		})
+	}
+}
+
+// TestGenerateWelcomeMessage_IsDirect 测试欢迎消息生成的私聊/群聊语气区分。
+//
+// 验证 generateWelcomeMessage 方法根据 IsDirect 参数生成不同语气的欢迎消息：
+// - 私聊：使用"很高兴认识你"等亲密语气
+// - 群聊：使用"欢迎加入"等群体语气
+func TestGenerateWelcomeMessage_IsDirect(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.ProactiveConfig{
+		Enabled: true,
+		NewMember: config.NewMemberConfig{
+			Enabled:       true,
+			WelcomePrompt: "欢迎新成员",
+		},
+	}
+
+	// 创建一个带有 globalConfig 的 Service，Enabled=false 表示 AI 未启用
+	aiService := &Service{
+		globalConfig: &config.AIConfig{
+			Enabled: false,
+		},
+	}
+	roomService := &matrix.RoomService{}
+	globalAIConfig := &config.AIConfig{}
+
+	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
+	if err != nil {
+		t.Fatalf("NewProactiveManager() error = %v", err)
+	}
+
+	ctx := context.Background()
+	userID := TestUserID(1)
+
+	tests := []struct {
+		name            string
+		isDirect        bool
+		wantContains    string
+		wantNotContains string
+	}{
+		{
+			name:            "私聊欢迎",
+			isDirect:        true,
+			wantContains:    "很高兴认识你",
+			wantNotContains: "欢迎",
+		},
+		{
+			name:            "群聊欢迎",
+			isDirect:        false,
+			wantContains:    "欢迎",
+			wantNotContains: "很高兴认识你",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, err := manager.generateWelcomeMessage(ctx, userID, tt.isDirect)
+			if err != nil {
+				t.Fatalf("generateWelcomeMessage() error = %v", err)
+			}
+
+			if !contains(msg, tt.wantContains) {
+				t.Errorf("generateWelcomeMessage() = %q, want to contain %q", msg, tt.wantContains)
+			}
+
+			if tt.wantNotContains != "" && contains(msg, tt.wantNotContains) {
+				t.Errorf("generateWelcomeMessage() = %q, should not contain %q", msg, tt.wantNotContains)
+			}
+		})
+	}
+}
