@@ -407,6 +407,7 @@ AI: [调用 web_search 工具] 我找到了以下信息...
 | `auto_join_rooms`   | 否      | 启动时自动加入的房间列表         |
 | `enable_e2ee`       | 否      | 启用端到端加密                   |
 | `e2ee_session_path` | 如果启用 E2EE | 加密会话数据库路径         |
+| `pickle_key_path`   | 否      | E2EE pickle 密钥路径（默认为 e2ee_session_path + ".key"） |
 
 ### AI 设置
 
@@ -486,6 +487,7 @@ AI: [调用 web_search 工具] 我找到了以下信息...
 | `model`          | `""`   | 决策使用的模型（留空用默认）   |
 | `temperature`    | `0.8`  | 决策温度（0-2）                |
 | `prompt_template`| `""`   | 自定义决策提示词（留空用默认） |
+| `stream_enabled` | `true` | 启用流式请求（更快响应）       |
 
 ### 上下文设置
 
@@ -505,6 +507,7 @@ AI: [调用 web_search 工具] 我找到了以下信息...
 | `initial_delay_ms`| `1000` | 初始延迟               |
 | `max_delay_ms`    | `30000`| 最大延迟               |
 | `backoff_factor`  | `2.0`  | 指数退避乘数           |
+| `fallback_enabled`| `true` | 启用降级到备用模型     |
 | `fallback_models` | `[]`   | 降级使用的模型列表     |
 
 ### MCP 设置
