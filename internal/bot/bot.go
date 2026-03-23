@@ -321,7 +321,14 @@ func (s *appState) initProactiveManager() (*ai.ProactiveManager, error) {
 // setupEventHandlers 设置事件处理器。
 func (s *appState) setupEventHandlers() {
 	svc := s.services
-	eventHandler := matrix.NewEventHandler(svc.commandService)
+
+	// 使用配置的并发数创建 EventHandler
+	maxConcurrent := s.cfg.Matrix.MaxConcurrentEvents
+	if maxConcurrent <= 0 {
+		maxConcurrent = 10 // 默认值
+	}
+
+	eventHandler := matrix.NewEventHandler(svc.commandService, maxConcurrent)
 
 	if svc.proactiveManager != nil {
 		eventHandler.SetProactiveManager(svc.proactiveManager)
@@ -344,6 +351,7 @@ func (s *appState) setupEventHandlers() {
 	}
 
 	s.autoJoinRooms()
+	slog.Info("事件处理器初始化完成", "max_concurrent_events", maxConcurrent)
 }
 
 // autoJoinRooms 自动加入配置的房间。

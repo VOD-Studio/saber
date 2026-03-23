@@ -34,6 +34,7 @@ type ContextManager struct {
 	mu             sync.RWMutex
 	contexts       map[id.RoomID][]ChatMessage
 	tokenCount     map[id.RoomID]int
+	lastActivity   map[id.RoomID]time.Time // 记录每个房间最后活动时间
 	config         config.ContextConfig
 	stopCleanup    chan struct{}
 	cleanupStopped sync.WaitGroup
@@ -43,10 +44,11 @@ type ContextManager struct {
 // NewContextManager 创建并返回一个新的上下文管理器实例。
 func NewContextManager(config config.ContextConfig) *ContextManager {
 	cm := &ContextManager{
-		contexts:    make(map[id.RoomID][]ChatMessage),
-		tokenCount:  make(map[id.RoomID]int),
-		config:      config,
-		stopCleanup: make(chan struct{}),
+		contexts:     make(map[id.RoomID][]ChatMessage),
+		tokenCount:   make(map[id.RoomID]int),
+		lastActivity: make(map[id.RoomID]time.Time),
+		config:       config,
+		stopCleanup:  make(chan struct{}),
 	}
 	cm.startBackgroundCleanup()
 	return cm
@@ -59,7 +61,7 @@ func estimateTokens(text string) int {
 
 // startBackgroundCleanup 启动后台清理 goroutine。
 func (cm *ContextManager) startBackgroundCleanup() {
-	if cm.config.ExpiryMinutes <= 0 {
+	if cm.config.ExpiryMinutes <= 0 && cm.config.InactiveRoomHours <= 0 {
 		return
 	}
 
@@ -76,6 +78,7 @@ func (cm *ContextManager) startBackgroundCleanup() {
 				return
 			case <-ticker.C:
 				cm.cleanupAllExpired()
+				cm.cleanupInactiveRooms()
 			}
 		}
 	}()
@@ -94,6 +97,9 @@ func (cm *ContextManager) Stop() {
 func (cm *ContextManager) AddMessage(roomID id.RoomID, role MessageRole, content string, userID id.UserID) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+
+	// 更新最后活动时间
+	cm.lastActivity[roomID] = time.Now()
 
 	cm.cleanupRoomContext(roomID)
 
@@ -155,6 +161,7 @@ func (cm *ContextManager) ClearContext(roomID id.RoomID) {
 
 	delete(cm.contexts, roomID)
 	delete(cm.tokenCount, roomID)
+	delete(cm.lastActivity, roomID)
 }
 
 // cleanupRoomContext 清理指定房间的过期消息。
@@ -202,6 +209,30 @@ func (cm *ContextManager) cleanupAllExpired() {
 
 	for roomID := range cm.contexts {
 		cm.cleanupRoomContext(roomID)
+	}
+}
+
+// cleanupInactiveRooms 清理长时间无活动的房间上下文。
+//
+// 这防止了内存泄漏：当机器人加入大量房间但大部分房间长期不活跃时，
+// 上下文数据会持续占用内存。此方法会定期清理超过阈值未活动的房间。
+func (cm *ContextManager) cleanupInactiveRooms() {
+	if cm.config.InactiveRoomHours <= 0 {
+		return
+	}
+
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	now := time.Now()
+	inactiveThreshold := time.Duration(cm.config.InactiveRoomHours) * time.Hour
+
+	for roomID, lastTime := range cm.lastActivity {
+		if now.Sub(lastTime) > inactiveThreshold {
+			delete(cm.contexts, roomID)
+			delete(cm.tokenCount, roomID)
+			delete(cm.lastActivity, roomID)
+		}
 	}
 }
 

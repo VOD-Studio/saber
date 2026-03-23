@@ -295,7 +295,7 @@ func TestOnMember(t *testing.T) {
 
 			// 创建命令服务和事件处理器
 			service := NewCommandService(client, tt.botID, nil)
-			handler := NewEventHandler(service)
+			handler := NewEventHandler(service, 10)
 
 			// 调用 OnMember 方法
 			ctx := context.Background()
@@ -318,6 +318,7 @@ func TestOnMember(t *testing.T) {
 func TestOnMessage_Concurrent(t *testing.T) {
 	const goroutines = 20
 	const messagesPerGoroutine = 5
+	const maxConcurrent = 20 // 测试用的并发限制
 
 	botUserID := id.UserID("@saber:example.com")
 	roomID := id.RoomID("!test:example.com")
@@ -358,7 +359,7 @@ func TestOnMessage_Concurrent(t *testing.T) {
 	}
 	service.RegisterCommand("ai", mockHandler)
 
-	handler := NewEventHandler(service)
+	handler := NewEventHandler(service, maxConcurrent)
 
 	// 创建测试事件
 	createEvent := func(idx int) *event.Event {
@@ -393,8 +394,11 @@ func TestOnMessage_Concurrent(t *testing.T) {
 	// 等待所有 goroutine 完成
 	wg.Wait()
 
-	// 给予一些时间让消息处理完成
-	time.Sleep(100 * time.Millisecond)
+	// 等待足够时间让所有消息处理完成
+	// 考虑并发限制和每个消息的处理时间
+	totalMessages := goroutines * messagesPerGoroutine
+	processingTime := time.Duration(totalMessages/maxConcurrent+1) * 20 * time.Millisecond
+	time.Sleep(processingTime)
 
 	// 验证所有消息都被处理
 	mu.Lock()
@@ -433,7 +437,7 @@ func TestOnMessage_PanicRecovery(t *testing.T) {
 	}
 	service.RegisterCommand("panic", panicHandler)
 
-	handler := NewEventHandler(service)
+	handler := NewEventHandler(service, 10)
 
 	// 创建会触发 panic 的事件
 	evt := &event.Event{
@@ -495,7 +499,7 @@ func TestOnMessage_ContextTimeout(t *testing.T) {
 	}
 	service.RegisterCommand("timeout", timeoutHandler)
 
-	handler := NewEventHandler(service)
+	handler := NewEventHandler(service, 10)
 
 	// 创建测试事件
 	evt := &event.Event{
@@ -555,7 +559,7 @@ func TestOnMessage_ContextPropagation(t *testing.T) {
 	}
 	service.RegisterCommand("check", checkTokenHandler)
 
-	handler := NewEventHandler(service)
+	handler := NewEventHandler(service, 10)
 
 	// 创建带有 SyncToken 的上下文
 	testToken := "test_sync_token_123"
@@ -638,7 +642,7 @@ func TestOnMessage_ErrorHandling(t *testing.T) {
 	}
 	service.RegisterCommand("success", successHandler)
 
-	handler := NewEventHandler(service)
+	handler := NewEventHandler(service, 10)
 
 	// 并发发送成功和失败的消息
 	var wg sync.WaitGroup
@@ -1693,7 +1697,7 @@ func TestOnMessage_HistoryFilter(t *testing.T) {
 	}
 	service.RegisterCommand("ai", mockHandler)
 
-	handler := NewEventHandler(service)
+	handler := NewEventHandler(service, 10)
 
 	// 等待一小段时间确保 startTime 已设置
 	time.Sleep(10 * time.Millisecond)
@@ -1776,7 +1780,7 @@ func TestOnMessage_ZeroTimestamp(t *testing.T) {
 	}
 	service.RegisterCommand("ai", mockHandler)
 
-	handler := NewEventHandler(service)
+	handler := NewEventHandler(service, 10)
 
 	// 创建时间戳为零的事件
 	zeroTimestampEvent := &event.Event{
