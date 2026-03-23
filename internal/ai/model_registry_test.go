@@ -174,9 +174,9 @@ func TestModelRegistry_ListModels(t *testing.T) {
 			"openai": {
 				BaseURL: "https://api.openai.com/v1",
 				Models: map[string]config.ModelConfig{
-					"apple":  {Model: "model-a"},
-					"mango":  {Model: "model-m"},
-					"zebra":  {Model: "model-z"},
+					"apple":   {Model: "model-a"},
+					"mango":   {Model: "model-m"},
+					"zebra":   {Model: "model-z"},
 					"default": {Model: "default-model"},
 				},
 			},

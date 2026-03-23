@@ -129,12 +129,12 @@ func TestProviderConfig_GetModelConfig(t *testing.T) {
 
 func TestParseModelID(t *testing.T) {
 	tests := []struct {
-		name          string
-		input         string
-		wantProvider  string
-		wantModel     string
-		wantErr       bool
-		errContains   string
+		name         string
+		input        string
+		wantProvider string
+		wantModel    string
+		wantErr      bool
+		errContains  string
 	}{
 		{
 			name:         "valid format",

@@ -9,11 +9,11 @@ import (
 // ProviderConfig 存储单个 AI 提供商的配置。
 // 每个提供商可以有自己的 API 端点、认证信息和模型配置。
 type ProviderConfig struct {
-	Type    string                 `yaml:"type"`    // 提供商类型（如 openai, azure），默认使用配置键名
+	Type    string                 `yaml:"type"`     // 提供商类型（如 openai, azure），默认使用配置键名
 	BaseURL string                 `yaml:"base_url"` // API 基础 URL
-	APIKey  string                 `yaml:"api_key"` // API 密钥
-	Models  map[string]ModelConfig `yaml:"models"`  // 该提供商下的模型配置
-	Extra   map[string]any         `yaml:",inline"` // 提供商特有配置（如 Azure deployment）
+	APIKey  string                 `yaml:"api_key"`  // API 密钥
+	Models  map[string]ModelConfig `yaml:"models"`   // 该提供商下的模型配置
+	Extra   map[string]any         `yaml:",inline"`  // 提供商特有配置（如 Azure deployment）
 }
 
 // Validate 验证提供商配置是否有效。

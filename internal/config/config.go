@@ -42,9 +42,9 @@ type MatrixConfig struct {
 
 // AIConfig 存储 AI 服务配置
 type AIConfig struct {
-	Enabled      bool                       `yaml:"enabled"`       // 是否启用 AI 功能
-	Providers    map[string]ProviderConfig  `yaml:"providers"`     // 多提供商配置
-	DefaultModel string                     `yaml:"default_model"` // 默认使用的模型（完全限定名称，如 openai.gpt-4o-mini）
+	Enabled      bool                      `yaml:"enabled"`       // 是否启用 AI 功能
+	Providers    map[string]ProviderConfig `yaml:"providers"`     // 多提供商配置
+	DefaultModel string                    `yaml:"default_model"` // 默认使用的模型（完全限定名称，如 openai.gpt-4o-mini）
 
 	// 旧字段保留向后兼容（已弃用，推荐使用 Providers）
 	Provider              string                 `yaml:"provider"`                 // AI 提供商名称（已弃用）
