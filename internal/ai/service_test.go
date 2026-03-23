@@ -9,6 +9,7 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"rua.plus/saber/internal/config"
+	ruacontext "rua.plus/saber/internal/context"
 )
 
 // createTestAIConfig 创建测试用的 AI 配置。
@@ -329,14 +330,14 @@ func TestWithUserContext(t *testing.T) {
 	userID := id.UserID("@test:example.com")
 	roomID := id.RoomID("!room:example.com")
 
-	newCtx := WithUserContext(ctx, userID, roomID)
+	newCtx := ruacontext.WithUserContext(ctx, userID, roomID)
 
 	if newCtx == nil {
 		t.Fatal("WithUserContext returned nil context")
 	}
 
 	// 验证上下文包含用户 ID
-	gotUserID, ok := newCtx.Value(userIDKey).(id.UserID)
+	gotUserID, ok := ruacontext.GetValue(newCtx, ruacontext.UserIDKey)
 	if !ok {
 		t.Fatal("context does not contain userID")
 	}
@@ -345,7 +346,7 @@ func TestWithUserContext(t *testing.T) {
 	}
 
 	// 验证上下文包含房间 ID
-	gotRoomID, ok := newCtx.Value(roomIDKey).(id.RoomID)
+	gotRoomID, ok := ruacontext.GetValue(newCtx, ruacontext.RoomIDKey)
 	if !ok {
 		t.Fatal("context does not contain roomID")
 	}
@@ -361,9 +362,9 @@ func TestGetUserFromContext(t *testing.T) {
 		userID := id.UserID("@test:example.com")
 		roomID := id.RoomID("!room:example.com")
 
-		ctx = WithUserContext(ctx, userID, roomID)
+		ctx = ruacontext.WithUserContext(ctx, userID, roomID)
 
-		gotUserID, ok := GetUserFromContext(ctx)
+		gotUserID, ok := ruacontext.GetUserFromContext(ctx)
 		if !ok {
 			t.Error("GetUserFromContext returned false")
 		}
@@ -375,7 +376,7 @@ func TestGetUserFromContext(t *testing.T) {
 	t.Run("context_without_user", func(t *testing.T) {
 		ctx := context.Background()
 
-		_, ok := GetUserFromContext(ctx)
+		_, ok := ruacontext.GetUserFromContext(ctx)
 		if ok {
 			t.Error("GetUserFromContext should return false for context without user")
 		}
@@ -389,9 +390,9 @@ func TestGetRoomFromContext(t *testing.T) {
 		userID := id.UserID("@test:example.com")
 		roomID := id.RoomID("!room:example.com")
 
-		ctx = WithUserContext(ctx, userID, roomID)
+		ctx = ruacontext.WithUserContext(ctx, userID, roomID)
 
-		gotRoomID, ok := GetRoomFromContext(ctx)
+		gotRoomID, ok := ruacontext.GetRoomFromContext(ctx)
 		if !ok {
 			t.Error("GetRoomFromContext returned false")
 		}
@@ -403,7 +404,7 @@ func TestGetRoomFromContext(t *testing.T) {
 	t.Run("context_without_room", func(t *testing.T) {
 		ctx := context.Background()
 
-		_, ok := GetRoomFromContext(ctx)
+		_, ok := ruacontext.GetRoomFromContext(ctx)
 		if ok {
 			t.Error("GetRoomFromContext should return false for context without room")
 		}
