@@ -18,6 +18,7 @@
 - **群聊提及回复**: 在群聊中被 @mention 时自动响应
 - **回复延续对话**: 回复机器人的消息时自动继续对话
 - **主动聊天**: AI 驱动的主动消息，支持静默检测、定时触发、新成员欢迎
+- **Meme 搜索**: 支持搜索 GIF/Sticker/Meme 并发送到聊天（使用 Klipy API）
 
 ## 快速开始
 
@@ -78,18 +79,21 @@ ai:
 
 ### 内置命令
 
-| 命令              | 描述                                       |
-| ----------------- | ------------------------------------------ |
-| `!ping`           | 检查机器人是否在线                         |
-| `!help`           | 列出所有可用命令                           |
-| `!version`        | 显示版本信息                               |
-| `!ai <message>`   | 与 AI 对话                                 |
-| `!ai-clear`       | 清除对话上下文                             |
-| `!ai-context`     | 显示上下文信息                             |
-| `!ai-models`      | 列出所有可用模型                           |
-| `!ai-switch <id>` | 切换默认模型                               |
-| `!ai-current`     | 显示当前默认模型                           |
-| `!mcp-list`       | 列出所有 MCP 服务器和工具                  |
+| 命令                | 描述                                       |
+| ------------------- | ------------------------------------------ |
+| `!ping`             | 检查机器人是否在线                         |
+| `!help`             | 列出所有可用命令                           |
+| `!version`          | 显示版本信息                               |
+| `!ai <message>`     | 与 AI 对话                                 |
+| `!ai-clear`         | 清除对话上下文                             |
+| `!ai-context`       | 显示上下文信息                             |
+| `!ai-models`        | 列出所有可用模型                           |
+| `!ai-switch <id>`   | 切换默认模型                               |
+| `!ai-current`       | 显示当前默认模型                           |
+| `!mcp-list`         | 列出所有 MCP 服务器和工具                  |
+| `!meme <keyword>`   | 搜索并发送 GIF/Sticker/Meme                |
+| `!gif <keyword>`    | 搜索并发送 GIF 动图                        |
+| `!sticker <keyword>`| 搜索并发送 Sticker 贴纸                    |
 
 ### 私聊
 
@@ -434,6 +438,31 @@ AI: [调用 web_search 工具] 我找到了以下信息...
 
 使用 `!mcp-list` 命令查看当前可用的所有 MCP 服务器和工具。
 
+### Meme 搜索
+
+Saber 支持 Meme 搜索功能，可以通过 Klipy API 搜索 GIF、Sticker 和 Meme 图片并直接发送到聊天。
+
+配置示例:
+
+```yaml
+meme:
+  enabled: true
+  api_key: "your-klipy-api-key"  # 从 partner.klipy.com 获取
+  max_results: 5
+  timeout_seconds: 10
+```
+
+使用方式:
+
+```
+!meme happy           # 搜索 GIF（默认）
+!meme --gif happy     # 搜索 GIF
+!meme --sticker hello # 搜索 Sticker
+!meme --meme cat      # 搜索 Meme
+!gif happy            # 快捷方式：搜索 GIF
+!sticker hello        # 快捷方式：搜索 Sticker
+```
+
 ## 配置参考
 
 ### Matrix 设置
@@ -557,6 +586,7 @@ AI: [调用 web_search 工具] 我找到了以下信息...
 | `max_messages`  | `50`    | 最大保留消息数     |
 | `max_tokens`    | `8000`  | 最大上下文 token 数 |
 | `expiry_minutes`| `60`    | 上下文过期时间     |
+| `inactive_room_hours`| `24` | 不活跃房间清理阈值（小时） |
 
 ### 重试设置
 
@@ -569,6 +599,12 @@ AI: [调用 web_search 工具] 我找到了以下信息...
 | `backoff_factor`  | `2.0`  | 指数退避乘数           |
 | `fallback_enabled`| `true` | 启用降级到备用模型     |
 | `fallback_models` | `[]`   | 降级使用的模型列表     |
+
+### 工具调用设置
+
+| 字段           | 默认值 | 描述                   |
+| -------------- | ------ | ---------------------- |
+| `max_iterations`| `5`   | 最大工具调用迭代次数   |
 
 ### MCP 设置
 
@@ -599,16 +635,32 @@ AI: [调用 web_search 工具] 我找到了以下信息...
 
 ### MCP 服务器设置
 
-| 字段    | 必填         | 描述                             |
-| ------- | ------------ | -------------------------------- |
-| `type`  | 是           | 服务器类型: `builtin`, `stdio`, `http` |
-| `enabled`| 否          | 是否启用                         |
-| `command`| stdio 必填  | 可执行文件路径                   |
-| `args`  | 否           | 命令参数                         |
-| `env`   | 否           | 环境变量                         |
-| `url`   | http 必填    | 服务器地址                       |
-| `token` | 否           | Bearer 认证令牌                  |
-| `timeout_seconds`| 否   | 调用超时时间                     |
+| 字段              | 必填         | 描述                             |
+| ----------------- | ------------ | -------------------------------- |
+| `type`            | 是           | 服务器类型: `builtin`, `stdio`, `http` |
+| `enabled`         | 否           | 是否启用                         |
+| `command`         | stdio 必填   | 可执行文件路径                   |
+| `args`            | 否           | 命令参数                         |
+| `env`             | 否           | 环境变量                         |
+| `url`             | http 必填    | 服务器地址                       |
+| `token`           | 否           | Bearer 认证令牌                  |
+| `timeout_seconds` | 否           | 调用超时时间                     |
+| `allowed_commands`| 否           | stdio 命令白名单（默认禁止所有） |
+
+### Meme 设置
+
+| 字段             | 默认值  | 描述                             |
+| ---------------- | ------- | -------------------------------- |
+| `enabled`        | `false` | 启用 Meme 搜索功能               |
+| `api_key`        | -       | Klipy API Key（从 partner.klipy.com 获取） |
+| `max_results`    | `5`     | 最大返回结果数                   |
+| `timeout_seconds`| `10`    | 请求超时时间（秒）               |
+
+### 关闭设置
+
+| 字段             | 默认值 | 描述                   |
+| ---------------- | ------ | ---------------------- |
+| `timeout_seconds`| `30`   | 关闭超时时间（秒）     |
 
 ## 架构
 
@@ -618,10 +670,15 @@ saber/
   internal/
     bot/
       bot.go              # 机器人初始化和生命周期
+      errors.go           # 错误定义
     cli/
       flags.go            # 命令行标志解析
     config/
       config.go           # 配置加载和验证
+      provider.go         # 提供商配置和模型 ID 解析
+    context/
+      keys.go             # 上下文键定义
+      user.go             # 用户上下文工具
     db/
       sqlite_cgo.go       # SQLite CGO 驱动（开发环境）
       sqlite_nocgo.go     # SQLite 纯 Go 驱动（生产环境）
@@ -667,6 +724,9 @@ saber/
         js_sandbox.go     # JavaScript 沙箱
         stdio.go          # Stdio MCP 服务器
         http.go           # HTTP MCP 服务器
+    meme/
+      service.go          # Meme 服务（Klipy API）
+      command.go          # !meme 命令处理
 ```
 
 ## 开发
