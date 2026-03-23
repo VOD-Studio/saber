@@ -12,7 +12,7 @@ import (
 	ruacontext "rua.plus/saber/internal/context"
 )
 
-// createTestAIConfig 创建测试用的 AI 配置。
+// createTestAIConfig 创建测试用的 AI 配置（使用旧格式，会自动迁移）。
 func createTestAIConfig() *config.AIConfig {
 	cfg := config.DefaultAIConfig()
 	cfg.Enabled = true
@@ -20,6 +20,26 @@ func createTestAIConfig() *config.AIConfig {
 	cfg.BaseURL = "https://api.openai.com/v1"
 	cfg.APIKey = "test-key"
 	cfg.DefaultModel = "gpt-4"
+	return &cfg
+}
+
+// createTestMultiProviderAIConfig 创建多提供商格式的测试配置。
+func createTestMultiProviderAIConfig() *config.AIConfig {
+	cfg := config.DefaultAIConfig()
+	cfg.Enabled = true
+	cfg.DefaultModel = "openai.gpt-4"
+	cfg.Providers = map[string]config.ProviderConfig{
+		"openai": {
+			Type:    "openai",
+			BaseURL: "https://api.openai.com/v1",
+			APIKey:  "test-key",
+			Models: map[string]config.ModelConfig{
+				"gpt-4":       {Model: "gpt-4"},
+				"gpt-4o-mini": {Model: "gpt-4o-mini"},
+				"gpt-4o":      {Model: "gpt-4o"},
+			},
+		},
+	}
 	return &cfg
 }
 

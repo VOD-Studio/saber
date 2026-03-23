@@ -73,12 +73,21 @@ func TestAIConfigValidate(t *testing.T) {
 		wantErr bool
 		errMsg  string
 	}{
+		// 基本测试
 		{"禁用时不验证", AIConfig{Enabled: false}, false, ""},
-		{"有效配置", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 5}}, false, ""},
-		{"缺少 provider", AIConfig{Enabled: true, BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4"}, true, "provider is required"},
-		{"缺少 base_url", AIConfig{Enabled: true, Provider: "openai", APIKey: "key", DefaultModel: "gpt-4"}, true, "base_url is required"},
-		{"缺少 api_key", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", DefaultModel: "gpt-4"}, true, "api_key is required"},
-		{"缺少 default_model", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}, true, "default_model is required"},
+
+		// 旧格式配置（向后兼容）
+		{"旧格式-有效配置", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 5}}, false, ""},
+		{"旧格式-缺少 base_url", AIConfig{Enabled: true, Provider: "openai", APIKey: "key", DefaultModel: "gpt-4"}, true, "base_url is required"},
+		{"旧格式-缺少 default_model", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}, true, "default_model is required"},
+		{"旧格式-api_key 可为空", AIConfig{Enabled: true, Provider: "ollama", BaseURL: "http://localhost:11434/v1", DefaultModel: "llama3", TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 5}}, false, ""},
+
+		// 新格式配置（多提供商）
+		{"新格式-有效配置", AIConfig{Enabled: true, DefaultModel: "openai.gpt-4", Providers: map[string]ProviderConfig{"openai": {BaseURL: "https://api.openai.com/v1", APIKey: "key"}}, TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 5}}, false, ""},
+		{"新格式-提供商不存在", AIConfig{Enabled: true, DefaultModel: "anthropic.claude", Providers: map[string]ProviderConfig{"openai": {BaseURL: "https://api.openai.com/v1"}}, TimeoutSeconds: 30}, true, "provider \"anthropic\" not found"},
+		{"新格式-default_model 格式错误", AIConfig{Enabled: true, DefaultModel: "gpt-4", Providers: map[string]ProviderConfig{"openai": {BaseURL: "https://api.openai.com/v1"}}, TimeoutSeconds: 30}, true, "invalid model id format"},
+
+		// 参数验证
 		{"温度过低", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: -0.1}, true, "temperature must be between 0 and 2"},
 		{"温度过高", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: 2.1}, true, "temperature must be between 0 and 2"},
 		{"温度边界 0", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: 0, TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 5}}, false, ""},

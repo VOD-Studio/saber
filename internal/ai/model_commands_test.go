@@ -17,28 +17,24 @@ func TestModelsCommand_Registry(t *testing.T) {
 		{
 			name: "无模型配置",
 			cfg: func() *config.AIConfig {
-				cfg := createTestAIConfig()
-				cfg.DefaultModel = "default"
+				cfg := createTestMultiProviderAIConfig()
+				cfg.DefaultModel = "openai.gpt-4"
 				return cfg
 			}(),
-			wantModelCount:  1, // just default
-			wantDefault:     "default",
-			wantModelsExist: nil,
+			wantModelCount:  3, // gpt-4, gpt-4o-mini, gpt-4o
+			wantDefault:     "openai.gpt-4",
+			wantModelsExist: []string{"openai.gpt-4", "openai.gpt-4o-mini", "openai.gpt-4o"},
 		},
 		{
 			name: "有模型配置",
 			cfg: func() *config.AIConfig {
-				cfg := createTestAIConfig()
-				cfg.DefaultModel = "fast"
-				cfg.Models = map[string]config.ModelConfig{
-					"fast":  {Model: "gpt-4o-mini"},
-					"smart": {Model: "gpt-4o"},
-				}
+				cfg := createTestMultiProviderAIConfig()
+				cfg.DefaultModel = "openai.gpt-4o-mini"
 				return cfg
 			}(),
-			wantModelCount:  2, // fast + smart
-			wantDefault:     "fast",
-			wantModelsExist: []string{"fast", "smart"},
+			wantModelCount:  3, // gpt-4, gpt-4o-mini, gpt-4o
+			wantDefault:     "openai.gpt-4o-mini",
+			wantModelsExist: []string{"openai.gpt-4o-mini", "openai.gpt-4o"},
 		},
 	}
 
@@ -71,12 +67,8 @@ func TestModelsCommand_Registry(t *testing.T) {
 }
 
 func TestSwitchModelCommand_Registry(t *testing.T) {
-	cfg := createTestAIConfig()
-	cfg.DefaultModel = "fast"
-	cfg.Models = map[string]config.ModelConfig{
-		"fast":  {Model: "gpt-4o-mini"},
-		"smart": {Model: "gpt-4o"},
-	}
+	cfg := createTestMultiProviderAIConfig()
+	cfg.DefaultModel = "openai.gpt-4o-mini"
 
 	t.Run("switch to existing model", func(t *testing.T) {
 		service, err := NewService(cfg, nil, nil, nil)
@@ -88,12 +80,12 @@ func TestSwitchModelCommand_Registry(t *testing.T) {
 		registry := cmd.service.GetModelRegistry()
 
 		// 切换模型
-		if err := registry.SetDefault("smart"); err != nil {
+		if err := registry.SetDefault("openai.gpt-4o"); err != nil {
 			t.Errorf("SetDefault error: %v", err)
 		}
 
-		if registry.GetDefault() != "smart" {
-			t.Errorf("GetDefault() = %q, want %q", registry.GetDefault(), "smart")
+		if registry.GetDefault() != "openai.gpt-4o" {
+			t.Errorf("GetDefault() = %q, want %q", registry.GetDefault(), "openai.gpt-4o")
 		}
 	})
 
@@ -106,13 +98,13 @@ func TestSwitchModelCommand_Registry(t *testing.T) {
 		cmd := NewSwitchModelCommand(service)
 		registry := cmd.service.GetModelRegistry()
 
-		// 切换到任意模型
-		if err := registry.SetDefault("custom-model"); err != nil {
+		// 切换到任意模型（即使不在配置中）
+		if err := registry.SetDefault("openai.custom-model"); err != nil {
 			t.Errorf("SetDefault error: %v", err)
 		}
 
-		if registry.GetDefault() != "custom-model" {
-			t.Errorf("GetDefault() = %q, want %q", registry.GetDefault(), "custom-model")
+		if registry.GetDefault() != "openai.custom-model" {
+			t.Errorf("GetDefault() = %q, want %q", registry.GetDefault(), "openai.custom-model")
 		}
 	})
 
@@ -126,28 +118,24 @@ func TestSwitchModelCommand_Registry(t *testing.T) {
 		registry := cmd.service.GetModelRegistry()
 
 		// 切换模型
-		_ = registry.SetDefault("smart")
+		_ = registry.SetDefault("openai.gpt-4o")
 
 		// 配置默认应该保持不变
-		if registry.GetConfigDefault() != "fast" {
-			t.Errorf("GetConfigDefault() = %q, want %q", registry.GetConfigDefault(), "fast")
+		if registry.GetConfigDefault() != "openai.gpt-4o-mini" {
+			t.Errorf("GetConfigDefault() = %q, want %q", registry.GetConfigDefault(), "openai.gpt-4o-mini")
 		}
 
 		// 重置
 		registry.ResetDefault()
-		if registry.GetDefault() != "fast" {
-			t.Errorf("after ResetDefault, GetDefault() = %q, want %q", registry.GetDefault(), "fast")
+		if registry.GetDefault() != "openai.gpt-4o-mini" {
+			t.Errorf("after ResetDefault, GetDefault() = %q, want %q", registry.GetDefault(), "openai.gpt-4o-mini")
 		}
 	})
 }
 
 func TestCurrentModelCommand_Registry(t *testing.T) {
-	cfg := createTestAIConfig()
-	cfg.DefaultModel = "fast"
-	cfg.Models = map[string]config.ModelConfig{
-		"fast":  {Model: "gpt-4o-mini"},
-		"smart": {Model: "gpt-4o"},
-	}
+	cfg := createTestMultiProviderAIConfig()
+	cfg.DefaultModel = "openai.gpt-4o-mini"
 
 	t.Run("initial state", func(t *testing.T) {
 		service, err := NewService(cfg, nil, nil, nil)
@@ -163,8 +151,8 @@ func TestCurrentModelCommand_Registry(t *testing.T) {
 			t.Error("Initial state: GetDefault should equal GetConfigDefault")
 		}
 
-		if !registry.IsCurrentDefault("fast") {
-			t.Error("fast should be current default")
+		if !registry.IsCurrentDefault("openai.gpt-4o-mini") {
+			t.Error("openai.gpt-4o-mini should be current default")
 		}
 	})
 
@@ -178,24 +166,24 @@ func TestCurrentModelCommand_Registry(t *testing.T) {
 		registry := cmd.service.GetModelRegistry()
 
 		// 切换模型
-		_ = registry.SetDefault("smart")
+		_ = registry.SetDefault("openai.gpt-4o")
 
-		// 当前默认应该是 smart
-		if registry.GetDefault() != "smart" {
-			t.Errorf("GetDefault() = %q, want %q", registry.GetDefault(), "smart")
+		// 当前默认应该是 openai.gpt-4o
+		if registry.GetDefault() != "openai.gpt-4o" {
+			t.Errorf("GetDefault() = %q, want %q", registry.GetDefault(), "openai.gpt-4o")
 		}
 
-		// 配置默认仍然应该是 fast
-		if registry.GetConfigDefault() != "fast" {
-			t.Errorf("GetConfigDefault() = %q, want %q", registry.GetConfigDefault(), "fast")
+		// 配置默认仍然应该是 openai.gpt-4o-mini
+		if registry.GetConfigDefault() != "openai.gpt-4o-mini" {
+			t.Errorf("GetConfigDefault() = %q, want %q", registry.GetConfigDefault(), "openai.gpt-4o-mini")
 		}
 
 		// IsCurrentDefault 应该正确反映状态
-		if registry.IsCurrentDefault("fast") {
-			t.Error("fast should NOT be current default after switch")
+		if registry.IsCurrentDefault("openai.gpt-4o-mini") {
+			t.Error("openai.gpt-4o-mini should NOT be current default after switch")
 		}
-		if !registry.IsCurrentDefault("smart") {
-			t.Error("smart should be current default after switch")
+		if !registry.IsCurrentDefault("openai.gpt-4o") {
+			t.Error("openai.gpt-4o should be current default after switch")
 		}
 	})
 }

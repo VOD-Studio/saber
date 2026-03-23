@@ -401,18 +401,52 @@ func (a *AIConfig) Validate() error {
 	if !a.Enabled {
 		return nil
 	}
-	if a.Provider == "" {
-		return fmt.Errorf("provider is required when AI is enabled")
+
+	// 检查是否使用旧配置格式
+	usingOldFormat := len(a.Providers) == 0 && a.Provider != ""
+
+	// 如果使用旧格式，先验证旧格式的必填字段（保持错误消息一致性）
+	if usingOldFormat {
+		if a.BaseURL == "" {
+			return fmt.Errorf("base_url is required when AI is enabled")
+		}
+		if a.DefaultModel == "" {
+			return fmt.Errorf("default_model is required when AI is enabled")
+		}
+		// 执行迁移
+		a.migrateFromOldFormat()
 	}
-	if a.BaseURL == "" {
-		return fmt.Errorf("base_url is required when AI is enabled")
-	}
-	if a.APIKey == "" {
-		return fmt.Errorf("api_key is required when AI is enabled")
-	}
+
+	// 验证默认模型
 	if a.DefaultModel == "" {
 		return fmt.Errorf("default_model is required when AI is enabled")
 	}
+
+	// 验证默认模型格式和提供商存在性
+	provider, modelID, err := ParseModelID(a.DefaultModel)
+	if err != nil {
+		return fmt.Errorf("default_model: %w", err)
+	}
+	if _, ok := a.Providers[provider]; !ok {
+		return fmt.Errorf("default_model: provider %q not found in providers config", provider)
+	}
+
+	// 验证各提供商配置
+	for name, p := range a.Providers {
+		if err := p.Validate(name); err != nil {
+			return fmt.Errorf("providers.%s: %w", name, err)
+		}
+		// 检查默认模型是否存在于提供商的模型列表中
+		if name == provider {
+			if _, found := p.Models[modelID]; !found {
+				// 模型未显式配置，但允许使用（使用提供商默认配置）
+				slog.Debug("default model not explicitly configured in provider, will use provider defaults",
+					"provider", provider, "model", modelID)
+			}
+		}
+	}
+
+	// 验证基本参数
 	if a.Temperature < 0 || a.Temperature > 2 {
 		return fmt.Errorf("temperature must be between 0 and 2")
 	}
@@ -431,13 +465,53 @@ func (a *AIConfig) Validate() error {
 	if err := a.ToolCalling.Validate(); err != nil {
 		return fmt.Errorf("tool_calling: %w", err)
 	}
-	// 验证所有模型配置
+	// 验证所有模型别名配置
 	for name, modelCfg := range a.Models {
 		if err := modelCfg.Validate(); err != nil {
 			return fmt.Errorf("models[%s]: %w", name, err)
 		}
 	}
 	return nil
+}
+
+// migrateFromOldFormat 将旧配置格式迁移到新格式。
+// 这允许向后兼容，旧配置会自动转换为新结构。
+func (a *AIConfig) migrateFromOldFormat() {
+	slog.Info("migrating AI config from old format to multi-provider format",
+		"provider", a.Provider)
+
+	// 创建提供商配置
+	providerCfg := ProviderConfig{
+		Type:    a.Provider,
+		BaseURL: a.BaseURL,
+		APIKey:  a.APIKey,
+		Models:  make(map[string]ModelConfig),
+	}
+
+	// 迁移旧模型配置
+	for alias, modelCfg := range a.Models {
+		// 如果模型配置没有指定提供商，使用全局提供商
+		if modelCfg.Provider == "" || modelCfg.Provider == a.Provider {
+			// 将模型添加到提供商配置中
+			modelName := modelCfg.Model
+			if modelName == "" {
+				modelName = alias
+			}
+			providerCfg.Models[modelName] = modelCfg
+		}
+	}
+
+	a.Providers = map[string]ProviderConfig{
+		a.Provider: providerCfg,
+	}
+
+	// 更新 default_model 为完全限定格式
+	// 检查 DefaultModel 是否已经是完全限定格式
+	if _, _, err := ParseModelID(a.DefaultModel); err != nil {
+		a.DefaultModel = FormatModelID(a.Provider, a.DefaultModel)
+	}
+
+	slog.Debug("migration completed", "default_model", a.DefaultModel)
 }
 
 // Validate 验证工具调用配置是否有效
@@ -568,39 +642,42 @@ func (m *MemeConfig) Validate() error {
 	return nil
 }
 
-// GetModelConfig 获取指定模型的配置
+// GetModelConfig 获取指定模型的配置。
 //
-// 它首先查找模型特定配置，如果找到则返回继承全局配置后的模型配置。
-// 如果未找到特定配置，则返回基于全局配置的默认模型配置。
-//
-// 参数:
-//   - modelID: 模型标识符
+// 支持多种格式：
+//   - 完全限定名称（如 openai.gpt-4o-mini）：从 Providers 配置解析
+//   - 别名（如 fast）：从 Models map 获取
+//   - 简单模型名：使用旧的全局配置（向后兼容）
 //
 // 返回值:
 //   - ModelConfig: 合并后的模型配置
-//   - bool: 是否找到了特定配置（false 表示使用默认配置）
+//   - bool: 是否找到了显式配置
 func (a *AIConfig) GetModelConfig(modelID string) (ModelConfig, bool) {
+	// 1. 尝试解析为完全限定名称 (provider.model)
+	if provider, model, err := ParseModelID(modelID); err == nil {
+		if providerCfg, ok := a.Providers[provider]; ok {
+			modelCfg, found := providerCfg.GetModelConfig(model)
+			// 补充提供商级别的配置
+			modelCfg = a.mergeProviderConfig(modelCfg, providerCfg)
+			return modelCfg, found
+		}
+	}
+
+	// 2. 尝试从别名 Models map 查找
 	if config, ok := a.Models[modelID]; ok {
-		// 合并配置：特定配置优先，未设置的字段使用全局配置
-		if config.Provider == "" {
-			config.Provider = a.Provider
+		// 如果别名指定了提供商，尝试从 Providers 获取配置
+		if config.Provider != "" {
+			if providerCfg, ok := a.Providers[config.Provider]; ok {
+				merged := a.mergeProviderConfig(config, providerCfg)
+				return merged, true
+			}
 		}
-		if config.BaseURL == "" {
-			config.BaseURL = a.BaseURL
-		}
-		if config.APIKey == "" {
-			config.APIKey = a.APIKey
-		}
-		if config.MaxTokens == 0 {
-			config.MaxTokens = a.MaxTokens
-		}
-		if config.Temperature == 0 {
-			config.Temperature = a.Temperature
-		}
+		// 使用旧的全局配置合并（向后兼容）
+		config = a.mergeGlobalConfig(config)
 		return config, true
 	}
 
-	// 返回默认配置
+	// 3. 向后兼容：使用旧的全局配置
 	return ModelConfig{
 		Model:       modelID,
 		Provider:    a.Provider,
@@ -609,6 +686,48 @@ func (a *AIConfig) GetModelConfig(modelID string) (ModelConfig, bool) {
 		MaxTokens:   a.MaxTokens,
 		Temperature: a.Temperature,
 	}, false
+}
+
+// mergeProviderConfig 合并提供商配置到模型配置。
+func (a *AIConfig) mergeProviderConfig(cfg ModelConfig, providerCfg ProviderConfig) ModelConfig {
+	// Model 字段由调用方设置，这里不处理
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = providerCfg.BaseURL
+	}
+	if cfg.APIKey == "" {
+		cfg.APIKey = providerCfg.APIKey
+	}
+	if cfg.Provider == "" {
+		cfg.Provider = providerCfg.Type
+	}
+	// 继承全局默认值
+	if cfg.MaxTokens == 0 {
+		cfg.MaxTokens = a.MaxTokens
+	}
+	if cfg.Temperature == 0 {
+		cfg.Temperature = a.Temperature
+	}
+	return cfg
+}
+
+// mergeGlobalConfig 使用旧的全局配置合并模型配置（向后兼容）。
+func (a *AIConfig) mergeGlobalConfig(cfg ModelConfig) ModelConfig {
+	if cfg.Provider == "" {
+		cfg.Provider = a.Provider
+	}
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = a.BaseURL
+	}
+	if cfg.APIKey == "" {
+		cfg.APIKey = a.APIKey
+	}
+	if cfg.MaxTokens == 0 {
+		cfg.MaxTokens = a.MaxTokens
+	}
+	if cfg.Temperature == 0 {
+		cfg.Temperature = a.Temperature
+	}
+	return cfg
 }
 
 // DefaultConfigPath 返回默认配置文件路径

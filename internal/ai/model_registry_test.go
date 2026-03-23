@@ -23,43 +23,58 @@ func TestNewModelRegistry(t *testing.T) {
 			name: "空配置对象",
 			cfg: &config.AIConfig{
 				DefaultModel: "",
-				Models:       make(map[string]config.ModelConfig),
+				Providers:    make(map[string]config.ProviderConfig),
 			},
 			wantModelCount: 0,
 			wantDefault:    "",
 		},
 		{
-			name: "仅默认模型",
+			name: "仅默认模型（完全限定名称）",
 			cfg: &config.AIConfig{
-				DefaultModel: "gpt-4o-mini",
-				Models:       make(map[string]config.ModelConfig),
+				DefaultModel: "openai.gpt-4o-mini",
+				Providers:    make(map[string]config.ProviderConfig),
 			},
 			wantModelCount: 1,
-			wantDefault:    "gpt-4o-mini",
+			wantDefault:    "openai.gpt-4o-mini",
 		},
 		{
-			name: "默认模型和自定义模型",
+			name: "多提供商配置",
 			cfg: &config.AIConfig{
-				DefaultModel: "gpt-4o-mini",
-				Models: map[string]config.ModelConfig{
-					"fast":   {Model: "gpt-4o-mini"},
-					"smart":  {Model: "gpt-4o"},
-					"claude": {Model: "claude-3-opus"},
+				DefaultModel: "openai.gpt-4o-mini",
+				Providers: map[string]config.ProviderConfig{
+					"openai": {
+						BaseURL: "https://api.openai.com/v1",
+						Models: map[string]config.ModelConfig{
+							"gpt-4o-mini": {Model: "gpt-4o-mini"},
+							"gpt-4o":      {Model: "gpt-4o"},
+						},
+					},
+					"ollama": {
+						BaseURL: "http://localhost:11434/v1",
+						Models: map[string]config.ModelConfig{
+							"llama3": {Model: "llama3"},
+						},
+					},
 				},
 			},
-			wantModelCount: 4, // default + 3 custom
-			wantDefault:    "gpt-4o-mini",
+			wantModelCount: 3, // gpt-4o-mini, gpt-4o, llama3
+			wantDefault:    "openai.gpt-4o-mini",
 		},
 		{
-			name: "默认模型不在模型映射中",
+			name: "默认模型不在提供商模型列表中",
 			cfg: &config.AIConfig{
-				DefaultModel: "default-model",
-				Models: map[string]config.ModelConfig{
-					"fast": {Model: "gpt-4o-mini"},
+				DefaultModel: "openai.custom-model",
+				Providers: map[string]config.ProviderConfig{
+					"openai": {
+						BaseURL: "https://api.openai.com/v1",
+						Models: map[string]config.ModelConfig{
+							"gpt-4o-mini": {Model: "gpt-4o-mini"},
+						},
+					},
 				},
 			},
-			wantModelCount: 2,
-			wantDefault:    "default-model",
+			wantModelCount: 2, // custom-model + gpt-4o-mini
+			wantDefault:    "openai.custom-model",
 		},
 	}
 
@@ -88,67 +103,83 @@ func TestNewModelRegistry(t *testing.T) {
 
 func TestModelRegistry_SetDefault(t *testing.T) {
 	cfg := &config.AIConfig{
-		DefaultModel: "gpt-4o-mini",
-		Models: map[string]config.ModelConfig{
-			"fast":  {Model: "gpt-4o-mini"},
-			"smart": {Model: "gpt-4o"},
+		DefaultModel: "openai.gpt-4o-mini",
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				BaseURL: "https://api.openai.com/v1",
+				Models: map[string]config.ModelConfig{
+					"gpt-4o-mini": {Model: "gpt-4o-mini"},
+					"gpt-4o":      {Model: "gpt-4o"},
+				},
+			},
 		},
 	}
 
 	registry := NewModelRegistry(cfg)
 
 	// 初始默认模型
-	if got := registry.GetDefault(); got != "gpt-4o-mini" {
-		t.Fatalf("initial default = %q, want %q", got, "gpt-4o-mini")
+	if got := registry.GetDefault(); got != "openai.gpt-4o-mini" {
+		t.Fatalf("initial default = %q, want %q", got, "openai.gpt-4o-mini")
 	}
 
 	// 切换到已存在的模型
-	if err := registry.SetDefault("smart"); err != nil {
-		t.Errorf("SetDefault(\"smart\") error = %v", err)
+	if err := registry.SetDefault("openai.gpt-4o"); err != nil {
+		t.Errorf("SetDefault(\"openai.gpt-4o\") error = %v", err)
 	}
-	if got := registry.GetDefault(); got != "smart" {
-		t.Errorf("after SetDefault(\"smart\") = %q, want %q", got, "smart")
+	if got := registry.GetDefault(); got != "openai.gpt-4o" {
+		t.Errorf("after SetDefault(\"openai.gpt-4o\") = %q, want %q", got, "openai.gpt-4o")
 	}
 
 	// 切换到不存在的模型（应该允许）
-	if err := registry.SetDefault("custom-model"); err != nil {
-		t.Errorf("SetDefault(\"custom-model\") error = %v", err)
+	if err := registry.SetDefault("openai.custom-model"); err != nil {
+		t.Errorf("SetDefault(\"openai.custom-model\") error = %v", err)
 	}
-	if got := registry.GetDefault(); got != "custom-model" {
-		t.Errorf("after SetDefault(\"custom-model\") = %q, want %q", got, "custom-model")
+	if got := registry.GetDefault(); got != "openai.custom-model" {
+		t.Errorf("after SetDefault(\"openai.custom-model\") = %q, want %q", got, "openai.custom-model")
 	}
 }
 
 func TestModelRegistry_ResetDefault(t *testing.T) {
 	cfg := &config.AIConfig{
-		DefaultModel: "gpt-4o-mini",
-		Models: map[string]config.ModelConfig{
-			"fast": {Model: "gpt-4o-mini"},
+		DefaultModel: "openai.gpt-4o-mini",
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				BaseURL: "https://api.openai.com/v1",
+				Models: map[string]config.ModelConfig{
+					"gpt-4o-mini": {Model: "gpt-4o-mini"},
+				},
+			},
 		},
 	}
 
 	registry := NewModelRegistry(cfg)
 
 	// 切换默认模型
-	_ = registry.SetDefault("fast")
-	if got := registry.GetDefault(); got != "fast" {
-		t.Fatalf("after SetDefault = %q, want %q", got, "fast")
+	_ = registry.SetDefault("openai.gpt-4o-mini")
+	if got := registry.GetDefault(); got != "openai.gpt-4o-mini" {
+		t.Fatalf("after SetDefault = %q, want %q", got, "openai.gpt-4o-mini")
 	}
 
 	// 重置
 	registry.ResetDefault()
-	if got := registry.GetDefault(); got != "gpt-4o-mini" {
-		t.Errorf("after ResetDefault() = %q, want %q", got, "gpt-4o-mini")
+	if got := registry.GetDefault(); got != "openai.gpt-4o-mini" {
+		t.Errorf("after ResetDefault() = %q, want %q", got, "openai.gpt-4o-mini")
 	}
 }
 
 func TestModelRegistry_ListModels(t *testing.T) {
 	cfg := &config.AIConfig{
-		DefaultModel: "default",
-		Models: map[string]config.ModelConfig{
-			"zebra": {Model: "model-z"},
-			"apple": {Model: "model-a"},
-			"mango": {Model: "model-m"},
+		DefaultModel: "openai.default",
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				BaseURL: "https://api.openai.com/v1",
+				Models: map[string]config.ModelConfig{
+					"apple":  {Model: "model-a"},
+					"mango":  {Model: "model-m"},
+					"zebra":  {Model: "model-z"},
+					"default": {Model: "default-model"},
+				},
+			},
 		},
 	}
 
@@ -156,12 +187,12 @@ func TestModelRegistry_ListModels(t *testing.T) {
 	models := registry.ListModels()
 
 	// 检查排序
-	if len(models) != 4 { // default + 3 models
+	if len(models) != 4 {
 		t.Fatalf("ListModels() count = %d, want 4", len(models))
 	}
 
 	// 验证按 ID 字母顺序排序
-	expectedOrder := []string{"apple", "default", "mango", "zebra"}
+	expectedOrder := []string{"openai.apple", "openai.default", "openai.mango", "openai.zebra"}
 	for i, m := range models {
 		if m.ID != expectedOrder[i] {
 			t.Errorf("models[%d].ID = %q, want %q", i, m.ID, expectedOrder[i])
@@ -171,81 +202,93 @@ func TestModelRegistry_ListModels(t *testing.T) {
 
 func TestModelRegistry_GetModelInfo(t *testing.T) {
 	cfg := &config.AIConfig{
-		DefaultModel: "default",
-		Models: map[string]config.ModelConfig{
-			"fast": {Model: "gpt-4o-mini"},
+		DefaultModel: "openai.default",
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				BaseURL: "https://api.openai.com/v1",
+				Models: map[string]config.ModelConfig{
+					"fast":    {Model: "gpt-4o-mini"},
+					"default": {Model: "default-model"},
+				},
+			},
 		},
 	}
 
 	registry := NewModelRegistry(cfg)
 
 	// 获取存在的模型
-	info, exists := registry.GetModelInfo("fast")
+	info, exists := registry.GetModelInfo("openai.fast")
 	if !exists {
-		t.Fatal("GetModelInfo(\"fast\") exists = false, want true")
+		t.Fatal("GetModelInfo(\"openai.fast\") exists = false, want true")
 	}
-	if info.ID != "fast" {
-		t.Errorf("info.ID = %q, want %q", info.ID, "fast")
+	if info.ID != "openai.fast" {
+		t.Errorf("info.ID = %q, want %q", info.ID, "openai.fast")
 	}
 	if info.Model != "gpt-4o-mini" {
 		t.Errorf("info.Model = %q, want %q", info.Model, "gpt-4o-mini")
 	}
 
 	// 获取不存在的模型
-	_, exists = registry.GetModelInfo("nonexistent")
+	_, exists = registry.GetModelInfo("openai.nonexistent")
 	if exists {
-		t.Error("GetModelInfo(\"nonexistent\") exists = true, want false")
+		t.Error("GetModelInfo(\"openai.nonexistent\") exists = true, want false")
 	}
 }
 
 func TestModelRegistry_IsCurrentDefault(t *testing.T) {
 	cfg := &config.AIConfig{
-		DefaultModel: "default",
-		Models: map[string]config.ModelConfig{
-			"fast": {Model: "gpt-4o-mini"},
+		DefaultModel: "openai.default",
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				BaseURL: "https://api.openai.com/v1",
+				Models: map[string]config.ModelConfig{
+					"fast":    {Model: "gpt-4o-mini"},
+					"default": {Model: "default-model"},
+				},
+			},
 		},
 	}
 
 	registry := NewModelRegistry(cfg)
 
 	// 检查初始默认模型
-	if !registry.IsCurrentDefault("default") {
-		t.Error("IsCurrentDefault(\"default\") = false, want true")
+	if !registry.IsCurrentDefault("openai.default") {
+		t.Error("IsCurrentDefault(\"openai.default\") = false, want true")
 	}
-	if registry.IsCurrentDefault("fast") {
-		t.Error("IsCurrentDefault(\"fast\") = true, want false")
+	if registry.IsCurrentDefault("openai.fast") {
+		t.Error("IsCurrentDefault(\"openai.fast\") = true, want false")
 	}
 
 	// 切换后检查
-	_ = registry.SetDefault("fast")
-	if registry.IsCurrentDefault("default") {
-		t.Error("after switch, IsCurrentDefault(\"default\") = true, want false")
+	_ = registry.SetDefault("openai.fast")
+	if registry.IsCurrentDefault("openai.default") {
+		t.Error("after switch, IsCurrentDefault(\"openai.default\") = true, want false")
 	}
-	if !registry.IsCurrentDefault("fast") {
-		t.Error("after switch, IsCurrentDefault(\"fast\") = false, want true")
+	if !registry.IsCurrentDefault("openai.fast") {
+		t.Error("after switch, IsCurrentDefault(\"openai.fast\") = false, want true")
 	}
 }
 
 func TestModelRegistry_RegisterModel(t *testing.T) {
 	cfg := &config.AIConfig{
-		DefaultModel: "default",
-		Models:       make(map[string]config.ModelConfig),
+		DefaultModel: "openai.default",
+		Providers:    make(map[string]config.ProviderConfig),
 	}
 
 	registry := NewModelRegistry(cfg)
 	initialCount := len(registry.ListModels())
 
 	// 注册新模型
-	registry.RegisterModel("new-model", "gpt-4")
+	registry.RegisterModel("openai.new-model", "gpt-4")
 
 	models := registry.ListModels()
 	if len(models) != initialCount+1 {
 		t.Errorf("after RegisterModel, count = %d, want %d", len(models), initialCount+1)
 	}
 
-	info, exists := registry.GetModelInfo("new-model")
+	info, exists := registry.GetModelInfo("openai.new-model")
 	if !exists {
-		t.Fatal("GetModelInfo(\"new-model\") exists = false, want true")
+		t.Fatal("GetModelInfo(\"openai.new-model\") exists = false, want true")
 	}
 	if info.Model != "gpt-4" {
 		t.Errorf("info.Model = %q, want %q", info.Model, "gpt-4")
@@ -254,27 +297,33 @@ func TestModelRegistry_RegisterModel(t *testing.T) {
 
 func TestModelRegistry_ValidateModel(t *testing.T) {
 	cfg := &config.AIConfig{
-		DefaultModel: "default",
-		Models: map[string]config.ModelConfig{
-			"fast": {Model: "gpt-4o-mini"},
+		DefaultModel: "openai.default",
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				BaseURL: "https://api.openai.com/v1",
+				Models: map[string]config.ModelConfig{
+					"fast":    {Model: "gpt-4o-mini"},
+					"default": {Model: "default-model"},
+				},
+			},
 		},
 	}
 
 	registry := NewModelRegistry(cfg)
 
 	// 验证存在的模型
-	if err := registry.ValidateModel("fast"); err != nil {
-		t.Errorf("ValidateModel(\"fast\") error = %v, want nil", err)
+	if err := registry.ValidateModel("openai.fast"); err != nil {
+		t.Errorf("ValidateModel(\"openai.fast\") error = %v, want nil", err)
 	}
 
 	// 验证默认模型
-	if err := registry.ValidateModel("default"); err != nil {
-		t.Errorf("ValidateModel(\"default\") error = %v, want nil", err)
+	if err := registry.ValidateModel("openai.default"); err != nil {
+		t.Errorf("ValidateModel(\"openai.default\") error = %v, want nil", err)
 	}
 
 	// 验证不存在的模型（全局配置存在，应该允许）
-	if err := registry.ValidateModel("any-model"); err != nil {
-		t.Errorf("ValidateModel(\"any-model\") error = %v, want nil (global config allows)", err)
+	if err := registry.ValidateModel("openai.any-model"); err != nil {
+		t.Errorf("ValidateModel(\"openai.any-model\") error = %v, want nil (global config allows)", err)
 	}
 }
 
@@ -289,10 +338,16 @@ func TestModelRegistry_ValidateModel_NilConfig(t *testing.T) {
 
 func TestModelRegistry_Concurrency(t *testing.T) {
 	cfg := &config.AIConfig{
-		DefaultModel: "default",
-		Models: map[string]config.ModelConfig{
-			"fast":  {Model: "gpt-4o-mini"},
-			"smart": {Model: "gpt-4o"},
+		DefaultModel: "openai.default",
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				BaseURL: "https://api.openai.com/v1",
+				Models: map[string]config.ModelConfig{
+					"fast":    {Model: "gpt-4o-mini"},
+					"smart":   {Model: "gpt-4o"},
+					"default": {Model: "default"},
+				},
+			},
 		},
 	}
 
@@ -304,7 +359,7 @@ func TestModelRegistry_Concurrency(t *testing.T) {
 	// 并发 SetDefault
 	for i := 0; i < 10; i++ {
 		go func(idx int) {
-			modelID := "model-" + string(rune('a'+idx))
+			modelID := "openai.model-" + string(rune('a'+idx))
 			_ = registry.SetDefault(modelID)
 			done <- true
 		}(i)
@@ -334,10 +389,15 @@ func TestModelRegistry_Concurrency(t *testing.T) {
 
 func TestModelInfo_IsConfigDefault(t *testing.T) {
 	cfg := &config.AIConfig{
-		DefaultModel: "fast",
-		Models: map[string]config.ModelConfig{
-			"fast":  {Model: "gpt-4o-mini"},
-			"smart": {Model: "gpt-4o"},
+		DefaultModel: "openai.fast",
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				BaseURL: "https://api.openai.com/v1",
+				Models: map[string]config.ModelConfig{
+					"fast":  {Model: "gpt-4o-mini"},
+					"smart": {Model: "gpt-4o"},
+				},
+			},
 		},
 	}
 
@@ -345,11 +405,11 @@ func TestModelInfo_IsConfigDefault(t *testing.T) {
 	models := registry.ListModels()
 
 	for _, m := range models {
-		if m.ID == "fast" && !m.IsConfigDefault {
-			t.Error("fast model should have IsConfigDefault = true")
+		if m.ID == "openai.fast" && !m.IsConfigDefault {
+			t.Error("openai.fast model should have IsConfigDefault = true")
 		}
-		if m.ID == "smart" && m.IsConfigDefault {
-			t.Error("smart model should have IsConfigDefault = false")
+		if m.ID == "openai.smart" && m.IsConfigDefault {
+			t.Error("openai.smart model should have IsConfigDefault = false")
 		}
 	}
 }

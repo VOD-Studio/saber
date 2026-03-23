@@ -54,27 +54,57 @@ func NewModelRegistry(cfg *config.AIConfig) *ModelRegistry {
 
 	models := make(map[string]ModelInfo)
 
-	// 将配置文件中的默认模型添加到注册表
-	if cfg.DefaultModel != "" {
-		models[cfg.DefaultModel] = ModelInfo{
-			ID:              cfg.DefaultModel,
-			Model:           cfg.DefaultModel,
-			IsConfigDefault: true,
+	// 从 Providers 收集所有模型
+	for providerName, providerCfg := range cfg.Providers {
+		for modelName, modelCfg := range providerCfg.Models {
+			fullID := config.FormatModelID(providerName, modelName)
+			actualModel := modelCfg.Model
+			if actualModel == "" {
+				actualModel = modelName
+			}
+			models[fullID] = ModelInfo{
+				ID:              fullID,
+				Model:           actualModel,
+				IsConfigDefault: fullID == cfg.DefaultModel,
+			}
 		}
 	}
 
-	// 添加 Models map 中定义的所有模型
-	for id, modelConfig := range cfg.Models {
-		info := ModelInfo{
-			ID:              id,
-			Model:           modelConfig.Model,
-			IsConfigDefault: id == cfg.DefaultModel,
+	// 将配置文件中的默认模型添加到注册表（如果尚未添加）
+	if cfg.DefaultModel != "" {
+		if _, exists := models[cfg.DefaultModel]; !exists {
+			// 解析默认模型
+			_, model, err := config.ParseModelID(cfg.DefaultModel)
+			if err == nil {
+				models[cfg.DefaultModel] = ModelInfo{
+					ID:              cfg.DefaultModel,
+					Model:           model,
+					IsConfigDefault: true,
+				}
+			} else {
+				// 旧格式，直接使用
+				models[cfg.DefaultModel] = ModelInfo{
+					ID:              cfg.DefaultModel,
+					Model:           cfg.DefaultModel,
+					IsConfigDefault: true,
+				}
+			}
 		}
-		// 如果模型 ID 与配置默认模型相同，标记为默认
-		if id == cfg.DefaultModel {
-			info.IsConfigDefault = true
+	}
+
+	// 添加 Models map 中定义的模型别名（向后兼容）
+	for alias, modelConfig := range cfg.Models {
+		// 如果别名已经是完全限定格式，直接使用
+		if _, _, err := config.ParseModelID(alias); err == nil {
+			if _, exists := models[alias]; !exists {
+				models[alias] = ModelInfo{
+					ID:              alias,
+					Model:           modelConfig.Model,
+					IsConfigDefault: alias == cfg.DefaultModel,
+				}
+			}
 		}
-		models[id] = info
+		// 别名作为快捷方式保留在 Models map 中，由 GetModelConfig 处理
 	}
 
 	return &ModelRegistry{
