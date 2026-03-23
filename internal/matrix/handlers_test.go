@@ -1970,7 +1970,7 @@ func TestHandleReply_ReferencedImage(t *testing.T) {
 
 // mustMarshalImageEvent 将图片事件信息序列化为 Matrix API 返回的 JSON 格式。
 func mustMarshalImageEvent(sender id.UserID, eventID id.EventID, body, mimeType, mxcURL string) []byte {
-	event := map[string]any{
+	evt := map[string]any{
 		"sender":   string(sender),
 		"event_id": string(eventID),
 		"type":     "m.room.message",
@@ -1984,9 +1984,347 @@ func mustMarshalImageEvent(sender id.UserID, eventID id.EventID, body, mimeType,
 		},
 		"origin_server_ts": 1234567890,
 	}
-	data, err := json.Marshal(event)
+	data, err := json.Marshal(evt)
 	if err != nil {
 		panic(err)
 	}
 	return data
+}
+
+// TestCommandService_ListCommands 测试 ListCommands 方法。
+func TestCommandService_ListCommands(t *testing.T) {
+	botUserID := id.UserID("@saber:example.com")
+	homeserverURL, _ := url.Parse("https://example.com")
+	client := &mautrix.Client{
+		UserID:        botUserID,
+		HomeserverURL: homeserverURL,
+	}
+
+	service := NewCommandService(client, botUserID, nil)
+
+	// 初始状态应该没有命令
+	commands := service.ListCommands()
+	if len(commands) != 0 {
+		t.Errorf("expected 0 commands initially, got %d", len(commands))
+	}
+
+	// 注册一些命令
+	service.RegisterCommandWithDesc("ping", "Ping command", &mockCommandHandler{})
+	service.RegisterCommandWithDesc("help", "Help command", &mockCommandHandler{})
+	service.RegisterCommandWithDesc("ai", "AI command", &mockCommandHandler{})
+
+	commands = service.ListCommands()
+	if len(commands) != 3 {
+		t.Errorf("expected 3 commands, got %d", len(commands))
+	}
+
+	// 验证命令存在
+	commandNames := make(map[string]bool)
+	for _, cmd := range commands {
+		commandNames[cmd.Name] = true
+	}
+
+	for _, expected := range []string{"ping", "help", "ai"} {
+		if !commandNames[expected] {
+			t.Errorf("expected command %s not found", expected)
+		}
+	}
+}
+
+// TestCommandService_UnregisterCommand 测试 UnregisterCommand 方法。
+func TestCommandService_UnregisterCommand(t *testing.T) {
+	botUserID := id.UserID("@saber:example.com")
+	homeserverURL, _ := url.Parse("https://example.com")
+	client := &mautrix.Client{
+		UserID:        botUserID,
+		HomeserverURL: homeserverURL,
+	}
+
+	service := NewCommandService(client, botUserID, nil)
+
+	// 注册命令
+	service.RegisterCommandWithDesc("ping", "Ping command", &mockCommandHandler{})
+	service.RegisterCommandWithDesc("help", "Help command", &mockCommandHandler{})
+
+	// 验证注册成功
+	if len(service.ListCommands()) != 2 {
+		t.Errorf("expected 2 commands, got %d", len(service.ListCommands()))
+	}
+
+	// 注销命令
+	service.UnregisterCommand("ping")
+
+	// 验证注销成功
+	commands := service.ListCommands()
+	if len(commands) != 1 {
+		t.Errorf("expected 1 command after unregister, got %d", len(commands))
+	}
+
+	// 验证剩余的命令
+	if _, ok := service.GetCommand("ping"); ok {
+		t.Error("ping command should be unregistered")
+	}
+
+	if _, ok := service.GetCommand("help"); !ok {
+		t.Error("help command should still exist")
+	}
+}
+
+// TestCommandService_BotID 测试 BotID 方法。
+func TestCommandService_BotID(t *testing.T) {
+	botUserID := id.UserID("@saber:example.com")
+	homeserverURL, _ := url.Parse("https://example.com")
+	client := &mautrix.Client{
+		UserID:        botUserID,
+		HomeserverURL: homeserverURL,
+	}
+
+	service := NewCommandService(client, botUserID, nil)
+
+	if service.BotID() != botUserID {
+		t.Errorf("expected bot ID %s, got %s", botUserID, service.BotID())
+	}
+}
+
+// TestCommandService_GetBuildInfo 测试 GetBuildInfo 方法。
+func TestCommandService_GetBuildInfo(t *testing.T) {
+	botUserID := id.UserID("@saber:example.com")
+	homeserverURL, _ := url.Parse("https://example.com")
+	client := &mautrix.Client{
+		UserID:        botUserID,
+		HomeserverURL: homeserverURL,
+	}
+
+	buildInfo := &BuildInfo{
+		Version:       "1.0.0",
+		GitCommit:     "abc123",
+		GitBranch:     "main",
+		BuildTime:     "2024-01-01",
+		GoVersion:     "go1.21.0",
+		BuildPlatform: "linux/amd64",
+	}
+
+	service := NewCommandService(client, botUserID, buildInfo)
+
+	gotInfo := service.GetBuildInfo()
+	if gotInfo == nil {
+		t.Fatal("GetBuildInfo returned nil")
+	}
+
+	if gotInfo.Version != buildInfo.Version {
+		t.Errorf("expected version %s, got %s", buildInfo.Version, gotInfo.Version)
+	}
+
+	if gotInfo.GitCommit != buildInfo.GitCommit {
+		t.Errorf("expected git commit %s, got %s", buildInfo.GitCommit, gotInfo.GitCommit)
+	}
+}
+
+// TestCommandService_ParseMentionCommand 测试 parseMentionCommand 方法。
+func TestCommandService_ParseMentionCommand(t *testing.T) {
+	botUserID := id.UserID("@saber:example.com")
+	homeserverURL, _ := url.Parse("https://example.com")
+	client := &mautrix.Client{
+		UserID:        botUserID,
+		HomeserverURL: homeserverURL,
+	}
+
+	service := NewCommandService(client, botUserID, nil)
+
+	tests := []struct {
+		name          string
+		input         string
+		expectNil     bool
+		expectCommand string
+		expectArgs    []string
+	}{
+		{
+			name:          "valid mention with command",
+			input:         "@saber:example.com help",
+			expectNil:     false,
+			expectCommand: "help",
+			expectArgs:    []string{},
+		},
+		{
+			name:          "valid mention with command and args",
+			input:         "@saber:example.com ai hello world",
+			expectNil:     false,
+			expectCommand: "ai",
+			expectArgs:    []string{"hello", "world"},
+		},
+		{
+			name:          "mention with trailing colon",
+			input:         "@saber:example.com: ping",
+			expectNil:     false,
+			expectCommand: "ping",
+			expectArgs:    []string{},
+		},
+		{
+			name:      "wrong bot mention",
+			input:     "@other:example.com help",
+			expectNil: true,
+		},
+		{
+			name:      "mention without command",
+			input:     "@saber:example.com",
+			expectNil: true,
+		},
+		{
+			name:      "empty string",
+			input:     "",
+			expectNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := service.ParseCommand(tt.input)
+
+			if tt.expectNil {
+				if result != nil {
+					t.Errorf("expected nil result, got %+v", result)
+				}
+				return
+			}
+
+			if result == nil {
+				t.Fatalf("expected non-nil result")
+			}
+
+			if result.Command != tt.expectCommand {
+				t.Errorf("expected command %s, got %s", tt.expectCommand, result.Command)
+			}
+
+			if len(result.Args) != len(tt.expectArgs) {
+				t.Errorf("expected %d args, got %d", len(tt.expectArgs), len(result.Args))
+			}
+
+			for i, arg := range tt.expectArgs {
+				if i < len(result.Args) && result.Args[i] != arg {
+					t.Errorf("expected arg[%d] = %s, got %s", i, arg, result.Args[i])
+				}
+			}
+		})
+	}
+}
+
+// TestBuildInfo_RuntimePlatform 测试 RuntimePlatform 方法。
+func TestBuildInfo_RuntimePlatform(t *testing.T) {
+	info := BuildInfo{
+		Version:       "1.0.0",
+		GitCommit:     "abc123",
+		GitBranch:     "main",
+		BuildTime:     "2024-01-01",
+		GoVersion:     "go1.21.0",
+		BuildPlatform: "linux/amd64",
+	}
+
+	platform := info.RuntimePlatform()
+	if platform == "" {
+		t.Error("RuntimePlatform returned empty string")
+	}
+
+	// 应该包含 GOOS/GOARCH 格式
+	if !strings.Contains(platform, "/") {
+		t.Errorf("RuntimePlatform should contain '/', got %s", platform)
+	}
+}
+
+// TestCommandService_SetMethods 测试各种 Set 方法。
+func TestCommandService_SetMethods(t *testing.T) {
+	botUserID := id.UserID("@saber:example.com")
+	homeserverURL, _ := url.Parse("https://example.com")
+	client := &mautrix.Client{
+		UserID:        botUserID,
+		HomeserverURL: homeserverURL,
+	}
+
+	service := NewCommandService(client, botUserID, nil)
+
+	// 测试 SetDirectChatAIHandler
+	mockHandler := &mockCommandHandler{}
+	service.SetDirectChatAIHandler(mockHandler)
+	if service.directChatAI != mockHandler {
+		t.Error("SetDirectChatAIHandler failed")
+	}
+
+	// 测试 SetMentionAIHandler
+	service.SetMentionAIHandler(mockHandler)
+	if service.mentionAI != mockHandler {
+		t.Error("SetMentionAIHandler failed")
+	}
+
+	// 测试 SetReplyAIHandler
+	service.SetReplyAIHandler(mockHandler)
+	if service.replyAI != mockHandler {
+		t.Error("SetReplyAIHandler failed")
+	}
+}
+
+// TestCommandService_GetCommand 测试 GetCommand 方法。
+func TestCommandService_GetCommand(t *testing.T) {
+	botUserID := id.UserID("@saber:example.com")
+	homeserverURL, _ := url.Parse("https://example.com")
+	client := &mautrix.Client{
+		UserID:        botUserID,
+		HomeserverURL: homeserverURL,
+	}
+
+	service := NewCommandService(client, botUserID, nil)
+	mockHandler := &mockCommandHandler{}
+	service.RegisterCommandWithDesc("test", "Test command", mockHandler)
+
+	// 测试获取存在的命令
+	info, ok := service.GetCommand("test")
+	if !ok {
+		t.Error("expected to find test command")
+	}
+	if info.Name != "test" {
+		t.Errorf("expected name 'test', got %s", info.Name)
+	}
+	if info.Handler != mockHandler {
+		t.Error("handler mismatch")
+	}
+
+	// 测试获取不存在的命令
+	_, ok = service.GetCommand("nonexistent")
+	if ok {
+		t.Error("expected not to find nonexistent command")
+	}
+
+	// 测试大小写不敏感
+	info, ok = service.GetCommand("TEST")
+	if !ok {
+		t.Error("expected case-insensitive match")
+	}
+	if info.Name != "test" {
+		t.Errorf("expected name 'test', got %s", info.Name)
+	}
+}
+
+// TestCommandService_RegisterCommand 测试 RegisterCommand 方法。
+func TestCommandService_RegisterCommand(t *testing.T) {
+	botUserID := id.UserID("@saber:example.com")
+	homeserverURL, _ := url.Parse("https://example.com")
+	client := &mautrix.Client{
+		UserID:        botUserID,
+		HomeserverURL: homeserverURL,
+	}
+
+	service := NewCommandService(client, botUserID, nil)
+	mockHandler := &mockCommandHandler{}
+
+	// 使用 RegisterCommand（不带描述）
+	service.RegisterCommand("test", mockHandler)
+
+	info, ok := service.GetCommand("test")
+	if !ok {
+		t.Error("expected to find test command")
+	}
+	if info.Name != "test" {
+		t.Errorf("expected name 'test', got %s", info.Name)
+	}
+	if info.Description != "" {
+		t.Errorf("expected empty description, got %s", info.Description)
+	}
 }
