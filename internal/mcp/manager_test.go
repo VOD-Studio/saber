@@ -9,6 +9,7 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"rua.plus/saber/internal/config"
+	appcontext "rua.plus/saber/internal/context"
 )
 
 func TestNewManager(t *testing.T) {
@@ -137,34 +138,34 @@ func TestWithUserContext(t *testing.T) {
 	userID := id.UserID("@alice:example.com")
 	roomID := id.RoomID("!room:example.com")
 
-	ctx = WithUserContext(ctx, userID, roomID)
+	ctx = appcontext.WithUserContext(ctx, userID, roomID)
 
-	extractedUser := GetUserFromContext(ctx)
-	if extractedUser != userID {
-		t.Errorf("GetUserFromContext() = %q, want %q", extractedUser, userID)
+	extractedUser, ok := appcontext.GetUserFromContext(ctx)
+	if !ok || extractedUser != userID {
+		t.Errorf("GetUserFromContext() = %q, ok = %v, want %q", extractedUser, ok, userID)
 	}
 
-	extractedRoom := GetRoomFromContext(ctx)
-	if extractedRoom != roomID {
-		t.Errorf("GetRoomFromContext() = %q, want %q", extractedRoom, roomID)
+	extractedRoom, ok := appcontext.GetRoomFromContext(ctx)
+	if !ok || extractedRoom != roomID {
+		t.Errorf("GetRoomFromContext() = %q, ok = %v, want %q", extractedRoom, ok, roomID)
 	}
 }
 
 func TestGetUserFromContext_Missing(t *testing.T) {
 	ctx := context.Background()
 
-	userID := GetUserFromContext(ctx)
-	if userID != "" {
-		t.Errorf("GetUserFromContext() = %q, want empty string", userID)
+	userID, ok := appcontext.GetUserFromContext(ctx)
+	if ok {
+		t.Errorf("GetUserFromContext() = %q, ok = %v, want ok = false", userID, ok)
 	}
 }
 
 func TestGetRoomFromContext_Missing(t *testing.T) {
 	ctx := context.Background()
 
-	roomID := GetRoomFromContext(ctx)
-	if roomID != "" {
-		t.Errorf("GetRoomFromContext() = %q, want empty string", roomID)
+	roomID, ok := appcontext.GetRoomFromContext(ctx)
+	if ok {
+		t.Errorf("GetRoomFromContext() = %q, ok = %v, want ok = false", roomID, ok)
 	}
 }
 
@@ -183,15 +184,6 @@ func TestServerInfo(t *testing.T) {
 	}
 	if !info.Enabled {
 		t.Error("Enabled should be true")
-	}
-}
-
-func TestContextKeys(t *testing.T) {
-	if UserContextKey != "userID" {
-		t.Errorf("UserContextKey = %q, want %q", UserContextKey, "userID")
-	}
-	if RoomContextKey != "roomID" {
-		t.Errorf("RoomContextKey = %q, want %q", RoomContextKey, "roomID")
 	}
 }
 
@@ -218,7 +210,7 @@ func TestManager_CallTool_MissingContext(t *testing.T) {
 func TestManager_CallTool_NonexistentServer(t *testing.T) {
 	mgr := NewManagerWithBuiltin(nil)
 	ctx := context.Background()
-	ctx = WithUserContext(ctx, "@user:example.com", "!room:example.com")
+	ctx = appcontext.WithUserContext(ctx, "@user:example.com", "!room:example.com")
 
 	_, err := mgr.CallTool(ctx, "nonexistent", "tool", nil)
 	if err == nil {
@@ -268,7 +260,7 @@ func TestMockManager_CallTool(t *testing.T) {
 	mgr.RegisterTool(TestFixtures.EchoTool)
 
 	ctx := context.Background()
-	ctx = WithUserContext(ctx, "@user:example.com", "!room:example.com")
+	ctx = appcontext.WithUserContext(ctx, "@user:example.com", "!room:example.com")
 
 	result, err := mgr.CallTool(ctx, "mock", "echo", map[string]any{"message": "hello"})
 	if err != nil {
@@ -282,7 +274,7 @@ func TestMockManager_CallTool(t *testing.T) {
 func TestMockManager_CallTool_Disabled(t *testing.T) {
 	mgr := NewMockManager(false)
 	ctx := context.Background()
-	ctx = WithUserContext(ctx, "@user:example.com", "!room:example.com")
+	ctx = appcontext.WithUserContext(ctx, "@user:example.com", "!room:example.com")
 
 	_, err := mgr.CallTool(ctx, "mock", "echo", nil)
 	if err == nil {
@@ -360,13 +352,19 @@ func TestNewTestMCPServerWithFixtures(t *testing.T) {
 func TestNewTestUserContext(t *testing.T) {
 	ctx := NewTestUserContext(1, 2)
 
-	userID := GetUserFromContext(ctx)
+	userID, ok := appcontext.GetUserFromContext(ctx)
+	if !ok {
+		t.Error("GetUserFromContext should return ok=true")
+	}
 	expectedUser := id.UserID("@user1:example.com")
 	if userID != expectedUser {
 		t.Errorf("userID = %q, want %q", userID, expectedUser)
 	}
 
-	roomID := GetRoomFromContext(ctx)
+	roomID, ok := appcontext.GetRoomFromContext(ctx)
+	if !ok {
+		t.Error("GetRoomFromContext should return ok=true")
+	}
 	expectedRoom := id.RoomID("!room2:example.com")
 	if roomID != expectedRoom {
 		t.Errorf("roomID = %q, want %q", roomID, expectedRoom)
