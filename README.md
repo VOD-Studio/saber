@@ -630,6 +630,32 @@ make lint        # 运行代码检查
 make clean       # 清理构建产物
 ```
 
+### 基准测试
+
+运行基准测试：
+
+```bash
+make bench              # 运行所有基准测试
+make bench-ai           # 运行 AI 模块基准测试
+make bench-matrix       # 运行 Matrix 模块基准测试
+make bench-mcp          # 运行 MCP 模块基准测试
+```
+
+性能分析：
+
+```bash
+make bench-profile      # 生成 CPU/内存分析文件
+make pprof-cpu          # 查看 CPU 分析（浏览器）
+make pprof-mem          # 查看内存分析（浏览器）
+```
+
+性能回归检测：
+
+```bash
+make bench-save-baseline  # 保存当前性能作为基准
+make bench-compare        # 与基准比较性能变化
+```
+
 ### 构建模式说明
 
 项目支持两种 SQLite 实现，通过 CGO 开关选择：
