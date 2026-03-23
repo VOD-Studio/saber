@@ -931,7 +931,12 @@ func TestGenerateWelcomeMessage_IsDirect(t *testing.T) {
 		},
 	}
 
-	aiService := &Service{} // AI 未启用，使用默认消息
+	// 创建一个带有 globalConfig 的 Service，Enabled=false 表示 AI 未启用
+	aiService := &Service{
+		globalConfig: &config.AIConfig{
+			Enabled: false,
+		},
+	}
 	roomService := &matrix.RoomService{}
 	globalAIConfig := &config.AIConfig{}
 
