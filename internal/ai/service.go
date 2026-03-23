@@ -28,15 +28,9 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"rua.plus/saber/internal/config"
+	appcontext "rua.plus/saber/internal/context"
 	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/mcp"
-)
-
-type contextKey string
-
-const (
-	userIDKey contextKey = "userID"
-	roomIDKey contextKey = "roomID"
 )
 
 // ResponseMode 表示 AI 响应模式。
@@ -91,58 +85,6 @@ func determineResponseMode(streamEnabled, streamEdit, useToolCall bool) Response
 		return ResponseModeToolCalling
 	}
 	return ResponseModeDirect
-}
-
-// WithUserContext 将用户 ID 和房间 ID 添加到上下文中。
-//
-// 这允许在请求链中传递用户和房间信息，供后续处理使用。
-// 通常在处理 Matrix 事件时调用，将事件来源信息注入上下文。
-//
-// 参数:
-//   - ctx: 原始上下文
-//   - userID: Matrix 用户 ID（如 @user:matrix.org）
-//   - roomID: Matrix 房间 ID（如 !room:matrix.org）
-//
-// 返回值:
-//   - context.Context: 包含用户和房间信息的新上下文
-//
-// 示例:
-//
-//	ctx := WithUserContext(context.Background(), userID, roomID)
-//	userID, ok := GetUserFromContext(ctx)
-func WithUserContext(ctx context.Context, userID id.UserID, roomID id.RoomID) context.Context {
-	ctx = context.WithValue(ctx, userIDKey, userID)
-	return context.WithValue(ctx, roomIDKey, roomID)
-}
-
-// GetUserFromContext 从上下文中提取用户 ID。
-//
-// 配合 WithUserContext 使用，用于在处理链中获取用户信息。
-//
-// 参数:
-//   - ctx: 包含用户信息的上下文（由 WithUserContext 创建）
-//
-// 返回值:
-//   - id.UserID: 用户 ID（如果存在）
-//   - bool: 是否存在用户 ID
-func GetUserFromContext(ctx context.Context) (id.UserID, bool) {
-	userID, ok := ctx.Value(userIDKey).(id.UserID)
-	return userID, ok
-}
-
-// GetRoomFromContext 从上下文中提取房间 ID。
-//
-// 配合 WithUserContext 使用，用于在处理链中获取房间信息。
-//
-// 参数:
-//   - ctx: 包含房间信息的上下文（由 WithUserContext 创建）
-//
-// 返回值:
-//   - id.RoomID: 房间 ID（如果存在）
-//   - bool: 是否存在房间 ID
-func GetRoomFromContext(ctx context.Context) (id.RoomID, bool) {
-	roomID, ok := ctx.Value(roomIDKey).(id.RoomID)
-	return roomID, ok
 }
 
 const maxToolIterations = 5
@@ -944,7 +886,7 @@ func (s *Service) buildMultiImageMessages(_ context.Context, roomID id.RoomID, u
 }
 
 func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID id.RoomID, modelName string, args []string) error {
-	ctx = mcp.WithUserContext(ctx, userID, roomID)
+	ctx = appcontext.WithUserContext(ctx, userID, roomID)
 
 	if !s.IsEnabled() {
 		return fmt.Errorf("AI功能未启用")
