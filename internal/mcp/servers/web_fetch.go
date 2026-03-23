@@ -11,12 +11,19 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // maxResponseBody 限制响应体大小（10MB）
 const maxResponseBody = 10 * 1024 * 1024
+
+// maxFetchTimeout 最大请求超时时间
+const maxFetchTimeout = 30 * time.Second
+
+// maxRedirects 最大重定向次数
+const maxRedirects = 10
 
 // 预编译正则表达式（避免每次调用时重复编译）
 var (
@@ -31,6 +38,22 @@ var (
 	metaRegex       = regexp.MustCompile(`(?i)<meta[^>]*/?>`)
 	baseRegex       = regexp.MustCompile(`(?i)<base[^>]*/?>`)
 	dangerousAttrs  = regexp.MustCompile(`(?i)\s+on\w+\s*=\s*["'][^"']*["']`)
+
+	// dangerousHostPatterns 危险主机名模式（用于 SSRF 防护）
+	// 这些主机名可能解析为内部服务或绕过 IP 过滤
+	dangerousHostPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)^localhost$`),
+		regexp.MustCompile(`(?i)^localtest\.me$`),
+		regexp.MustCompile(`(?i)^.*\.local$`),
+		regexp.MustCompile(`(?i)^.*\.localhost$`),
+		regexp.MustCompile(`(?i)^.*\.internal$`),
+		regexp.MustCompile(`(?i)^.*\.localdomain$`),
+		regexp.MustCompile(`(?i)^host\.docker\.internal$`),
+		regexp.MustCompile(`(?i)^.*\.kube$`),
+		regexp.MustCompile(`(?i)^kubernetes\.default$`),
+		regexp.MustCompile(`(?i)^kubernetes\.default\.svc$`),
+		regexp.MustCompile(`(?i)^.*\.svc\.cluster\.local$`),
+	}
 )
 
 // FetchInput 定义 fetch_url 工具的输入参数。
@@ -72,6 +95,53 @@ func cloneClientWithRedirect(base *http.Client, checkRedirect func(*http.Request
 	return cloned
 }
 
+// createSecureTransport 创建一个安全的 HTTP Transport，在连接时验证 IP 地址。
+//
+// 这提供了 DNS rebinding 防护：即使 DNS 解析返回了合法 IP，
+// 实际连接时也会验证目标 IP 是否为私有地址。
+func createSecureTransport() *http.Transport {
+	dialer := &net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// 解析地址中的主机名和端口
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, fmt.Errorf("地址解析失败: %w", err)
+			}
+
+			// DNS rebinding 防护：解析实际 IP 并验证
+			ips, err := net.LookupIP(host)
+			if err != nil {
+				return nil, fmt.Errorf("DNS 解析失败: %w", err)
+			}
+
+			// 检查所有解析出的 IP
+			for _, ip := range ips {
+				if isPrivateIP(ip) {
+					slog.Warn("DNS rebinding 检测：阻止连接到私有 IP",
+						"host", host,
+						"ip", ip.String(),
+						"port", port)
+					return nil, fmt.Errorf("DNS rebinding 防护：禁止连接到私有 IP 地址 %s", ip.String())
+				}
+			}
+
+			// 使用第一个有效 IP 建立连接
+			// 构造 IP:port 地址以避免二次 DNS 解析
+			targetAddr := net.JoinHostPort(ips[0].String(), port)
+			return dialer.DialContext(ctx, network, targetAddr)
+		},
+		MaxIdleConns:          10,
+		IdleConnTimeout:       30 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+}
+
 func handleFetchURL(ctx context.Context, _ *mcp.CallToolRequest, input FetchInput) (*mcp.CallToolResult, FetchOutput, error) {
 	// 验证 URL
 	if input.URL == "" {
@@ -108,18 +178,21 @@ func handleFetchURL(ctx context.Context, _ *mcp.CallToolRequest, input FetchInpu
 		input.Format = "text"
 	}
 
-	// 获取共享客户端并克隆以添加自定义 CheckRedirect
-	baseClient := GetSharedHTTPClient()
-	client := cloneClientWithRedirect(baseClient, func(req *http.Request, via []*http.Request) error {
-		if len(via) >= 10 {
-			return fmt.Errorf("重定向超过 10 次")
-		}
-		// 验证重定向目标
-		if err := validateHost(req.URL.Hostname()); err != nil {
-			return fmt.Errorf("重定向目标无效: %w", err)
-		}
-		return nil
-	})
+	// 创建安全的 HTTP 客户端，包含 DNS rebinding 防护
+	client := &http.Client{
+		Timeout:   maxFetchTimeout,
+		Transport: createSecureTransport(),
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxRedirects {
+				return fmt.Errorf("重定向超过 %d 次", maxRedirects)
+			}
+			// 验证重定向目标
+			if err := validateHost(req.URL.Hostname()); err != nil {
+				return fmt.Errorf("重定向目标无效: %w", err)
+			}
+			return nil
+		},
+	}
 
 	// 创建带上下文的请求
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", input.URL, nil)
@@ -166,17 +239,40 @@ func handleFetchURL(ctx context.Context, _ *mcp.CallToolRequest, input FetchInpu
 }
 
 // validateHost 验证主机名，阻止对私有 IP 地址的访问（SSRF 防护）。
+//
+// 验证步骤：
+// 1. 检查主机名是否匹配危险模式（localhost、*.local 等）
+// 2. 解析 DNS 获取 IP 地址
+// 3. 检查 IP 是否为私有地址
 func validateHost(host string) error {
-	// 解析主机名获取 IP 地址
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		// DNS 解析失败可能是域名不存在，让 HTTP 请求自行处理
+	// 1. 检查危险主机名模式
+	for _, pattern := range dangerousHostPatterns {
+		if pattern.MatchString(host) {
+			return fmt.Errorf("禁止访问危险主机名: %s", host)
+		}
+	}
+
+	// 2. 检查 IP 地址字面量（直接输入 IP 而非域名）
+	if ip := net.ParseIP(host); ip != nil {
+		if isPrivateIP(ip) {
+			return fmt.Errorf("禁止访问私有 IP 地址: %s", ip.String())
+		}
 		return nil
 	}
 
+	// 3. 解析主机名获取 IP 地址
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		// DNS 解析失败可能是域名不存在，让 HTTP 请求自行处理
+		// 但记录日志以便审计
+		slog.Debug("DNS 解析失败，将交由 HTTP 请求处理", "host", host, "error", err)
+		return nil
+	}
+
+	// 4. 检查所有解析出的 IP 地址
 	for _, ip := range ips {
 		if isPrivateIP(ip) {
-			return fmt.Errorf("禁止访问私有 IP 地址: %s", ip.String())
+			return fmt.Errorf("禁止访问私有 IP 地址: %s (主机: %s)", ip.String(), host)
 		}
 	}
 
@@ -184,24 +280,32 @@ func validateHost(host string) error {
 }
 
 // isPrivateIP 检测 IP 是否为私有地址或特殊地址。
+//
+// 检测范围包括：
+// - 回环地址 (127.0.0.0/8, ::1)
+// - 私有地址 (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+// - 链路本地地址 (169.254.0.0/16, fe80::/10)
+// - 当前网络 (0.0.0.0/8)
+// - 广播地址 (255.255.255.255)
+// - 运营商级 NAT (100.64.0.0/10)
+// - IPv6 私有地址
 func isPrivateIP(ip net.IP) bool {
-	// 回环地址 127.0.0.0/8
+	// 回环地址 127.0.0.0/8 和 ::1
 	if ip.IsLoopback() {
 		return true
 	}
 
-	// 私有地址范围
-	// 10.0.0.0/8
+	// 处理 IPv4 地址
 	if ip4 := ip.To4(); ip4 != nil {
-		// 10.0.0.0/8
+		// 10.0.0.0/8 (A类私有)
 		if ip4[0] == 10 {
 			return true
 		}
-		// 172.16.0.0/12
+		// 172.16.0.0/12 (B类私有)
 		if ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31 {
 			return true
 		}
-		// 192.168.0.0/16
+		// 192.168.0.0/16 (C类私有)
 		if ip4[0] == 192 && ip4[1] == 168 {
 			return true
 		}
@@ -213,6 +317,14 @@ func isPrivateIP(ip net.IP) bool {
 		if ip4[0] == 0 {
 			return true
 		}
+		// 255.255.255.255 (广播地址)
+		if ip4[0] == 255 && ip4[1] == 255 && ip4[2] == 255 && ip4[3] == 255 {
+			return true
+		}
+		// 100.64.0.0/10 (运营商级 NAT，可能导致内网访问)
+		if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
+			return true
+		}
 	}
 
 	// IPv6 私有地址
@@ -220,9 +332,19 @@ func isPrivateIP(ip net.IP) bool {
 		return true
 	}
 
-	// 链路本地地址
+	// 链路本地地址 (fe80::/10 等)
 	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 		return true
+	}
+
+	// IPv6 唯一本地地址 (fc00::/7)
+	// 前缀 fc00::/7 范围是 fc00::-fdff::
+	if len(ip) == 16 {
+		// fc00::/7: 检查第一个字节的最高 7 位
+		// fc00 = 111111 00 00000000，fd00 = 111111 01 00000000
+		if ip[0] == 0xfc || ip[0] == 0xfd {
+			return true
+		}
 	}
 
 	return false

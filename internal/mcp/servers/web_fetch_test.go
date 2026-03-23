@@ -318,6 +318,42 @@ func TestValidateHost_InvalidHost(t *testing.T) {
 	}
 }
 
+// TestValidateHost_DangerousHostnames 测试危险主机名检测。
+func TestValidateHost_DangerousHostnames(t *testing.T) {
+	tests := []struct {
+		name    string
+		host    string
+		wantErr bool
+	}{
+		// 标准危险主机名
+		{"localhost", "localhost", true},
+		{"localtest.me", "localtest.me", true},
+		{"test.local", "test.local", true},
+		{"myapp.localhost", "myapp.localhost", true},
+		{"service.internal", "service.internal", true},
+		{"host.docker.internal", "host.docker.internal", true},
+
+		// Kubernetes 相关
+		{"kubernetes.default", "kubernetes.default", true},
+		{"kubernetes.default.svc", "kubernetes.default.svc", true},
+		{"my-service.default.svc.cluster.local", "my-service.default.svc.cluster.local", true},
+
+		// 安全的主机名
+		{"example.com", "example.com", false},
+		{"google.com", "google.com", false},
+		{"subdomain.example.com", "subdomain.example.com", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateHost(tt.host)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateHost(%s) error = %v, wantErr %v", tt.host, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // TestExtractText_Basic 测试基本 HTML 转文本功能。
 func TestExtractText_Basic(t *testing.T) {
 	tests := []struct {
