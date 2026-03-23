@@ -775,6 +775,7 @@ func (s *CommandService) StopTyping(ctx context.Context, roomID id.RoomID) error
 type EventHandler struct {
 	service          *CommandService
 	logger           *slog.Logger
+	startTime        time.Time // 机器人启动时间，用于过滤历史消息
 	proactiveManager interface {
 		OnNewMember(ctx context.Context, roomID id.RoomID, userID id.UserID) error
 		RecordUserMessage(roomID id.RoomID)
@@ -782,10 +783,12 @@ type EventHandler struct {
 }
 
 // NewEventHandler 创建一个新的事件处理器。
+// 记录启动时间，用于过滤启动前的历史消息。
 func NewEventHandler(service *CommandService) *EventHandler {
 	return &EventHandler{
-		service: service,
-		logger:  slog.With("component", "event_handler"),
+		service:   service,
+		logger:    slog.With("component", "event_handler"),
+		startTime: time.Now(),
 	}
 }
 
@@ -807,6 +810,15 @@ func (h *EventHandler) OnMessage(ctx context.Context, evt *event.Event) {
 		"sender", evt.Sender.String())
 
 	logger.Debug("Processing event")
+
+	// 过滤启动前的历史消息
+	// 检查消息时间戳是否早于机器人启动时间
+	if evt.Timestamp != 0 && evt.Timestamp < h.startTime.UnixMilli() {
+		logger.Debug("跳过启动前的历史消息",
+			"event_time", time.UnixMilli(evt.Timestamp).Format(time.RFC3339),
+			"start_time", h.startTime.Format(time.RFC3339))
+		return
+	}
 
 	// 记录用户消息时间（排除机器人自己的消息）
 	if h.proactiveManager != nil && evt.Sender != h.service.botID {

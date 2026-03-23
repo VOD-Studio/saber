@@ -484,9 +484,9 @@ func TestShutdownSequence(t *testing.T) {
 func TestProactiveManagerNilCheck(t *testing.T) {
 	// 测试 nil 和非 nil 两种情况
 	tests := []struct {
-		name     string
-		manager  *int
-		isNil    bool
+		name    string
+		manager *int
+		isNil   bool
 	}{
 		{"未初始化的管理器", nil, true},
 		{"已初始化的管理器", new(int), false},

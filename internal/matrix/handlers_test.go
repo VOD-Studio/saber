@@ -1661,3 +1661,150 @@ func TestHandleEvent_ReplyToOriginalMessage(t *testing.T) {
 		})
 	}
 }
+
+// TestOnMessage_HistoryFilter 测试历史消息过滤功能。
+//
+// 验证启动前的历史消息会被正确过滤：
+//   - 消息时间戳早于启动时间的消息应该被跳过
+//   - 消息时间戳晚于启动时间的消息应该被正常处理
+func TestOnMessage_HistoryFilter(t *testing.T) {
+	botUserID := id.UserID("@saber:example.com")
+	roomID := id.RoomID("!test:example.com")
+	senderID := id.UserID("@sender:example.com")
+
+	homeserverURL, _ := url.Parse("https://example.com")
+	client := &mautrix.Client{
+		UserID:        botUserID,
+		HomeserverURL: homeserverURL,
+	}
+
+	service := NewCommandService(client, botUserID, nil)
+
+	var processedCount int
+	var mu sync.Mutex
+
+	mockHandler := &mockCommandHandler{
+		handleFunc: func(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
+			mu.Lock()
+			processedCount++
+			mu.Unlock()
+			return nil
+		},
+	}
+	service.RegisterCommand("ai", mockHandler)
+
+	handler := NewEventHandler(service)
+
+	// 等待一小段时间确保 startTime 已设置
+	time.Sleep(10 * time.Millisecond)
+
+	// 创建一个过去时间戳的事件（启动前）
+	oldEvent := &event.Event{
+		Type:      event.EventMessage,
+		RoomID:    roomID,
+		Sender:    senderID,
+		ID:        id.EventID("$old_event:example.com"),
+		Timestamp: time.Now().Add(-1 * time.Hour).UnixMilli(), // 1 小时前
+		Content: event.Content{
+			Parsed: &event.MessageEventContent{
+				MsgType: event.MsgText,
+				Body:    "!ai old message",
+			},
+		},
+	}
+
+	// 创建一个未来时间戳的事件（启动后）
+	newEvent := &event.Event{
+		Type:      event.EventMessage,
+		RoomID:    roomID,
+		Sender:    senderID,
+		ID:        id.EventID("$new_event:example.com"),
+		Timestamp: time.Now().Add(1 * time.Second).UnixMilli(), // 1 秒后
+		Content: event.Content{
+			Parsed: &event.MessageEventContent{
+				MsgType: event.MsgText,
+				Body:    "!ai new message",
+			},
+		},
+	}
+
+	// 处理旧消息（应该被过滤）
+	handler.OnMessage(context.Background(), oldEvent)
+
+	// 处理新消息（应该被正常处理）
+	handler.OnMessage(context.Background(), newEvent)
+
+	// 等待处理完成
+	time.Sleep(100 * time.Millisecond)
+
+	// 验证只有新消息被处理
+	mu.Lock()
+	count := processedCount
+	mu.Unlock()
+
+	if count != 1 {
+		t.Errorf("期望处理 1 条消息，实际处理 %d 条", count)
+	}
+}
+
+// TestOnMessage_ZeroTimestamp 测试时间戳为零的情况。
+//
+// 验证当事件时间戳为零时，消息应该被正常处理（不过滤）。
+func TestOnMessage_ZeroTimestamp(t *testing.T) {
+	botUserID := id.UserID("@saber:example.com")
+	roomID := id.RoomID("!test:example.com")
+	senderID := id.UserID("@sender:example.com")
+
+	homeserverURL, _ := url.Parse("https://example.com")
+	client := &mautrix.Client{
+		UserID:        botUserID,
+		HomeserverURL: homeserverURL,
+	}
+
+	service := NewCommandService(client, botUserID, nil)
+
+	var processedCount int
+	var mu sync.Mutex
+
+	mockHandler := &mockCommandHandler{
+		handleFunc: func(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
+			mu.Lock()
+			processedCount++
+			mu.Unlock()
+			return nil
+		},
+	}
+	service.RegisterCommand("ai", mockHandler)
+
+	handler := NewEventHandler(service)
+
+	// 创建时间戳为零的事件
+	zeroTimestampEvent := &event.Event{
+		Type:      event.EventMessage,
+		RoomID:    roomID,
+		Sender:    senderID,
+		ID:        id.EventID("$zero_event:example.com"),
+		Timestamp: 0, // 时间戳为零
+		Content: event.Content{
+			Parsed: &event.MessageEventContent{
+				MsgType: event.MsgText,
+				Body:    "!ai zero timestamp",
+			},
+		},
+	}
+
+	// 处理时间戳为零的消息（应该被正常处理）
+	handler.OnMessage(context.Background(), zeroTimestampEvent)
+
+	// 等待处理完成
+	time.Sleep(100 * time.Millisecond)
+
+	// 验证消息被处理
+	mu.Lock()
+	count := processedCount
+	mu.Unlock()
+
+	if count != 1 {
+		t.Errorf("期望处理 1 条消息（时间戳为零不应被过滤），实际处理 %d 条", count)
+	}
+}
