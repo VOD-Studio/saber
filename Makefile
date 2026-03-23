@@ -55,6 +55,23 @@ endif
 test: ## 运行测试
 	go test -v -tags goolm ./...
 
+test-cover: ## 运行测试并生成 HTML 覆盖率报告
+	go test -cover -coverprofile=coverage.out -tags goolm ./...
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "覆盖率报告: coverage.html"
+
+test-cover-func: ## 显示函数级别覆盖率详情
+	go test -cover -coverprofile=coverage.out -tags goolm ./...
+	go tool cover -func=coverage.out
+
+test-cover-check: ## CI 覆盖率门禁检查（阈值 60%）
+	@go test -cover -coverprofile=coverage.out -tags goolm ./... 2>/dev/null
+	@total=$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}' | sed 's/%//'); \
+	if [ $$(echo "$$total < 60" | bc -L) -eq 1 ]; then \
+		echo "覆盖率 $$total% 低于 60% 阈值"; exit 1; \
+	fi; \
+	echo "覆盖率 $$total% 达标"
+
 fmt: ## 使用 goimports 格式化代码
 	goimports -w .
 
