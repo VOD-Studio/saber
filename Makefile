@@ -1,4 +1,4 @@
-.PHONY: build build-prod clean test fmt lint run help
+.PHONY: build build-prod clean test fmt lint run help bench bench-ai bench-matrix bench-mcp bench-profile bench-compare bench-save-baseline pprof-cpu pprof-mem bench-clean
 
 APP_NAME := saber
 VERSION := 0.0.4
@@ -66,5 +66,64 @@ run: ## 运行应用程序
 
 help: ## 显示帮助信息
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-12s\033[0m %s\n", $$1, $$2}'
+
+# 基准测试配置
+BENCH_DIR := benchmark-results
+BENCH_TIME ?= 3s
+
+bench: ## 运行所有基准测试
+	@mkdir -p $(BENCH_DIR)
+	go test -tags goolm -bench=. -benchmem -benchtime=$(BENCH_TIME) ./... | tee $(BENCH_DIR)/results.txt
+
+bench-ai: ## 运行 AI 包基准测试
+	go test -tags goolm -v -bench=. -benchmem ./internal/ai/...
+
+bench-matrix: ## 运行 Matrix 包基准测试
+	go test -tags goolm -v -bench=. -benchmem ./internal/matrix/...
+
+bench-mcp: ## 运行 MCP 包基准测试
+	go test -tags goolm -v -bench=. -benchmem ./internal/mcp/...
+
+bench-profile: ## 生成 CPU/内存分析文件
+	@mkdir -p $(BENCH_DIR)
+	go test -tags goolm -bench=. -benchmem -cpuprofile=$(BENCH_DIR)/cpu.prof -memprofile=$(BENCH_DIR)/mem.prof ./...
+	@echo "Profile files generated in $(BENCH_DIR)/"
+	@echo "View CPU profile: make pprof-cpu"
+	@echo "View Memory profile: make pprof-mem"
+
+bench-compare: ## 与基准比较性能
+	@mkdir -p $(BENCH_DIR)
+	@echo "Running current branch benchmarks..."
+	go test -tags goolm -bench=. -benchmem ./... > $(BENCH_DIR)/current.txt
+	@if [ -f $(BENCH_DIR)/baseline.txt ]; then \
+		echo "Comparing with baseline..."; \
+		echo "Install benchstat: go install golang.org/x/perf/cmd/benchstat@latest"; \
+		benchstat $(BENCH_DIR)/baseline.txt $(BENCH_DIR)/current.txt 2>/dev/null || echo "benchstat not installed, install with: go install golang.org/x/perf/cmd/benchstat@latest"; \
+	else \
+		echo "No baseline found. Run 'make bench-save-baseline' first."; \
+	fi
+
+bench-save-baseline: ## 保存当前性能作为基准
+	@mkdir -p $(BENCH_DIR)
+	@echo "Saving baseline benchmarks..."
+	go test -tags goolm -bench=. -benchmem -count=5 ./... > $(BENCH_DIR)/baseline.txt
+	@echo "Baseline saved to $(BENCH_DIR)/baseline.txt"
+
+pprof-cpu: ## 查看 CPU 分析
+	@if [ ! -f $(BENCH_DIR)/cpu.prof ]; then \
+		echo "Run 'make bench-profile' first"; \
+		exit 1; \
+	fi
+	go tool pprof -http=:8080 $(BENCH_DIR)/cpu.prof
+
+pprof-mem: ## 查看内存分析
+	@if [ ! -f $(BENCH_DIR)/mem.prof ]; then \
+		echo "Run 'make bench-profile' first"; \
+		exit 1; \
+	fi
+	go tool pprof -http=:8080 $(BENCH_DIR)/mem.prof
+
+bench-clean: ## 清理基准测试产物
+	@rm -rf $(BENCH_DIR)
 
 .DEFAULT_GOAL := build
