@@ -54,10 +54,16 @@ matrix:
 
 ai:
   enabled: true
-  provider: "openai"
-  base_url: "https://api.openai.com/v1"
-  api_key: "your-api-key"
-  default_model: "gpt-4o-mini"
+  # 多提供商配置（推荐）
+  providers:
+    openai:
+      type: "openai"
+      base_url: "https://api.openai.com/v1"
+      api_key: "your-api-key"
+      models:
+        gpt-4o-mini:
+          model: "gpt-4o-mini"
+  default_model: "openai.gpt-4o-mini"  # 使用完全限定名称：提供商.模型名
 ```
 
 ### 运行
@@ -279,29 +285,65 @@ min_interval_minutes: 60  # 两次主动消息之间至少间隔 60 分钟
 2. 查看决策上下文中的活动水平是否为 "high"
 3. 确认今日消息数是否已达到上限
 
-### 多模型命令
+### 多提供商配置
 
-在 `config.yaml` 中配置多个模型:
+Saber 支持同时配置多个 AI 提供商，使用完全限定名称（`提供商.模型名`）标识模型：
 
 ```yaml
 ai:
-  models:
-    fast:
-      model: "gpt-4o-mini"
-      temperature: 0.3
-    creative:
-      model: "gpt-4o"
-      temperature: 0.9
+  enabled: true
+  providers:
+    # OpenAI 提供商
+    openai:
+      type: "openai"
+      base_url: "https://api.openai.com/v1"
+      api_key: "your-openai-key"
+      models:
+        gpt-4o-mini:
+          model: "gpt-4o-mini"
+        gpt-4o:
+          model: "gpt-4o"
+          temperature: 0.5
+    # Azure OpenAI 提供商
+    azure:
+      type: "azure"
+      base_url: "https://your-resource.openai.azure.com"
+      api_key: "your-azure-key"
+      models:
+        gpt-4:
+          model: "gpt-4"
+    # Ollama 本地模型
+    ollama:
+      type: "openai"  # Ollama 兼容 OpenAI API
+      base_url: "http://localhost:11434/v1"
+      models:
+        llama3:
+          model: "llama3"
+        qwen2:
+          model: "qwen2"
+  # 默认模型使用完全限定名称
+  default_model: "openai.gpt-4o-mini"
 ```
 
-然后使用模型特定命令: `!ai-fast <message>`, `!ai-creative <message>`。
+### 向后兼容
 
-也可以通过命令动态切换默认模型:
+旧的单提供商配置格式仍然支持，会自动迁移为新格式：
 
+```yaml
+ai:
+  enabled: true
+  provider: "openai"
+  base_url: "https://api.openai.com/v1"
+  api_key: "your-api-key"
+  default_model: "gpt-4o-mini"  # 自动转换为 openai.gpt-4o-mini
 ```
-!ai-models           # 查看所有可用模型
-!ai-switch fast      # 切换到 fast 模型
-!ai-current          # 查看当前默认模型
+
+### 模型切换命令
+
+```bash
+!ai-models              # 查看所有可用模型（显示完全限定名称）
+!ai-switch openai.gpt-4o   # 切换到指定模型
+!ai-current             # 查看当前默认模型
 ```
 
 **注意**: 通过命令切换的默认模型在重启后会恢复为配置文件中的设置。
@@ -414,10 +456,11 @@ AI: [调用 web_search 工具] 我找到了以下信息...
 | 字段                      | 必填        | 描述                         |
 | ------------------------- | ----------- | ---------------------------- |
 | `enabled`                 | 否          | 启用 AI 功能                 |
-| `provider`                | 如果启用    | 提供商名称（如 `openai`）    |
-| `base_url`                | 如果启用    | API 基础 URL                 |
-| `api_key`                 | 如果启用    | API 密钥                     |
-| `default_model`           | 如果启用    | 默认使用的模型               |
+| `providers`               | 否          | 多提供商配置（推荐）         |
+| `default_model`           | 如果启用    | 默认模型（推荐使用完全限定名称 `提供商.模型名`） |
+| `provider`                | 否          | 提供商名称（旧格式，向后兼容）|
+| `base_url`                | 否          | API 基础 URL（全局默认）     |
+| `api_key`                 | 否          | API 密钥（全局默认）         |
 | `max_tokens`              | 否          | 每次响应的最大 token 数      |
 | `temperature`             | 否          | 响应随机性（0-2）            |
 | `system_prompt`           | 否          | 自定义系统提示词             |
@@ -430,6 +473,23 @@ AI: [调用 web_search 工具] 我找到了以下信息...
 | `reply_to_bot_reply`      | 否          | 回复机器人消息时自动回复     |
 | `media`                   | 否          | 媒体处理配置（见下表）       |
 | `proactive`               | 否          | 主动聊天配置（见下表）       |
+
+### 提供商配置 (providers)
+
+| 字段       | 必填 | 描述                                    |
+| ---------- | ---- | --------------------------------------- |
+| `type`     | 是   | 提供商类型（`openai`, `azure`）        |
+| `base_url` | 是   | API 基础 URL                            |
+| `api_key`  | 是   | API 密钥                                |
+| `models`   | 否   | 模型配置 map（键为模型名，值为配置）   |
+
+### 模型配置 (models)
+
+| 字段          | 必填 | 描述                               |
+| ------------- | ---- | ---------------------------------- |
+| `model`       | 是   | 实际使用的模型名称                 |
+| `temperature` | 否   | 响应随机性（覆盖全局设置）         |
+| `max_tokens`  | 否   | 最大 token 数（覆盖全局设置）      |
 
 ### 流式编辑设置
 

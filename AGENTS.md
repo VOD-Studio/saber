@@ -64,7 +64,7 @@ if err != nil {
 }
 
 // 日志：使用 slog 结构化日志，禁止记录敏感数据
-slog.Info("服务初始化完成", "provider", cfg.Provider)
+slog.Info("服务初始化完成", "default_model", cfg.DefaultModel)
 ```
 
 ### 注释规范
@@ -111,6 +111,32 @@ factory.GetDefaultFactory().RegisterStrategy(&MyProviderStrategy{})
 ```
 
 内置策略: `openai` (兼容 Ollama/vLLM/LocalAI), `azure`
+
+### 多提供商配置
+
+支持同时配置多个 AI 提供商，使用完全限定名称标识模型：
+
+```yaml
+ai:
+  providers:
+    openai:
+      type: "openai"
+      base_url: "https://api.openai.com/v1"
+      api_key: "..."
+      models:
+        gpt-4o-mini: {model: "gpt-4o-mini"}
+    ollama:
+      type: "openai"
+      base_url: "http://localhost:11434/v1"
+      models:
+        llama3: {model: "llama3"}
+  default_model: "openai.gpt-4o-mini"  # 完全限定名称：提供商.模型名
+```
+
+**关键函数**:
+- `config.ParseModelID(id)`: 解析完全限定名称，返回提供商和模型名
+- `config.FormatModelID(provider, model)`: 生成完全限定名称
+- `AIConfig.GetModelConfig(modelID)`: 获取模型配置，支持提供商级和全局级合并
 
 ### Factory 模式 (MCP 服务器)
 
@@ -233,7 +259,16 @@ func TestValidate(t *testing.T) {
 func createTestAIConfig() *config.AIConfig {
     cfg := config.DefaultAIConfig()
     cfg.Enabled = true
-    cfg.Provider = "openai"
+    cfg.DefaultModel = "openai.gpt-4o-mini"
+    cfg.Providers = map[string]config.ProviderConfig{
+        "openai": {
+            Type:    "openai",
+            BaseURL: "https://api.openai.com/v1",
+            Models: map[string]config.ModelConfig{
+                "gpt-4o-mini": {Model: "gpt-4o-mini"},
+            },
+        },
+    }
     return &cfg
 }
 ```
