@@ -383,3 +383,36 @@ func NewTestMCPServerConfig(enabled bool) *config.MCPConfig {
 		Servers: make(map[string]config.ServerConfig),
 	}
 }
+
+// BenchmarkManager 创建用于基准测试的预填充 MCP Manager。
+//
+// 该函数创建一个 MockManager，并预先填充指定数量的测试工具，
+// 适用于测试大量工具场景下的性能。
+//
+// 参数:
+//   - toolCount: 工具数量
+//
+// 返回值:
+//   - *MockManager: 预填充的模拟管理器
+func BenchmarkManager(toolCount int) *MockManager {
+	mgr := NewMockManager(true)
+	for i := 0; i < toolCount; i++ {
+		tool := &MockTool{
+			Name:        fmt.Sprintf("tool_%d", i),
+			Description: fmt.Sprintf("Benchmark tool %d", i),
+			InputSchema: map[string]any{
+				"type": "object",
+			},
+			Handler: func(ctx context.Context, args map[string]any) (*MockToolResult, error) {
+				return &MockToolResult{
+					Content: []any{map[string]any{
+						"type": "text",
+						"text": "ok",
+					}},
+				}, nil
+			},
+		}
+		mgr.RegisterTool(tool)
+	}
+	return mgr
+}

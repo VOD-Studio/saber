@@ -27,6 +27,18 @@ make lint                               # golangci-lint
 make run                                # 运行应用
 ```
 
+**基准测试**:
+
+```bash
+make bench                              # 运行所有基准测试
+make bench-ai                           # AI 模块基准测试
+make bench-matrix                       # Matrix 模块基准测试
+make bench-mcp                          # MCP 模块基准测试
+make bench-profile                      # 生成 pprof 分析文件
+make bench-compare                      # 性能回归对比
+go test -bench=. -benchmem -tags goolm ./internal/ai/...  # 单模块基准测试
+```
+
 **编辑器配置**:
 ```bash
 export GOFLAGS="-tags=goolm"
@@ -227,6 +239,41 @@ func createTestAIConfig() *config.AIConfig {
 ```
 
 **要求**: 成功和失败路径覆盖 | 使用 `t.TempDir()` | 表驱动测试 | 每个测试独立
+
+### 基准测试规范
+
+基准测试文件使用 `_bench_test.go` 后缀，函数命名格式: `Benchmark<Component>_<Scenario>`
+
+```go
+// 基准测试基本模式
+func BenchmarkAddMessage_SingleRoom(b *testing.B) {
+    cm := NewTestContextManager()
+    roomID := TestRoomID(0)
+    userID := TestUserID(0)
+
+    b.ResetTimer()
+    for i := 0; i < b.N; i++ {
+        cm.AddMessage(roomID, RoleUser, "test", userID)
+    }
+}
+
+// 并行基准测试使用 RunParallel
+func BenchmarkAllow_Parallel(b *testing.B) {
+    cb := NewCircuitBreaker(100, time.Minute)
+    b.RunParallel(func(pb *testing.PB) {
+        for pb.Next() {
+            cb.Allow()
+        }
+    })
+}
+```
+
+**基准测试要求**:
+- 使用 `b.ResetTimer()` 排除初始化时间
+- 并发场景使用 `b.RunParallel()`
+- 报告内存分配：`go test -benchmem`
+- 运行竞态检测：`go test -race -bench=.`
+- 文件添加 `//go:build goolm` 构建标签
 
 ---
 
