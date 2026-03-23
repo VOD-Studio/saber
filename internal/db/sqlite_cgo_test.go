@@ -20,7 +20,11 @@ func TestCGODriver_Open(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Logf("failed to close database: %v", err)
+		}
+	}()
 
 	// 验证连接有效
 	if err := db.Ping(); err != nil {
@@ -37,7 +41,11 @@ func TestCGODriver_ForeignKeysEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Logf("failed to close database: %v", err)
+		}
+	}()
 
 	var fkEnabled int
 	err = db.QueryRow("PRAGMA foreign_keys").Scan(&fkEnabled)
@@ -59,7 +67,11 @@ func TestCGODriver_JournalMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Logf("failed to close database: %v", err)
+		}
+	}()
 
 	var journalMode string
 	err = db.QueryRow("PRAGMA journal_mode").Scan(&journalMode)
@@ -79,7 +91,11 @@ func TestCGODriver_InMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open in-memory database: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Logf("failed to close database: %v", err)
+		}
+	}()
 
 	// 创建测试表
 	_, err = db.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)")
@@ -111,7 +127,11 @@ func TestCGODriver_ForeignKeyConstraint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Logf("failed to close database: %v", err)
+		}
+	}()
 
 	// 创建父表
 	_, err = db.Exec("CREATE TABLE parent (id INTEGER PRIMARY KEY)")
@@ -175,13 +195,21 @@ func TestCGODriver_ConcurrentAccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open database 1: %v", err)
 	}
-	defer db1.Close()
+	defer func() {
+		if err := db1.Close(); err != nil {
+			t.Logf("failed to close database 1: %v", err)
+		}
+	}()
 
 	db2, err := sql.Open("sqlite3-fk-wal", dbPath)
 	if err != nil {
 		t.Fatalf("failed to open database 2: %v", err)
 	}
-	defer db2.Close()
+	defer func() {
+		if err := db2.Close(); err != nil {
+			t.Logf("failed to close database 2: %v", err)
+		}
+	}()
 
 	// 在第一个连接创建表
 	_, err = db1.Exec("CREATE TABLE concurrent_test (id INTEGER PRIMARY KEY, value TEXT)")

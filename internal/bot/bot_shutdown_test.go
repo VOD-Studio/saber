@@ -2,58 +2,11 @@
 package bot
 
 import (
-	"sync"
 	"testing"
 	"time"
 
 	"rua.plus/saber/internal/config"
 )
-
-// mockStopper 用于测试的服务停止器。
-type mockStopper struct {
-	stopCalled bool
-	stopDelay  time.Duration
-	mu         sync.Mutex
-}
-
-func (m *mockStopper) Stop() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.stopDelay > 0 {
-		time.Sleep(m.stopDelay)
-	}
-	m.stopCalled = true
-}
-
-func (m *mockStopper) wasStopped() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.stopCalled
-}
-
-// mockCloser 用于测试的服务关闭器。
-type mockCloser struct {
-	closeCalled bool
-	closeDelay  time.Duration
-	closeErr    error
-	mu          sync.Mutex
-}
-
-func (m *mockCloser) Close() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.closeDelay > 0 {
-		time.Sleep(m.closeDelay)
-	}
-	m.closeCalled = true
-	return m.closeErr
-}
-
-func (m *mockCloser) wasClosed() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.closeCalled
-}
 
 // TestShutdown_EmptyServices 测试服务为空时的关闭。
 func TestShutdown_EmptyServices(t *testing.T) {
@@ -64,7 +17,7 @@ func TestShutdown_EmptyServices(t *testing.T) {
 	}
 
 	state := &appState{
-		cfg: cfg,
+		cfg:      cfg,
 		services: &services{
 			// 所有服务为 nil
 		},
