@@ -16,14 +16,14 @@ type mockMatrixClientForRooms struct {
 	userID   id.UserID
 	deviceID id.DeviceID
 
-	joinRoomFunc       func(ctx context.Context, roomIDOrAlias string, req *mautrix.ReqJoinRoom) (*mautrix.RespJoinRoom, error)
-	leaveRoomFunc      func(ctx context.Context, roomID id.RoomID, req *mautrix.ReqLeave) (*mautrix.RespLeaveRoom, error)
-	sendTextFunc       func(ctx context.Context, roomID id.RoomID, text string) (*mautrix.RespSendEvent, error)
+	joinRoomFunc         func(ctx context.Context, roomIDOrAlias string, req *mautrix.ReqJoinRoom) (*mautrix.RespJoinRoom, error)
+	leaveRoomFunc        func(ctx context.Context, roomID id.RoomID, req *mautrix.ReqLeave) (*mautrix.RespLeaveRoom, error)
+	sendTextFunc         func(ctx context.Context, roomID id.RoomID, text string) (*mautrix.RespSendEvent, error)
 	sendMessageEventFunc func(ctx context.Context, roomID id.RoomID, eventType event.Type, content interface{}) (*mautrix.RespSendEvent, error)
-	sendNoticeFunc     func(ctx context.Context, roomID id.RoomID, text string) (*mautrix.RespSendEvent, error)
-	joinedRoomsFunc    func(ctx context.Context) (*mautrix.RespJoinedRooms, error)
-	stateFunc          func(ctx context.Context, roomID id.RoomID) (mautrix.RoomStateMap, error)
-	fullStateEventFunc func(ctx context.Context, roomID id.RoomID, eventType event.Type, stateKey string) (*event.Event, error)
+	sendNoticeFunc       func(ctx context.Context, roomID id.RoomID, text string) (*mautrix.RespSendEvent, error)
+	joinedRoomsFunc      func(ctx context.Context) (*mautrix.RespJoinedRooms, error)
+	stateFunc            func(ctx context.Context, roomID id.RoomID) (mautrix.RoomStateMap, error)
+	fullStateEventFunc   func(ctx context.Context, roomID id.RoomID, eventType event.Type, stateKey string) (*event.Event, error)
 }
 
 func (m *mockMatrixClientForRooms) GetUserID() id.UserID {
@@ -106,7 +106,7 @@ func TestJoinRoom_ValidRoomID(t *testing.T) {
 	roomID := "!test:example.com"
 
 	mockClient := &mockMatrixClientForRooms{
-		userID: "@bot:example.com",
+		userID:   "@bot:example.com",
 		deviceID: "DEVICE123",
 		joinRoomFunc: func(ctx context.Context, roomIDOrAlias string, req *mautrix.ReqJoinRoom) (*mautrix.RespJoinRoom, error) {
 			return &mautrix.RespJoinRoom{RoomID: id.RoomID(roomID)}, nil
@@ -138,7 +138,7 @@ func TestJoinRoom_ValidAlias(t *testing.T) {
 	expectedRoomID := "!internal-id:example.com"
 
 	mockClient := &mockMatrixClientForRooms{
-		userID: "@bot:example.com",
+		userID:   "@bot:example.com",
 		deviceID: "DEVICE123",
 		joinRoomFunc: func(ctx context.Context, roomIDOrAlias string, req *mautrix.ReqJoinRoom) (*mautrix.RespJoinRoom, error) {
 			if roomIDOrAlias == alias {
@@ -204,7 +204,7 @@ func TestJoinRoom_InvalidIdentifier(t *testing.T) {
 // TestJoinRoom_APIError 测试 API 错误情况。
 func TestJoinRoom_APIError(t *testing.T) {
 	mockClient := &mockMatrixClientForRooms{
-		userID: "@bot:example.com",
+		userID:   "@bot:example.com",
 		deviceID: "DEVICE123",
 		joinRoomFunc: func(ctx context.Context, roomIDOrAlias string, req *mautrix.ReqJoinRoom) (*mautrix.RespJoinRoom, error) {
 			return nil, errors.New("room not found")
@@ -227,7 +227,7 @@ func TestLeaveRoom_Success(t *testing.T) {
 	roomID := "!test:example.com"
 
 	mockClient := &mockMatrixClientForRooms{
-		userID: "@bot:example.com",
+		userID:   "@bot:example.com",
 		deviceID: "DEVICE123",
 		leaveRoomFunc: func(ctx context.Context, rID id.RoomID, req *mautrix.ReqLeave) (*mautrix.RespLeaveRoom, error) {
 			if rID != id.RoomID(roomID) {
@@ -262,7 +262,7 @@ func TestLeaveRoom_EmptyRoomID(t *testing.T) {
 // TestLeaveRoom_APIError 测试 API 错误。
 func TestLeaveRoom_APIError(t *testing.T) {
 	mockClient := &mockMatrixClientForRooms{
-		userID: "@bot:example.com",
+		userID:   "@bot:example.com",
 		deviceID: "DEVICE123",
 		leaveRoomFunc: func(ctx context.Context, roomID id.RoomID, req *mautrix.ReqLeave) (*mautrix.RespLeaveRoom, error) {
 			return nil, errors.New("not in room")
@@ -287,7 +287,7 @@ func TestSendMessage_Success(t *testing.T) {
 	expectedEventID := id.EventID("$event123:example.com")
 
 	mockClient := &mockMatrixClientForRooms{
-		userID: "@bot:example.com",
+		userID:   "@bot:example.com",
 		deviceID: "DEVICE123",
 		sendTextFunc: func(ctx context.Context, rID id.RoomID, t string) (*mautrix.RespSendEvent, error) {
 			if rID != id.RoomID(roomID) {
@@ -345,7 +345,7 @@ func TestSendFormattedMessage_Success(t *testing.T) {
 	expectedEventID := id.EventID("$event123:example.com")
 
 	mockClient := &mockMatrixClientForRooms{
-		userID: "@bot:example.com",
+		userID:   "@bot:example.com",
 		deviceID: "DEVICE123",
 		sendMessageEventFunc: func(ctx context.Context, rID id.RoomID, eventType event.Type, content interface{}) (*mautrix.RespSendEvent, error) {
 			return &mautrix.RespSendEvent{EventID: expectedEventID}, nil
@@ -396,7 +396,7 @@ func TestSendNotice_Success(t *testing.T) {
 	expectedEventID := id.EventID("$notice123:example.com")
 
 	mockClient := &mockMatrixClientForRooms{
-		userID: "@bot:example.com",
+		userID:   "@bot:example.com",
 		deviceID: "DEVICE123",
 		sendNoticeFunc: func(ctx context.Context, rID id.RoomID, t string) (*mautrix.RespSendEvent, error) {
 			if rID != id.RoomID(roomID) {
@@ -451,7 +451,7 @@ func TestGetJoinedRooms_Success(t *testing.T) {
 	}
 
 	mockClient := &mockMatrixClientForRooms{
-		userID: "@bot:example.com",
+		userID:   "@bot:example.com",
 		deviceID: "DEVICE123",
 		joinedRoomsFunc: func(ctx context.Context) (*mautrix.RespJoinedRooms, error) {
 			return &mautrix.RespJoinedRooms{JoinedRooms: rooms}, nil
@@ -480,7 +480,7 @@ func TestGetJoinedRooms_Success(t *testing.T) {
 // TestGetJoinedRooms_APIError 测试 API 错误。
 func TestGetJoinedRooms_APIError(t *testing.T) {
 	mockClient := &mockMatrixClientForRooms{
-		userID: "@bot:example.com",
+		userID:   "@bot:example.com",
 		deviceID: "DEVICE123",
 		joinedRoomsFunc: func(ctx context.Context) (*mautrix.RespJoinedRooms, error) {
 			return nil, errors.New("network error")

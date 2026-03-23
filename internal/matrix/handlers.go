@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/microcosm-cc/bluemonday"
+	"golang.org/x/sync/semaphore"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
-	"golang.org/x/sync/semaphore"
 
 	"rua.plus/saber/internal/mcp"
 )
@@ -800,7 +800,7 @@ func (s *CommandService) StopTyping(ctx context.Context, roomID id.RoomID) error
 type EventHandler struct {
 	service          *CommandService
 	logger           *slog.Logger
-	startTime        time.Time // 机器人启动时间，用于过滤历史消息
+	startTime        time.Time           // 机器人启动时间，用于过滤历史消息
 	sem              *semaphore.Weighted // 并发限制信号量
 	proactiveManager interface {
 		OnNewMember(ctx context.Context, roomID id.RoomID, userID id.UserID) error

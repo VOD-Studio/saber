@@ -1116,10 +1116,10 @@ func TestGatherDecisionContext_IsDirect(t *testing.T) {
 	roomID := id.RoomID("!test:example.org")
 
 	tests := []struct {
-		name           string
-		memberCount    int
-		wantIsDirect   bool
-		wantRoomType   string
+		name         string
+		memberCount  int
+		wantIsDirect bool
+		wantRoomType string
 	}{
 		{
 			name:         "私聊 - 成员数为2",
@@ -1190,21 +1190,21 @@ func TestGatherDecisionContext_IsDirect(t *testing.T) {
 // - IsDirect=false 时显示"群聊"
 func TestBuildDecisionPrompt_IsDirect(t *testing.T) {
 	tests := []struct {
-		name         string
-		isDirect     bool
-		wantContain  string
+		name           string
+		isDirect       bool
+		wantContain    string
 		wantNotContain string
 	}{
 		{
-			name:        "私聊房间 - 显示私聊类型",
-			isDirect:    true,
-			wantContain: "房间类型：私聊",
+			name:           "私聊房间 - 显示私聊类型",
+			isDirect:       true,
+			wantContain:    "房间类型：私聊",
 			wantNotContain: "群聊",
 		},
 		{
-			name:        "群聊房间 - 显示群聊类型",
-			isDirect:    false,
-			wantContain: "房间类型：群聊",
+			name:           "群聊房间 - 显示群聊类型",
+			isDirect:       false,
+			wantContain:    "房间类型：群聊",
 			wantNotContain: "私聊",
 		},
 	}
@@ -1218,9 +1218,15 @@ func TestBuildDecisionPrompt_IsDirect(t *testing.T) {
 				MinutesSinceLast: 120,
 				MessagesToday:    1,
 				TriggerType:      TriggerInactivity,
-				MemberCount:      func() int { if tt.isDirect { return 2 } else { return 5 } }(),
-				IsDirect:         tt.isDirect,
-				IsEncrypted:      false,
+				MemberCount: func() int {
+					if tt.isDirect {
+						return 2
+					} else {
+						return 5
+					}
+				}(),
+				IsDirect:    tt.isDirect,
+				IsEncrypted: false,
 			}
 
 			prompt, err := BuildDecisionPrompt(ctx, &config.DecisionConfig{})
