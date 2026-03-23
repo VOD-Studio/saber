@@ -84,17 +84,6 @@ func NewWebFetchServer() *mcp.Server {
 	return server
 }
 
-// cloneClientWithRedirect 创建一个带有自定义 CheckRedirect 函数的客户端克隆。
-func cloneClientWithRedirect(base *http.Client, checkRedirect func(*http.Request, []*http.Request) error) *http.Client {
-	// 克隆基础客户端，保留其 Transport 和其他设置
-	cloned := &http.Client{
-		Timeout:       base.Timeout,
-		Transport:     base.Transport,
-		CheckRedirect: checkRedirect,
-	}
-	return cloned
-}
-
 // createSecureTransport 创建一个安全的 HTTP Transport，在连接时验证 IP 地址。
 //
 // 这提供了 DNS rebinding 防护：即使 DNS 解析返回了合法 IP，

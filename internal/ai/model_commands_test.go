@@ -245,19 +245,3 @@ func TestModelCommands_NilService(t *testing.T) {
 		}
 	})
 }
-
-// createTestModelConfig 创建测试配置。
-func createTestModelConfig() *config.AIConfig {
-	return &config.AIConfig{
-		Enabled:        true,
-		Provider:       "openai",
-		BaseURL:        "https://api.openai.com/v1",
-		APIKey:         "test-key",
-		DefaultModel:   "fast",
-		TimeoutSeconds: 30,
-		Models: map[string]config.ModelConfig{
-			"fast":  {Model: "gpt-4o-mini"},
-			"smart": {Model: "gpt-4o"},
-		},
-	}
-}
