@@ -9,8 +9,9 @@
 - **AI 集成**: 内置 AI 对话功能，支持 OpenAI 兼容的 API
 - **工具调用**: 支持 MCP (Model Context Protocol) 工具调用，AI 可执行网络搜索、网页抓取等操作
 - **流式响应**: 实时流式输出，智能消息编辑
+- **图片理解**: 支持发送图片让 AI 理解和分析（需模型支持视觉功能）
 - **上下文管理**: 每个房间独立的持久化对话上下文
-- **多模型支持**: 配置多个 AI 模型，各自独立参数
+- **多模型支持**: 配置多个 AI 模型，各自独立参数，支持运行时切换
 - **可扩展命令**: 清晰的命令注册和分发系统
 - **自动重连**: 弹性连接，支持指数退避
 - **私聊自动回复**: 在私聊中自动响应 AI 消息
@@ -71,15 +72,18 @@ ai:
 
 ### 内置命令
 
-| 命令              | 描述                     |
-| ----------------- | ------------------------ |
-| `!ping`           | 检查机器人是否在线       |
-| `!help`           | 列出所有可用命令         |
-| `!version`        | 显示版本信息             |
-| `!ai <message>`   | 与 AI 对话               |
-| `!ai-clear`       | 清除对话上下文           |
-| `!ai-context`     | 显示上下文信息           |
-| `!mcp-list`       | 列出所有 MCP 服务器和工具 |
+| 命令              | 描述                                       |
+| ----------------- | ------------------------------------------ |
+| `!ping`           | 检查机器人是否在线                         |
+| `!help`           | 列出所有可用命令                           |
+| `!version`        | 显示版本信息                               |
+| `!ai <message>`   | 与 AI 对话                                 |
+| `!ai-clear`       | 清除对话上下文                             |
+| `!ai-context`     | 显示上下文信息                             |
+| `!ai-models`      | 列出所有可用模型                           |
+| `!ai-switch <id>` | 切换默认模型                               |
+| `!ai-current`     | 显示当前默认模型                           |
+| `!mcp-list`       | 列出所有 MCP 服务器和工具                  |
 
 ### 私聊
 
@@ -292,6 +296,36 @@ ai:
 
 然后使用模型特定命令: `!ai-fast <message>`, `!ai-creative <message>`。
 
+也可以通过命令动态切换默认模型:
+
+```
+!ai-models           # 查看所有可用模型
+!ai-switch fast      # 切换到 fast 模型
+!ai-current          # 查看当前默认模型
+```
+
+**注意**: 通过命令切换的默认模型在重启后会恢复为配置文件中的设置。
+
+### 图片理解
+
+机器人支持图片理解功能，只需在私聊或 @机器人 的消息中发送图片，AI 会自动分析图片内容。
+
+配置示例:
+
+```yaml
+ai:
+  media:
+    enabled: true           # 启用媒体处理
+    max_size_mb: 10         # 最大文件大小（MB）
+    timeout_sec: 30         # 处理超时时间（秒）
+    # model: "gpt-4o"       # 指定视觉模型（留空使用默认模型）
+```
+
+使用场景:
+1. 用户在私聊中发送图片
+2. 机器人自动调用视觉模型分析图片
+3. 用户可以追加文字说明，如"这张图片里有什么？"
+
 ### MCP 工具调用
 
 Saber 支持 MCP (Model Context Protocol) 工具调用，让 AI 能够执行实际操作，如网络搜索、网页抓取等。
@@ -385,11 +419,35 @@ AI: [调用 web_search 工具] 我找到了以下信息...
 | `default_model`           | 如果启用    | 默认使用的模型               |
 | `max_tokens`              | 否          | 每次响应的最大 token 数      |
 | `temperature`             | 否          | 响应随机性（0-2）            |
+| `system_prompt`           | 否          | 自定义系统提示词             |
+| `timeout_seconds`         | 否          | 请求超时时间（秒）           |
+| `rate_limit_per_minute`   | 否          | 每分钟请求限制（0 表示无限制）|
 | `stream_enabled`          | 否          | 启用流式响应                 |
+| `stream_edit`             | 否          | 流式编辑配置（见下表）       |
 | `direct_chat_auto_reply`  | 否          | 私聊自动回复                 |
 | `group_chat_mention_reply`| 否          | 群聊 @mention 时自动回复     |
 | `reply_to_bot_reply`      | 否          | 回复机器人消息时自动回复     |
+| `media`                   | 否          | 媒体处理配置（见下表）       |
 | `proactive`               | 否          | 主动聊天配置（见下表）       |
+
+### 流式编辑设置
+
+| 字段               | 默认值 | 描述                               |
+| ------------------ | ------ | ---------------------------------- |
+| `enabled`          | `true` | 启用流式编辑                       |
+| `char_threshold`   | `300`  | 触发编辑的字符数阈值               |
+| `time_threshold_ms`| `3000` | 触发编辑的时间阈值（毫秒）         |
+| `edit_interval_ms` | `500`  | 编辑间隔（毫秒）                   |
+| `max_edits`        | `5`    | 单条消息最大编辑次数               |
+
+### 媒体处理设置
+
+| 字段          | 默认值 | 描述                             |
+| ------------- | ------ | -------------------------------- |
+| `enabled`     | `true` | 启用媒体处理                     |
+| `max_size_mb` | `10`   | 最大文件大小（MB）               |
+| `timeout_sec` | `30`   | 处理超时时间（秒）               |
+| `model`       | `""`   | 图片识别专用模型（留空用默认）   |
 
 ### 主动聊天设置
 
@@ -644,7 +702,9 @@ go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 - [mautrix-go](https://github.com/mautrix/go) - Matrix 客户端库
 - [go-openai](https://github.com/sashabaranov/go-openai) - OpenAI 客户端
 - [go-sdk](https://github.com/modelcontextprotocol/go-sdk) - MCP (Model Context Protocol) SDK
+- [goja](https://github.com/dop251/goja) - JavaScript 运行时（用于 JS 沙箱）
 - [tint](https://github.com/lmittmann/tint) - 带颜色的结构化日志
+- [bluemonday](https://github.com/microcosm-cc/bluemonday) - HTML 净化库
 
 ## 许可证
 
