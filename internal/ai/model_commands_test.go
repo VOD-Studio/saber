@@ -16,33 +16,26 @@ func TestModelsCommand_Registry(t *testing.T) {
 	}{
 		{
 			name: "无模型配置",
-			cfg: &config.AIConfig{
-				Enabled:        true,
-				Provider:       "openai",
-				BaseURL:        "https://api.openai.com/v1",
-				APIKey:         "test-key",
-				DefaultModel:   "default",
-				TimeoutSeconds: 30,
-				Models:         make(map[string]config.ModelConfig),
-			},
+			cfg: func() *config.AIConfig {
+				cfg := createTestAIConfig()
+				cfg.DefaultModel = "default"
+				return cfg
+			}(),
 			wantModelCount:  1, // just default
 			wantDefault:     "default",
 			wantModelsExist: nil,
 		},
 		{
 			name: "有模型配置",
-			cfg: &config.AIConfig{
-				Enabled:        true,
-				Provider:       "openai",
-				BaseURL:        "https://api.openai.com/v1",
-				APIKey:         "test-key",
-				DefaultModel:   "fast",
-				TimeoutSeconds: 30,
-				Models: map[string]config.ModelConfig{
+			cfg: func() *config.AIConfig {
+				cfg := createTestAIConfig()
+				cfg.DefaultModel = "fast"
+				cfg.Models = map[string]config.ModelConfig{
 					"fast":  {Model: "gpt-4o-mini"},
 					"smart": {Model: "gpt-4o"},
-				},
-			},
+				}
+				return cfg
+			}(),
 			wantModelCount:  2, // fast + smart
 			wantDefault:     "fast",
 			wantModelsExist: []string{"fast", "smart"},
@@ -78,17 +71,11 @@ func TestModelsCommand_Registry(t *testing.T) {
 }
 
 func TestSwitchModelCommand_Registry(t *testing.T) {
-	cfg := &config.AIConfig{
-		Enabled:        true,
-		Provider:       "openai",
-		BaseURL:        "https://api.openai.com/v1",
-		APIKey:         "test-key",
-		DefaultModel:   "fast",
-		TimeoutSeconds: 30,
-		Models: map[string]config.ModelConfig{
-			"fast":  {Model: "gpt-4o-mini"},
-			"smart": {Model: "gpt-4o"},
-		},
+	cfg := createTestAIConfig()
+	cfg.DefaultModel = "fast"
+	cfg.Models = map[string]config.ModelConfig{
+		"fast":  {Model: "gpt-4o-mini"},
+		"smart": {Model: "gpt-4o"},
 	}
 
 	t.Run("switch to existing model", func(t *testing.T) {
@@ -155,17 +142,11 @@ func TestSwitchModelCommand_Registry(t *testing.T) {
 }
 
 func TestCurrentModelCommand_Registry(t *testing.T) {
-	cfg := &config.AIConfig{
-		Enabled:        true,
-		Provider:       "openai",
-		BaseURL:        "https://api.openai.com/v1",
-		APIKey:         "test-key",
-		DefaultModel:   "fast",
-		TimeoutSeconds: 30,
-		Models: map[string]config.ModelConfig{
-			"fast":  {Model: "gpt-4o-mini"},
-			"smart": {Model: "gpt-4o"},
-		},
+	cfg := createTestAIConfig()
+	cfg.DefaultModel = "fast"
+	cfg.Models = map[string]config.ModelConfig{
+		"fast":  {Model: "gpt-4o-mini"},
+		"smart": {Model: "gpt-4o"},
 	}
 
 	t.Run("initial state", func(t *testing.T) {

@@ -87,11 +87,9 @@ func determineResponseMode(streamEnabled, streamEdit, useToolCall bool) Response
 	return ResponseModeDirect
 }
 
-const maxToolIterations = 5
-
 // executeToolCallingLoop 执行工具调用循环，处理 AI 响应中的工具调用。
 //
-// 它最多执行 maxToolIterations 次迭代，每次迭代都会：
+// 它最多执行配置的 MaxIterations 次迭代，每次迭代都会：
 // 1. 向 AI 发送当前消息历史
 // 2. 检查 AI 响应是否包含工具调用
 // 3. 如果没有工具调用，返回最终内容
@@ -116,7 +114,12 @@ func (s *Service) executeToolCallingLoop(
 	currentMessages := make([]openai.ChatCompletionMessage, len(messages))
 	copy(currentMessages, messages)
 
-	for i := 0; i < maxToolIterations; i++ {
+	maxIterations := s.globalConfig.ToolCalling.MaxIterations
+	if maxIterations <= 0 {
+		maxIterations = 5
+	}
+
+	for i := 0; i < maxIterations; i++ {
 		req := ChatCompletionRequest{
 			Model:    modelName,
 			Messages: currentMessages,
@@ -205,7 +208,7 @@ func (s *Service) executeToolCallingLoop(
 		}
 	}
 
-	return "", fmt.Errorf("max tool iterations (%d) exceeded", maxToolIterations)
+	return "", fmt.Errorf("max tool iterations (%d) exceeded", maxIterations)
 }
 
 // executeStreamingWithToolCalling 执行支持工具调用的流式响应。
@@ -242,7 +245,12 @@ func (s *Service) executeStreamingWithToolCalling(
 
 	eventID := matrix.GetEventID(ctx)
 
-	for i := range maxToolIterations {
+	maxIterations := s.globalConfig.ToolCalling.MaxIterations
+	if maxIterations <= 0 {
+		maxIterations = 5
+	}
+
+	for i := 0; i < maxIterations; i++ {
 		// 创建流编辑器和处理器
 		editor := NewStreamEditor(s.matrixService, roomID, "", s.globalConfig.StreamEdit, eventID)
 		handler := NewStreamToolHandler(editor, s.globalConfig.StreamEdit)
@@ -323,8 +331,8 @@ func (s *Service) executeStreamingWithToolCalling(
 		slog.Debug("工具调用执行完成，继续流式请求", "iteration", i+1)
 	}
 
-	slog.Error("超过最大工具调用迭代次数", "max_iterations", maxToolIterations)
-	return nil, fmt.Errorf("max tool iterations (%d) exceeded", maxToolIterations)
+	slog.Error("超过最大工具调用迭代次数", "max_iterations", maxIterations)
+	return nil, fmt.Errorf("max tool iterations (%d) exceeded", maxIterations)
 }
 
 // executeToolCall 执行单个工具调用。
@@ -409,11 +417,21 @@ func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpM
 }
 
 func (s *Service) getClient(modelName string) (*Client, error) {
+	// 第一次检查（读锁）
 	s.clientsMu.RLock()
 	client, exists := s.clients[modelName]
 	s.clientsMu.RUnlock()
 
 	if exists {
+		return client, nil
+	}
+
+	// 获取写锁进行创建
+	s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()
+
+	// 再次检查（可能其他 goroutine 已创建）
+	if client, exists := s.clients[modelName]; exists {
 		return client, nil
 	}
 
@@ -425,10 +443,7 @@ func (s *Service) getClient(modelName string) (*Client, error) {
 		return nil, fmt.Errorf("创建AI客户端失败 (模型: %s): %w", modelName, err)
 	}
 
-	s.clientsMu.Lock()
 	s.clients[modelName] = newClient
-	s.clientsMu.Unlock()
-
 	slog.Debug("创建了新的AI客户端", "model", modelName)
 	return newClient, nil
 }
@@ -661,6 +676,27 @@ func (s *Service) prependSystemPrompt(messages []openai.ChatCompletionMessage, p
 	return append(result, messages...)
 }
 
+// sendResponse 根据上下文中的 EventID 发送响应消息。
+//
+// 如果上下文中包含 EventID，则发送回复消息；否则发送普通文本消息。
+// 这消除了多处重复的消息发送逻辑。
+//
+// 参数:
+//   - ctx: 上下文（可能包含 EventID）
+//   - roomID: 目标房间 ID
+//   - content: 要发送的消息内容
+//
+// 返回值:
+//   - error: 发送过程中发生的错误
+func (s *Service) sendResponse(ctx context.Context, roomID id.RoomID, content string) error {
+	eventID := matrix.GetEventID(ctx)
+	if eventID != "" {
+		_, err := s.matrixService.SendReply(ctx, roomID, content, eventID)
+		return err
+	}
+	return s.matrixService.SendText(ctx, roomID, content)
+}
+
 // executeDirectResponse 执行直接（非流式）AI 响应。
 func (s *Service) executeDirectResponse(
 	ctx context.Context,
@@ -691,19 +727,11 @@ func (s *Service) executeDirectResponse(
 		"completion_tokens", resp.Usage.CompletionTokens,
 		"total_tokens", resp.Usage.TotalTokens)
 
-	slog.Info("AI 响应", "model", resp.Model, "content", resp.Content)
+	slog.Info("AI 响应", "model", resp.Model, "content_length", len(resp.Content))
 
-	eventID := matrix.GetEventID(ctx)
-	var sendErr error
-	if eventID != "" {
-		_, sendErr = s.matrixService.SendReply(ctx, roomID, resp.Content, eventID)
-	} else {
-		sendErr = s.matrixService.SendText(ctx, roomID, resp.Content)
-	}
-
-	if sendErr != nil {
-		slog.Error("发送 AI 响应失败", "error", sendErr)
-		return nil, fmt.Errorf("发送响应失败：%w", sendErr)
+	if err := s.sendResponse(ctx, roomID, resp.Content); err != nil {
+		slog.Error("发送 AI 响应失败", "error", err)
+		return nil, fmt.Errorf("发送响应失败：%w", err)
 	}
 
 	if s.contextManager != nil {
@@ -1072,19 +1100,11 @@ func (s *Service) executeDirectResponseWithTools(
 		return nil, chatErr
 	}
 
-	slog.Info("AI 响应", "model", respCtx.Model, "content", finalContent)
+	slog.Info("AI 响应", "model", respCtx.Model, "content_length", len(finalContent))
 
-	eventID := matrix.GetEventID(ctx)
-	var sendErr error
-	if eventID != "" {
-		_, sendErr = s.matrixService.SendReply(ctx, roomID, finalContent, eventID)
-	} else {
-		sendErr = s.matrixService.SendText(ctx, roomID, finalContent)
-	}
-
-	if sendErr != nil {
-		slog.Error("发送 AI 响应失败", "error", sendErr)
-		return nil, fmt.Errorf("发送响应失败：%w", sendErr)
+	if err := s.sendResponse(ctx, roomID, finalContent); err != nil {
+		slog.Error("发送 AI 响应失败", "error", err)
+		return nil, fmt.Errorf("发送响应失败：%w", err)
 	}
 
 	if s.contextManager != nil {
