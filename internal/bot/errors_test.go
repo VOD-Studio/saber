@@ -62,10 +62,10 @@ func TestExitCodeError_Unwrap(t *testing.T) {
 
 func TestIsExitCode(t *testing.T) {
 	tests := []struct {
-		name         string
-		err          error
-		wantCode     int
-		wantOK       bool
+		name     string
+		err      error
+		wantCode int
+		wantOK   bool
 	}{
 		{
 			name:     "ExitCodeError 成功退出",

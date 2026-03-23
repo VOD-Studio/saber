@@ -20,17 +20,17 @@ type MockMatrixClient struct {
 	BaseURL     string
 
 	// 可自定义的行为
-	JoinRoomFunc       func(ctx context.Context, roomIDOrAlias string, req *mautrix.ReqJoinRoom) (*mautrix.RespJoinRoom, error)
-	LeaveRoomFunc      func(ctx context.Context, roomID id.RoomID, req *mautrix.ReqLeave) (*mautrix.RespLeaveRoom, error)
-	SendTextFunc       func(ctx context.Context, roomID id.RoomID, text string) (*mautrix.RespSendEvent, error)
+	JoinRoomFunc         func(ctx context.Context, roomIDOrAlias string, req *mautrix.ReqJoinRoom) (*mautrix.RespJoinRoom, error)
+	LeaveRoomFunc        func(ctx context.Context, roomID id.RoomID, req *mautrix.ReqLeave) (*mautrix.RespLeaveRoom, error)
+	SendTextFunc         func(ctx context.Context, roomID id.RoomID, text string) (*mautrix.RespSendEvent, error)
 	SendMessageEventFunc func(ctx context.Context, roomID id.RoomID, eventType event.Type, content interface{}) (*mautrix.RespSendEvent, error)
-	SendNoticeFunc     func(ctx context.Context, roomID id.RoomID, text string) (*mautrix.RespSendEvent, error)
-	JoinedRoomsFunc    func(ctx context.Context) (*mautrix.RespJoinedRooms, error)
-	StateFunc          func(ctx context.Context, roomID id.RoomID) (mautrix.RoomStateMap, error)
-	FullStateEventFunc func(ctx context.Context, roomID id.RoomID, eventType event.Type, stateKey string) (*event.Event, error)
-	SetTypingFunc      func(ctx context.Context, roomID id.RoomID, typing bool, timeout int64) (bool, error)
-	UserIDFunc         func() id.UserID
-	DeviceIDFunc       func() id.DeviceID
+	SendNoticeFunc       func(ctx context.Context, roomID id.RoomID, text string) (*mautrix.RespSendEvent, error)
+	JoinedRoomsFunc      func(ctx context.Context) (*mautrix.RespJoinedRooms, error)
+	StateFunc            func(ctx context.Context, roomID id.RoomID) (mautrix.RoomStateMap, error)
+	FullStateEventFunc   func(ctx context.Context, roomID id.RoomID, eventType event.Type, stateKey string) (*event.Event, error)
+	SetTypingFunc        func(ctx context.Context, roomID id.RoomID, typing bool, timeout int64) (bool, error)
+	UserIDFunc           func() id.UserID
+	DeviceIDFunc         func() id.DeviceID
 
 	// 底层 mautrix.Client（可选）
 	client *mautrix.Client
@@ -229,10 +229,10 @@ func NewMockHTTPClient(baseURL string) (*mockHTTPClient, error) {
 // createTestEvent 创建一个测试用的事件。
 func createTestEvent(eventID, roomID, userID, msgType, body string) *event.Event {
 	return &event.Event{
-		ID:   id.EventID(eventID),
+		ID:     id.EventID(eventID),
 		RoomID: id.RoomID(roomID),
 		Sender: id.UserID(userID),
-		Type:  event.EventMessage,
+		Type:   event.EventMessage,
 		Content: event.Content{
 			Parsed: &event.MessageEventContent{
 				MsgType: event.MessageType(msgType),
@@ -250,10 +250,10 @@ func CreateTestMessageEvent(eventID, roomID, userID, body string) *event.Event {
 // CreateTestMemberEvent 创建一个测试用的成员事件。
 func CreateTestMemberEvent(roomID, userID, senderID string, membership event.Membership) *event.Event {
 	return &event.Event{
-		ID:     id.EventID("$member_" + eventIDFromParts(roomID, userID)),
-		RoomID: id.RoomID(roomID),
-		Sender: id.UserID(senderID),
-		Type:   event.StateMember,
+		ID:       id.EventID("$member_" + eventIDFromParts(roomID, userID)),
+		RoomID:   id.RoomID(roomID),
+		Sender:   id.UserID(senderID),
+		Type:     event.StateMember,
 		StateKey: ptr(userID),
 		Content: event.Content{
 			Parsed: &event.MemberEventContent{
