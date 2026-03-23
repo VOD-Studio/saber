@@ -30,6 +30,14 @@ build: ## 构建二进制文件
 	@$(MKDIR_P)
 	CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(APP_NAME)$(shell go env GOEXE) .
 
+build-all: ## 构建所有平台 (macOS/Linux/Windows, arm64/amd64)
+	@mkdir -p $(BUILD_DIR)/release
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/release/$(APP_NAME)-darwin-amd64 .
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/release/$(APP_NAME)-darwin-arm64 .
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/release/$(APP_NAME)-linux-amd64 .
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/release/$(APP_NAME)-linux-arm64 .
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/release/$(APP_NAME)-windows-amd64.exe .
+	GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/release/$(APP_NAME)-windows-arm64.exe .
 build-prod: ## 构建优化的生产版本（静态链接，去除调试信息）
 	@$(MKDIR_P)
 	CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -gcflags="-l=4" -o $(BUILD_DIR)/$(APP_NAME)$(shell go env GOEXE) .
