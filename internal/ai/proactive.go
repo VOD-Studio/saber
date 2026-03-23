@@ -418,8 +418,9 @@ func (m *ProactiveManager) generateDefaultProactiveMessage(triggerType TriggerTy
 // 当检测到新成员加入时，该方法会：
 // 1. 检查新成员欢迎功能是否启用
 // 2. 检查房间是否满足发送条件（频率限制）
-// 3. 生成欢迎消息并发送
-// 4. 更新房间的主动消息状态
+// 3. 获取房间类型（私聊/群聊）
+// 4. 生成欢迎消息并发送
+// 5. 更新房间的主动消息状态
 //
 // 参数:
 //   - ctx: 上下文，用于取消操作
@@ -451,8 +452,19 @@ func (m *ProactiveManager) OnNewMember(ctx context.Context, roomID id.RoomID, us
 
 	logger.Info("处理新成员欢迎")
 
+	// 获取房间信息以判断房间类型
+	roomInfo, err := m.roomService.GetRoomInfo(ctx, roomID.String())
+	if err != nil {
+		logger.Debug("获取房间信息失败，使用默认群聊语气", "error", err)
+		roomInfo = &matrix.RoomInfo{ID: roomID, MemberCount: 0}
+	}
+
+	// 判断是否为私聊房间（成员数为2）
+	isDirect := roomInfo.MemberCount == 2
+	logger.Debug("房间类型判断", "is_direct", isDirect, "member_count", roomInfo.MemberCount)
+
 	// 生成欢迎消息
-	welcomeMsg, err := m.generateWelcomeMessage(ctx, userID)
+	welcomeMsg, err := m.generateWelcomeMessage(ctx, userID, isDirect)
 	if err != nil {
 		return fmt.Errorf("生成欢迎消息失败: %w", err)
 	}
@@ -511,15 +523,19 @@ func (m *ProactiveManager) canSendMessage(roomID id.RoomID) bool {
 // generateWelcomeMessage 生成新成员欢迎消息。
 //
 // 它使用 AI 服务根据配置的欢迎提示词生成个性化欢迎消息。
+// 根据房间类型（私聊/群聊）使用不同的语气：
+//   - 私聊：使用亲密、个人化的语气
+//   - 群聊：使用面向群体的语气
 //
 // 参数:
 //   - ctx: 上下文，用于取消操作
 //   - userID: 新成员的用户 ID
+//   - isDirect: 是否为私聊房间
 //
 // 返回值:
 //   - string: 生成的欢迎消息
 //   - error: 生成过程中发生的错误
-func (m *ProactiveManager) generateWelcomeMessage(ctx context.Context, userID id.UserID) (string, error) {
+func (m *ProactiveManager) generateWelcomeMessage(ctx context.Context, userID id.UserID, isDirect bool) (string, error) {
 	// 构建欢迎提示词
 	welcomePrompt := m.config.NewMember.WelcomePrompt
 	if welcomePrompt == "" {
@@ -528,11 +544,22 @@ func (m *ProactiveManager) generateWelcomeMessage(ctx context.Context, userID id
 
 	// 如果 AI 服务未启用，返回简单欢迎消息
 	if !m.aiService.IsEnabled() {
+		if isDirect {
+			return fmt.Sprintf("很高兴认识你，%s！", userID), nil
+		}
 		return fmt.Sprintf("欢迎 %s 加入！", userID), nil
 	}
 
+	// 根据房间类型调整系统提示词
+	var roomTypeHint string
+	if isDirect {
+		roomTypeHint = "这是私聊场景，请使用亲密、个人化的语气，像朋友一样交谈。"
+	} else {
+		roomTypeHint = "这是群聊场景，请使用面向群体的语气。"
+	}
+
 	// 构建系统提示词
-	systemPrompt := fmt.Sprintf("你是一个友好的聊天机器人。%s。请用简短友好的方式回复，不要超过两句话。", welcomePrompt)
+	systemPrompt := fmt.Sprintf("你是一个友好的聊天机器人。%s。%s 请用简短友好的方式回复，不要超过两句话。", welcomePrompt, roomTypeHint)
 
 	// 构建用户消息
 	userMsg := fmt.Sprintf("新成员 %s 刚刚加入了这个房间。请生成一条简短的欢迎消息。", userID)
@@ -541,6 +568,9 @@ func (m *ProactiveManager) generateWelcomeMessage(ctx context.Context, userID id
 	response, err := m.aiService.GenerateSimpleResponse(ctx, systemPrompt, userMsg)
 	if err != nil {
 		slog.Warn("AI 生成欢迎消息失败，使用默认消息", "error", err)
+		if isDirect {
+			return fmt.Sprintf("很高兴认识你，%s！", userID), nil
+		}
 		return fmt.Sprintf("欢迎 %s 加入！", userID), nil
 	}
 
