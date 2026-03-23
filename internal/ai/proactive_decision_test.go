@@ -1106,3 +1106,142 @@ func TestDecisionCache_ContextHashIsolation(t *testing.T) {
 		t.Errorf("Context2 ShouldSpeak = %v, want false", got2.ShouldSpeak)
 	}
 }
+
+// TestGatherDecisionContext_IsDirect 测试 IsDirect 字段的正确设置。
+//
+// 验证 GatherDecisionContext 根据成员数量正确判断房间类型：
+// - 成员数为 2 时，IsDirect 应为 true（私聊）
+// - 成员数不为 2 时，IsDirect 应为 false（群聊）
+func TestGatherDecisionContext_IsDirect(t *testing.T) {
+	roomID := id.RoomID("!test:example.org")
+
+	tests := []struct {
+		name           string
+		memberCount    int
+		wantIsDirect   bool
+		wantRoomType   string
+	}{
+		{
+			name:         "私聊 - 成员数为2",
+			memberCount:  2,
+			wantIsDirect: true,
+			wantRoomType: "私聊",
+		},
+		{
+			name:         "群聊 - 成员数为3",
+			memberCount:  3,
+			wantIsDirect: false,
+			wantRoomType: "群聊",
+		},
+		{
+			name:         "群聊 - 成员数为1",
+			memberCount:  1,
+			wantIsDirect: false,
+			wantRoomType: "群聊",
+		},
+		{
+			name:         "群聊 - 成员数为10",
+			memberCount:  10,
+			wantIsDirect: false,
+			wantRoomType: "群聊",
+		},
+		{
+			name:         "群聊 - 成员数为0（未知）",
+			memberCount:  0,
+			wantIsDirect: false,
+			wantRoomType: "群聊",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			stateProvider := &mockStateProvider{
+				state: &RoomState{
+					LastMessageTime: time.Now().Add(-30 * time.Minute),
+					MessagesToday:   1,
+				},
+			}
+			roomInfoProvider := &mockRoomInfoProvider{
+				info: &matrix.RoomInfo{
+					ID:          roomID,
+					Name:        "测试房间",
+					MemberCount: tt.memberCount,
+					IsEncrypted: false,
+				},
+			}
+
+			dc, err := GatherDecisionContext(ctx, roomID, stateProvider, roomInfoProvider, TriggerInactivity, 60)
+			if err != nil {
+				t.Fatalf("GatherDecisionContext() error = %v", err)
+			}
+
+			if dc.IsDirect != tt.wantIsDirect {
+				t.Errorf("IsDirect = %v, want %v (memberCount=%d)", dc.IsDirect, tt.wantIsDirect, tt.memberCount)
+			}
+		})
+	}
+}
+
+// TestBuildDecisionPrompt_IsDirect 测试模板中房间类型的正确渲染。
+//
+// 验证 BuildDecisionPrompt 生成的提示词包含正确的房间类型信息：
+// - IsDirect=true 时显示"私聊"
+// - IsDirect=false 时显示"群聊"
+func TestBuildDecisionPrompt_IsDirect(t *testing.T) {
+	tests := []struct {
+		name         string
+		isDirect     bool
+		wantContain  string
+		wantNotContain string
+	}{
+		{
+			name:        "私聊房间 - 显示私聊类型",
+			isDirect:    true,
+			wantContain: "房间类型：私聊",
+			wantNotContain: "群聊",
+		},
+		{
+			name:        "群聊房间 - 显示群聊类型",
+			isDirect:    false,
+			wantContain: "房间类型：群聊",
+			wantNotContain: "私聊",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := &DecisionContext{
+				RoomID:           "!test:example.org",
+				RoomName:         "测试房间",
+				ActivityLevel:    ActivityLow,
+				MinutesSinceLast: 120,
+				MessagesToday:    1,
+				TriggerType:      TriggerInactivity,
+				MemberCount:      func() int { if tt.isDirect { return 2 } else { return 5 } }(),
+				IsDirect:         tt.isDirect,
+				IsEncrypted:      false,
+			}
+
+			prompt, err := BuildDecisionPrompt(ctx, &config.DecisionConfig{})
+			if err != nil {
+				t.Fatalf("BuildDecisionPrompt() error = %v", err)
+			}
+
+			if !strings.Contains(prompt, tt.wantContain) {
+				t.Errorf("Prompt does not contain %q\ngot: %s", tt.wantContain, prompt)
+			}
+
+			// 验证语气提示
+			if tt.isDirect {
+				if !strings.Contains(prompt, "亲密、个人化的语气") {
+					t.Errorf("Private chat prompt should contain intimate tone hint\ngot: %s", prompt)
+				}
+			} else {
+				if !strings.Contains(prompt, "面向群体的语气") {
+					t.Errorf("Group chat prompt should contain group tone hint\ngot: %s", prompt)
+				}
+			}
+		})
+	}
+}
