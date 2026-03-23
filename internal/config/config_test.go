@@ -428,6 +428,9 @@ func TestExampleConfig(t *testing.T) {
 	if !contains(content, "homeserver:") {
 		t.Error("示例配置应包含 homeserver 说明")
 	}
+	if !contains(content, "providers:") {
+		t.Error("示例配置应包含 providers 多提供商配置")
+	}
 	if !contains(content, "provider:") {
 		t.Error("示例配置应包含 provider 说明")
 	}

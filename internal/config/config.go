@@ -841,14 +841,45 @@ func ExampleConfig() string {
 ai:
   # 启用 AI 功能
   enabled: false
+  # ==================== 多提供商配置（推荐） ====================
+  # 支持同时配置多个 AI 提供商，使用完全限定名称：提供商.模型名
+  providers:
+    openai:
+      type: "openai"
+      base_url: "https://api.openai.com/v1"
+      api_key: ""
+      models:
+        gpt-4o-mini:
+          model: "gpt-4o-mini"
+        gpt-4o:
+          model: "gpt-4o"
+    # Ollama 本地模型示例
+    # ollama:
+    #   type: "openai"
+    #   base_url: "http://localhost:11434/v1"
+    #   models:
+    #     llama3:
+    #       model: "llama3"
+    # Azure OpenAI 示例
+    # azure:
+    #   type: "azure"
+    #   base_url: "https://your-resource.openai.azure.com"
+    #   api_key: ""
+    #   extra:
+    #     api_version: "2024-02-15-preview"
+    #   models:
+    #     gpt-4:
+    #       model: "gpt-4"
+  # 默认使用的模型（完全限定名称：提供商.模型名）
+  default_model: "openai.gpt-4o-mini"
+  # ==================== 单提供商配置（兼容旧格式） ====================
+  # 以下配置仅在没有配置 providers 时生效，用于向后兼容
   # AI 提供商（如 openai, azure, anthropic）
-  provider: "openai"
+  # provider: "openai"
   # API 基础 URL
-  base_url: "https://api.openai.com/v1"
+  # base_url: "https://api.openai.com/v1"
   # API 密钥
-  api_key: ""
-  # 默认使用的模型
-  default_model: "gpt-4o-mini"
+  # api_key: ""
   # 最大生成 token 数
   max_tokens: 256000
   # 生成温度（0-2）
