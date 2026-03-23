@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/lmittmann/tint"
 	"maunium.net/go/mautrix"
@@ -426,28 +428,81 @@ func (s *appState) waitForShutdown(ctx context.Context, cancel context.CancelFun
 }
 
 // shutdown 执行优雅关闭。
+//
+// 它会：
+// 1. 并行停止所有服务
+// 2. 等待所有服务完成或超时
+// 3. 记录关闭日志
 func (s *appState) shutdown(cancel context.CancelFunc) {
 	svc := s.services
 
+	// 从配置获取超时时间
+	timeoutSeconds := s.cfg.Shutdown.TimeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 30 // 默认值
+	}
+	shutdownTimeout := time.Duration(timeoutSeconds) * time.Second
+
+	slog.Info("开始优雅关闭", "timeout", shutdownTimeout)
+
+	// 创建带超时的上下文
+	ctx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer shutdownCancel()
+
+	// 使用 WaitGroup 并行关闭所有服务
+	var wg sync.WaitGroup
+
 	if svc.aiService != nil {
-		slog.Info("Stopping AI service...")
-		svc.aiService.Stop()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			slog.Debug("正在停止 AI 服务...")
+			svc.aiService.Stop()
+			slog.Debug("AI 服务已停止")
+		}()
 	}
 
 	if svc.mcpManager != nil {
-		slog.Info("Closing MCP connections...")
-		if err := svc.mcpManager.Close(); err != nil {
-			slog.Warn("Failed to close MCP manager", "error", err)
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			slog.Debug("正在关闭 MCP 连接...")
+			if err := svc.mcpManager.Close(); err != nil {
+				slog.Warn("关闭 MCP 管理器失败", "error", err)
+			} else {
+				slog.Debug("MCP 连接已关闭")
+			}
+		}()
 	}
 
 	if svc.proactiveManager != nil {
-		slog.Info("Stopping proactive manager...")
-		svc.proactiveManager.Stop()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			slog.Debug("正在停止主动聊天管理器...")
+			svc.proactiveManager.Stop()
+			slog.Debug("主动聊天管理器已停止")
+		}()
+	}
+
+	// 等待所有服务关闭完成或超时
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		slog.Info("所有服务已优雅关闭")
+	case <-ctx.Done():
+		slog.Warn("关闭超时，强制退出",
+			"timeout", shutdownTimeout,
+			"hint", "考虑增加 shutdown.timeout_seconds 配置值")
 	}
 
 	cancel()
-	slog.Info("Bot stopped")
+	slog.Info("Bot 已停止")
 }
 
 // setupLogging 配置全局日志记录器。
