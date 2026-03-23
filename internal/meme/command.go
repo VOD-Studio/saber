@@ -34,9 +34,9 @@ type MemeCommand struct {
 // NewMemeCommand 创建一个新的 meme 命令处理器。
 func NewMemeCommand(cmdService CommandService, client *mautrix.Client, memeService *Service) *MemeCommand {
 	return &MemeCommand{
-		service:    memeService,
-		cmdService: cmdService,
-		client:     client,
+		service:     memeService,
+		cmdService:  cmdService,
+		client:      client,
 		uploadMedia: defaultUploadMedia(client),
 	}
 }
@@ -56,14 +56,16 @@ func defaultUploadMedia(client *mautrix.Client) UploadMediaFunc {
 // Handle 实现 CommandHandler。
 //
 // 用法:
-//   !meme <关键词>           - 搜索 GIF（默认）
-//   !meme --gif <关键词>     - 搜索 GIF
-//   !meme --sticker <关键词> - 搜索 Sticker
-//   !meme --meme <关键词>    - 搜索 Meme
+//
+//	!meme <关键词>           - 搜索 GIF（默认）
+//	!meme --gif <关键词>     - 搜索 GIF
+//	!meme --sticker <关键词> - 搜索 Sticker
+//	!meme --meme <关键词>    - 搜索 Meme
 //
 // 示例:
-//   !meme happy
-//   !meme --sticker hello
+//
+//	!meme happy
+//	!meme --sticker hello
 func (c *MemeCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
 	// 检查服务是否可用
 	if c.service == nil || !c.service.IsEnabled() {
