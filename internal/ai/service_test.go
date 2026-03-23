@@ -2,6 +2,7 @@
 package ai
 
 import (
+	"context"
 	"sync"
 	"testing"
 
@@ -320,4 +321,118 @@ func TestService_Stop(t *testing.T) {
 	// Stop 方法应该已经执行，但由于没有直接的可见效果，
 	// 我们主要验证它不会 panic 并且可以被调用多次
 	service.Stop() // 第二次调用应该也是安全的
+}
+
+// TestWithUserContext 测试 WithUserContext 函数。
+func TestWithUserContext(t *testing.T) {
+	ctx := context.Background()
+	userID := id.UserID("@test:example.com")
+	roomID := id.RoomID("!room:example.com")
+
+	newCtx := WithUserContext(ctx, userID, roomID)
+
+	if newCtx == nil {
+		t.Fatal("WithUserContext returned nil context")
+	}
+
+	// 验证上下文包含用户 ID
+	gotUserID, ok := newCtx.Value(userIDKey).(id.UserID)
+	if !ok {
+		t.Fatal("context does not contain userID")
+	}
+	if gotUserID != userID {
+		t.Errorf("expected userID %s, got %s", userID, gotUserID)
+	}
+
+	// 验证上下文包含房间 ID
+	gotRoomID, ok := newCtx.Value(roomIDKey).(id.RoomID)
+	if !ok {
+		t.Fatal("context does not contain roomID")
+	}
+	if gotRoomID != roomID {
+		t.Errorf("expected roomID %s, got %s", roomID, gotRoomID)
+	}
+}
+
+// TestGetUserFromContext 测试 GetUserFromContext 函数。
+func TestGetUserFromContext(t *testing.T) {
+	t.Run("context_with_user", func(t *testing.T) {
+		ctx := context.Background()
+		userID := id.UserID("@test:example.com")
+		roomID := id.RoomID("!room:example.com")
+
+		ctx = WithUserContext(ctx, userID, roomID)
+
+		gotUserID, ok := GetUserFromContext(ctx)
+		if !ok {
+			t.Error("GetUserFromContext returned false")
+		}
+		if gotUserID != userID {
+			t.Errorf("expected userID %s, got %s", userID, gotUserID)
+		}
+	})
+
+	t.Run("context_without_user", func(t *testing.T) {
+		ctx := context.Background()
+
+		_, ok := GetUserFromContext(ctx)
+		if ok {
+			t.Error("GetUserFromContext should return false for context without user")
+		}
+	})
+}
+
+// TestGetRoomFromContext 测试 GetRoomFromContext 函数。
+func TestGetRoomFromContext(t *testing.T) {
+	t.Run("context_with_room", func(t *testing.T) {
+		ctx := context.Background()
+		userID := id.UserID("@test:example.com")
+		roomID := id.RoomID("!room:example.com")
+
+		ctx = WithUserContext(ctx, userID, roomID)
+
+		gotRoomID, ok := GetRoomFromContext(ctx)
+		if !ok {
+			t.Error("GetRoomFromContext returned false")
+		}
+		if gotRoomID != roomID {
+			t.Errorf("expected roomID %s, got %s", roomID, gotRoomID)
+		}
+	})
+
+	t.Run("context_without_room", func(t *testing.T) {
+		ctx := context.Background()
+
+		_, ok := GetRoomFromContext(ctx)
+		if ok {
+			t.Error("GetRoomFromContext should return false for context without room")
+		}
+	})
+}
+
+// TestService_GetModelRegistry 测试 GetModelRegistry 方法。
+func TestService_GetModelRegistry(t *testing.T) {
+	cfg := createTestAIConfig()
+	service, _ := NewService(cfg, nil, nil, nil)
+
+	registry := service.GetModelRegistry()
+	if registry == nil {
+		t.Error("GetModelRegistry returned nil")
+	}
+}
+
+// TestService_WithMCPManager 测试带 MCP Manager 的服务初始化。
+// 注意：MCP Manager 需要实际的 *mcp.Manager 类型，不能用 mock
+// 这里只测试 nil MCP Manager 的情况
+func TestService_WithNilMCPManager(t *testing.T) {
+	cfg := createTestAIConfig()
+
+	service, err := NewService(cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if service == nil {
+		t.Fatal("service is nil")
+	}
 }
