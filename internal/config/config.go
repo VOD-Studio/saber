@@ -16,6 +16,7 @@ type Config struct {
 	Matrix   MatrixConfig   `yaml:"matrix"`
 	AI       AIConfig       `yaml:"ai"`
 	MCP      MCPConfig      `yaml:"mcp"`
+	Meme     MemeConfig     `yaml:"meme"`
 	Shutdown ShutdownConfig `yaml:"shutdown"`
 }
 
@@ -195,6 +196,14 @@ type MediaConfig struct {
 	Model      string `yaml:"model"`       // 图片识别专用模型（留空则使用默认模型）
 }
 
+// MemeConfig 存储 meme/GIF 搜索配置
+type MemeConfig struct {
+	Enabled        bool   `yaml:"enabled"`         // 是否启用 meme 功能
+	APIKey         string `yaml:"api_key"`         // Klipy API Key
+	MaxResults     int    `yaml:"max_results"`     // 最大返回结果数（默认 5）
+	TimeoutSeconds int    `yaml:"timeout_seconds"` // 请求超时时间（秒，默认 10）
+}
+
 // UseTokenAuth 检查是否使用 Token 认证
 func (m *MatrixConfig) UseTokenAuth() bool {
 	return m.AccessToken != ""
@@ -329,6 +338,16 @@ func DefaultMediaConfig() MediaConfig {
 		MaxSizeMB:  10,
 		TimeoutSec: 30,
 		Model:      "",
+	}
+}
+
+// DefaultMemeConfig 返回带有合理默认值的 meme 配置
+func DefaultMemeConfig() MemeConfig {
+	return MemeConfig{
+		Enabled:        false,
+		APIKey:         "",
+		MaxResults:     5,
+		TimeoutSeconds: 10,
 	}
 }
 
@@ -528,6 +547,23 @@ func (d *DecisionConfig) Validate() error {
 	return nil
 }
 
+// Validate 验证 meme 配置是否有效
+func (m *MemeConfig) Validate() error {
+	if !m.Enabled {
+		return nil
+	}
+	if m.APIKey == "" {
+		return fmt.Errorf("api_key is required when meme is enabled")
+	}
+	if m.MaxResults <= 0 {
+		return fmt.Errorf("max_results must be positive")
+	}
+	if m.TimeoutSeconds <= 0 {
+		return fmt.Errorf("timeout_seconds must be positive")
+	}
+	return nil
+}
+
 // GetModelConfig 获取指定模型的配置
 //
 // 它首先查找模型特定配置，如果找到则返回继承全局配置后的模型配置。
@@ -647,6 +683,7 @@ func DefaultConfig() *Config {
 				JSSandbox: DefaultJSSandboxConfig(),
 			},
 		},
+		Meme:     DefaultMemeConfig(),
 		Shutdown: DefaultShutdownConfig(),
 	}
 }
@@ -826,6 +863,17 @@ mcp:
       max_memory_mb: 64
       # 最大输出长度（字符，默认 10000）
       max_output_length: 10000
+
+# Meme/GIF 搜索配置（使用 Klipy API）
+meme:
+  # 是否启用 meme 功能
+  enabled: false
+  # Klipy API Key（从 partner.klipy.com 获取）
+  api_key: ""
+  # 最大返回结果数（默认 5）
+  max_results: 5
+  # 请求超时时间（秒，默认 10）
+  timeout_seconds: 10
 
 # 关闭配置
 shutdown:

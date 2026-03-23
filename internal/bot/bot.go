@@ -20,6 +20,7 @@ import (
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/mcp"
+	"rua.plus/saber/internal/meme"
 )
 
 // services 持有所有需要管理的服务实例。
@@ -31,6 +32,7 @@ type services struct {
 	eventHandler     *matrix.EventHandler
 	presence         *matrix.PresenceService
 	mediaService     *matrix.MediaService
+	memeService      *meme.Service
 	client           *matrix.MatrixClient
 }
 
@@ -230,6 +232,9 @@ func (s *appState) initServices() error {
 		svc.proactiveManager = mgr
 	}
 
+	// 初始化 Meme 服务
+	s.initMemeService()
+
 	return nil
 }
 
@@ -296,6 +301,42 @@ func (s *appState) registerAICommands() {
 	}
 
 	slog.Info("AI 命令注册完成")
+}
+
+// initMemeService 初始化 Meme 服务。
+func (s *appState) initMemeService() {
+	if !s.cfg.Meme.Enabled {
+		return
+	}
+
+	if err := s.cfg.Meme.Validate(); err != nil {
+		slog.Warn("Meme 配置无效，跳过初始化", "error", err)
+		return
+	}
+
+	svc := s.services
+	mautrixClient := svc.client.GetClient()
+
+	memeSvc := meme.NewService(&s.cfg.Meme)
+	svc.memeService = memeSvc
+
+	cs := svc.commandService
+
+	// 注册主命令，支持 --gif/--sticker/--meme 参数
+	cs.RegisterCommandWithDesc("meme",
+		"搜索并发送梗图 (用法: !meme [--gif|--sticker|--meme] <关键词>)",
+		meme.NewMemeCommand(cs, mautrixClient, memeSvc))
+
+	// 注册便捷命令
+	cs.RegisterCommandWithDesc("gif",
+		"搜索 GIF 动图 (用法: !gif <关键词>)",
+		meme.NewTypedMemeCommand(cs, mautrixClient, memeSvc, meme.ContentTypeGIF))
+
+	cs.RegisterCommandWithDesc("sticker",
+		"搜索贴纸 (用法: !sticker <关键词>)",
+		meme.NewTypedMemeCommand(cs, mautrixClient, memeSvc, meme.ContentTypeSticker))
+
+	slog.Info("Meme 服务已启用")
 }
 
 // initProactiveManager 初始化主动聊天管理器。
