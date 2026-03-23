@@ -1968,16 +1968,6 @@ func TestHandleReply_ReferencedImage(t *testing.T) {
 	})
 }
 
-// mustMarshalEventFromEvent 从事件对象创建 JSON 响应。
-func mustMarshalEventFromEvent(userID id.UserID, evt *event.Event) []byte {
-	// 使用事件的 JSON 序列化
-	data, err := json.Marshal(evt)
-	if err != nil {
-		panic(err)
-	}
-	return data
-}
-
 // mustMarshalImageEvent 将图片事件信息序列化为 Matrix API 返回的 JSON 格式。
 func mustMarshalImageEvent(sender id.UserID, eventID id.EventID, body, mimeType, mxcURL string) []byte {
 	event := map[string]any{
