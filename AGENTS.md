@@ -180,22 +180,53 @@ cs.SetReplyAIHandler(handler)            // 回复机器人消息
 
 ## Testing Guidelines
 
+### 测试命名规范
+
+测试函数命名格式: `Test<FunctionName>_<Scenario>`
+
+```go
+func TestNewService_NilConfig(t *testing.T) { ... }
+func TestNewService_InvalidConfig(t *testing.T) { ... }
+func TestNewService_ValidConfig(t *testing.T) { ... }
+```
+
+### 表驱动测试
+
 ```go
 func TestValidate(t *testing.T) {
-    tests := []struct { name string; config Config; wantErr bool }{
+    tests := []struct {
+        name    string
+        config  Config
+        wantErr bool
+    }{
         {"valid", Config{URL: "https://example.com"}, false},
         {"missing URL", Config{}, true},
     }
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
             err := tt.config.Validate()
-            if (err != nil) != tt.wantErr { t.Errorf("error = %v", err) }
+            if (err != nil) != tt.wantErr {
+                t.Errorf("error = %v", err)
+            }
         })
     }
 }
 ```
 
-**要求**: 成功和失败路径覆盖 | 使用 `t.TempDir()` | 表驱动测试
+### 测试辅助函数
+
+测试辅助函数以 `create` 或 `new` 前缀命名:
+
+```go
+func createTestAIConfig() *config.AIConfig {
+    cfg := config.DefaultAIConfig()
+    cfg.Enabled = true
+    cfg.Provider = "openai"
+    return &cfg
+}
+```
+
+**要求**: 成功和失败路径覆盖 | 使用 `t.TempDir()` | 表驱动测试 | 每个测试独立
 
 ---
 
@@ -230,3 +261,5 @@ export GOFLAGS="-tags=goolm"  # 编辑器构建标签
 
 - [Effective Go](https://go.dev/doc/effective_go)
 - [mautrix-go Documentation](https://docs.mau.fi/mautrix-go/)
+- [go-openai Documentation](https://pkg.go.dev/github.com/sashabaranov/go-openai)
+- [MCP Go SDK](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk)
