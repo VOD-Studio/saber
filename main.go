@@ -5,6 +5,9 @@
 package main
 
 import (
+	"log/slog"
+	"os"
+
 	// 注册 SQLite 驱动 (纯 Go 或 CGO，取决于构建标签)
 	_ "rua.plus/saber/internal/db"
 
@@ -22,7 +25,7 @@ var (
 )
 
 func main() {
-	bot.Run(matrix.BuildInfo{
+	err := bot.Run(matrix.BuildInfo{
 		Version:       version,
 		GitCommit:     gitCommit,
 		GitBranch:     gitBranch,
@@ -30,4 +33,14 @@ func main() {
 		GoVersion:     goVersion,
 		BuildPlatform: buildPlatform,
 	})
+
+	if err != nil {
+		// 检查是否为退出码错误（如 --version、--generate-config）
+		if code, ok := bot.IsExitCode(err); ok {
+			os.Exit(code)
+		}
+		// 其他错误
+		slog.Error("机器人启动失败", "error", err)
+		os.Exit(1)
+	}
 }

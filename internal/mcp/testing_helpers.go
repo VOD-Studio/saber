@@ -12,6 +12,7 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"rua.plus/saber/internal/config"
+	appcontext "rua.plus/saber/internal/context"
 )
 
 // MockToolResult 定义模拟工具的返回结果。
@@ -231,11 +232,13 @@ func (m *MockManager) CallTool(ctx context.Context, serverName, toolName string,
 	}
 
 	// 提取用户上下文
-	userID := GetUserFromContext(ctx)
-	roomID := GetRoomFromContext(ctx)
-
-	if userID == "" || roomID == "" {
-		return nil, fmt.Errorf("缺少用户上下文：userID 和 roomID 必须通过 WithUserContext 设置")
+	userID, ok := appcontext.GetUserFromContext(ctx)
+	if !ok || userID == "" {
+		return nil, fmt.Errorf("缺少用户上下文：userID 必须通过 WithUserContext 设置")
+	}
+	roomID, ok := appcontext.GetRoomFromContext(ctx)
+	if !ok || roomID == "" {
+		return nil, fmt.Errorf("缺少用户上下文：roomID 必须通过 WithUserContext 设置")
 	}
 
 	// 调用模拟工具
@@ -316,8 +319,8 @@ var TestFixtures = struct {
 			"type": "object",
 		},
 		Handler: func(ctx context.Context, args map[string]any) (*MockToolResult, error) {
-			userID := GetUserFromContext(ctx)
-			roomID := GetRoomFromContext(ctx)
+			userID, _ := appcontext.GetUserFromContext(ctx)
+			roomID, _ := appcontext.GetRoomFromContext(ctx)
 
 			return &MockToolResult{
 				Content: []any{map[string]any{
@@ -365,7 +368,7 @@ func NewTestUserContext(userNum, roomNum int) context.Context {
 	ctx := context.Background()
 	userID := id.UserID(fmt.Sprintf("@user%d:example.com", userNum))
 	roomID := id.RoomID(fmt.Sprintf("!room%d:example.com", roomNum))
-	return WithUserContext(ctx, userID, roomID)
+	return appcontext.WithUserContext(ctx, userID, roomID)
 }
 
 // NewTestMCPServerConfig 创建用于测试的 MCP 配置。

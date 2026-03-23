@@ -287,7 +287,7 @@ func TestRun_ConfigLoadFailure(t *testing.T) {
 				return filepath.Join(dir, "nonexistent.yaml")
 			},
 			expectedExit:   1,
-			outputContains: "Failed to load configuration",
+			outputContains: "加载配置失败",
 		},
 		{
 			name: "无效的 YAML 格式",
@@ -298,7 +298,7 @@ func TestRun_ConfigLoadFailure(t *testing.T) {
 				return configPath
 			},
 			expectedExit:   1,
-			outputContains: "Failed to load configuration",
+			outputContains: "加载配置失败",
 		},
 		{
 			name: "缺少必需字段",
@@ -312,7 +312,7 @@ func TestRun_ConfigLoadFailure(t *testing.T) {
 				return configPath
 			},
 			expectedExit:   1,
-			outputContains: "Failed to create Matrix client",
+			outputContains: "创建 Matrix 客户端失败",
 		},
 	}
 

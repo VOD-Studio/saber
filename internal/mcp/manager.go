@@ -8,20 +8,10 @@ import (
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"maunium.net/go/mautrix/id"
 
 	"rua.plus/saber/internal/config"
+	appcontext "rua.plus/saber/internal/context"
 	"rua.plus/saber/internal/mcp/servers"
-)
-
-// contextKey 定义上下文键类型，避免键冲突。
-type contextKey string
-
-const (
-	// UserContextKey 是上下文中用户 ID 的键。
-	UserContextKey contextKey = "userID"
-	// RoomContextKey 是上下文中房间 ID 的键。
-	RoomContextKey contextKey = "roomID"
 )
 
 // ServerInfo 包含 MCP 服务器的信息。
@@ -239,35 +229,6 @@ func (m *Manager) IsEnabled() bool {
 	return m.enabled
 }
 
-// WithUserContext 创建包含用户上下文的新上下文。
-//
-// 它将用户 ID 和房间 ID 存储在上下文中，用于后续的工具调用授权和审计。
-func WithUserContext(ctx context.Context, userID id.UserID, roomID id.RoomID) context.Context {
-	ctx = context.WithValue(ctx, UserContextKey, userID)
-	ctx = context.WithValue(ctx, RoomContextKey, roomID)
-	return ctx
-}
-
-// GetUserFromContext 从上下文中提取用户 ID。
-//
-// 如果上下文中不存在用户 ID，返回空字符串。
-func GetUserFromContext(ctx context.Context) id.UserID {
-	if userID, ok := ctx.Value(UserContextKey).(id.UserID); ok {
-		return userID
-	}
-	return ""
-}
-
-// GetRoomFromContext 从上下文中提取房间 ID。
-//
-// 如果上下文中不存在房间 ID，返回空字符串。
-func GetRoomFromContext(ctx context.Context) id.RoomID {
-	if roomID, ok := ctx.Value(RoomContextKey).(id.RoomID); ok {
-		return roomID
-	}
-	return ""
-}
-
 // CallTool 使用用户上下文调用指定的 MCP 工具。
 //
 // 它会验证用户上下文并检查速率限制。
@@ -278,11 +239,13 @@ func (m *Manager) CallTool(ctx context.Context, serverName, toolName string, arg
 	}
 
 	// 提取用户上下文
-	userID := GetUserFromContext(ctx)
-	roomID := GetRoomFromContext(ctx)
-
-	if userID == "" || roomID == "" {
-		return nil, fmt.Errorf("缺少用户上下文：userID 和 roomID 必须通过 WithUserContext 设置")
+	userID, ok := appcontext.GetUserFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("缺少用户上下文：userID 必须通过 WithUserContext 设置")
+	}
+	roomID, ok := appcontext.GetRoomFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("缺少用户上下文：roomID 必须通过 WithUserContext 设置")
 	}
 
 	// 检查速率限制
