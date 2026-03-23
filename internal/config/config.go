@@ -42,11 +42,14 @@ type MatrixConfig struct {
 
 // AIConfig 存储 AI 服务配置
 type AIConfig struct {
-	Enabled               bool                   `yaml:"enabled"`                  // 是否启用 AI 功能
-	Provider              string                 `yaml:"provider"`                 // AI 提供商名称（如 openai, anthropic）
-	BaseURL               string                 `yaml:"base_url"`                 // API 基础 URL
-	APIKey                string                 `yaml:"api_key"`                  // API 密钥
-	DefaultModel          string                 `yaml:"default_model"`            // 默认使用的模型
+	Enabled      bool                       `yaml:"enabled"`       // 是否启用 AI 功能
+	Providers    map[string]ProviderConfig  `yaml:"providers"`     // 多提供商配置
+	DefaultModel string                     `yaml:"default_model"` // 默认使用的模型（完全限定名称，如 openai.gpt-4o-mini）
+
+	// 旧字段保留向后兼容（已弃用，推荐使用 Providers）
+	Provider              string                 `yaml:"provider"`                 // AI 提供商名称（已弃用）
+	BaseURL               string                 `yaml:"base_url"`                 // API 基础 URL（已弃用）
+	APIKey                string                 `yaml:"api_key"`                  // API 密钥（已弃用）
 	MaxTokens             int                    `yaml:"max_tokens"`               // 最大生成 token 数
 	Temperature           float64                `yaml:"temperature"`              // 生成温度（0-2）
 	SystemPrompt          string                 `yaml:"system_prompt"`            // 系统提示词
@@ -56,7 +59,7 @@ type AIConfig struct {
 	StreamEdit            StreamEditConfig       `yaml:"stream_edit"`              // 流式编辑配置
 	Retry                 RetryConfig            `yaml:"retry"`                    // 重试配置
 	ToolCalling           ToolCallingConfig      `yaml:"tool_calling"`             // 工具调用配置
-	Models                map[string]ModelConfig `yaml:"models"`                   // 模型特定配置
+	Models                map[string]ModelConfig `yaml:"models"`                   // 模型别名配置
 	TimeoutSeconds        int                    `yaml:"timeout_seconds"`          // 请求超时时间（秒）
 	DirectChatAutoReply   bool                   `yaml:"direct_chat_auto_reply"`   // 在私聊中自动回复（无需 !ai 前缀）
 	GroupChatMentionReply bool                   `yaml:"group_chat_mention_reply"` // 在群聊中 @mention 时自动回复（无需 !ai 前缀）
@@ -218,10 +221,11 @@ func (m *MatrixConfig) UsePasswordAuth() bool {
 func DefaultAIConfig() AIConfig {
 	return AIConfig{
 		Enabled:               false,
+		Providers:             make(map[string]ProviderConfig),
+		DefaultModel:          "",
 		Provider:              "",
 		BaseURL:               "",
 		APIKey:                "",
-		DefaultModel:          "",
 		MaxTokens:             256000,
 		Temperature:           0.7,
 		SystemPrompt:          "",
