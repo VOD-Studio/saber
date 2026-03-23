@@ -43,20 +43,22 @@ type appState struct {
 // Run 初始化并运行机器人。
 //
 // 它处理 CLI 标志、配置加载、Matrix 客户端设置和优雅关闭。
-func Run(info matrix.BuildInfo) {
+// 返回错误而非直接调用 os.Exit，支持测试和优雅关闭。
+func Run(info matrix.BuildInfo) error {
 	state := &appState{info: info}
 
-	if !state.initConfig() {
-		return
+	if err := state.initConfig(); err != nil {
+		return err
 	}
 
-	state.services = state.initMatrixClient()
-	if state.services == nil {
-		return
+	services, err := state.initMatrixClient()
+	if err != nil {
+		return err
 	}
+	state.services = services
 
-	if !state.initServices() {
-		return
+	if err := state.initServices(); err != nil {
+		return err
 	}
 
 	state.setupEventHandlers()
@@ -65,13 +67,13 @@ func Run(info matrix.BuildInfo) {
 	defer cancel()
 
 	state.startSync(ctx)
-	state.waitForShutdown(ctx, cancel)
+	return state.waitForShutdown(ctx, cancel)
 }
 
 // initConfig 处理配置初始化。
 //
-// 返回 true 表示成功继续，false 表示应该退出。
-func (s *appState) initConfig() bool {
+// 返回错误而非调用 os.Exit，支持测试和优雅关闭。
+func (s *appState) initConfig() error {
 	s.flags = cli.Parse()
 
 	if s.flags.ShowVersion {
@@ -81,16 +83,15 @@ func (s *appState) initConfig() bool {
 		fmt.Printf("  Go: %s\n", s.info.GoVersion)
 		fmt.Printf("  Build Platform: %s\n", s.info.BuildPlatform)
 		fmt.Printf("  Runtime Platform: %s\n", s.info.RuntimePlatform())
-		os.Exit(0)
+		return ExitSuccess()
 	}
 
 	if s.flags.GenerateConfig {
 		if err := config.GenerateExample("config.example.yaml"); err != nil {
-			fmt.Fprintf(os.Stderr, "Error generating config: %v\n", err)
-			os.Exit(1)
+			return ExitError(1, fmt.Errorf("生成配置文件失败: %w", err))
 		}
 		fmt.Println("Example configuration generated: config.example.yaml")
-		os.Exit(0)
+		return ExitSuccess()
 	}
 
 	setupLogging(s.flags.Verbose)
@@ -102,10 +103,7 @@ func (s *appState) initConfig() bool {
 
 	cfg, err := config.Load(s.flags.ConfigPath)
 	if err != nil {
-		slog.Error("Failed to load configuration",
-			"error", err,
-			"path", s.flags.ConfigPath)
-		os.Exit(1)
+		return fmt.Errorf("加载配置失败: %w", err)
 	}
 
 	s.cfg = cfg
@@ -115,24 +113,22 @@ func (s *appState) initConfig() bool {
 		"homeserver", cfg.Matrix.Homeserver,
 		"user_id", cfg.Matrix.UserID)
 
-	return true
+	return nil
 }
 
 // initMatrixClient 初始化 Matrix 客户端。
 //
-// 返回初始化的服务实例，如果失败返回 nil。
-func (s *appState) initMatrixClient() *services {
+// 返回初始化的服务实例和错误，支持测试和优雅关闭。
+func (s *appState) initMatrixClient() (*services, error) {
 	client, err := matrix.NewMatrixClient(&s.cfg.Matrix)
 	if err != nil {
-		slog.Error("Failed to create Matrix client", "error", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("创建 Matrix 客户端失败: %w", err)
 	}
 
 	if s.cfg.Matrix.UsePasswordAuth() {
 		slog.Info("Performing password login...")
 		if err := client.Login(context.Background()); err != nil {
-			slog.Error("Login failed", "error", err)
-			os.Exit(1)
+			return nil, fmt.Errorf("登录失败: %w", err)
 		}
 
 		sessionPath := s.flags.ConfigPath + ".session"
@@ -144,8 +140,7 @@ func (s *appState) initMatrixClient() *services {
 	}
 
 	if err := client.VerifyLogin(context.Background()); err != nil {
-		slog.Error("Login verification failed", "error", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("登录验证失败: %w", err)
 	}
 
 	slog.Info("Matrix client authenticated",
@@ -161,7 +156,7 @@ func (s *appState) initMatrixClient() *services {
 	return &services{
 		client:         client,
 		commandService: commandService,
-	}
+	}, nil
 }
 
 // initCrypto 初始化端到端加密。
@@ -189,19 +184,18 @@ func (s *appState) initCrypto(client *matrix.MatrixClient) {
 
 // initServices 初始化 AI、MCP 和主动聊天服务。
 //
-// 返回 true 表示成功，false 表示应该退出。
-func (s *appState) initServices() bool {
+// 返回错误而非调用 os.Exit，支持测试和优雅关闭。
+func (s *appState) initServices() error {
 	svc := s.services
 
 	if !s.cfg.AI.Enabled {
-		return true
+		return nil
 	}
 
 	slog.Info("正在初始化AI服务...")
 
 	if err := s.cfg.AI.Validate(); err != nil {
-		slog.Error("AI配置验证失败", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("AI配置验证失败: %w", err)
 	}
 
 	svc.mcpManager = s.initMCPManager()
@@ -216,8 +210,7 @@ func (s *appState) initServices() bool {
 
 	aiService, err := ai.NewService(&s.cfg.AI, svc.commandService, svc.mcpManager, svc.mediaService)
 	if err != nil {
-		slog.Error("AI服务初始化失败", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("AI服务初始化失败: %w", err)
 	}
 	svc.aiService = aiService
 
@@ -228,10 +221,14 @@ func (s *appState) initServices() bool {
 	s.registerAICommands()
 
 	if s.cfg.AI.Proactive.Enabled {
-		svc.proactiveManager = s.initProactiveManager()
+		mgr, err := s.initProactiveManager()
+		if err != nil {
+			return err
+		}
+		svc.proactiveManager = mgr
 	}
 
-	return true
+	return nil
 }
 
 // initMCPManager 初始化 MCP 管理器。
@@ -300,7 +297,9 @@ func (s *appState) registerAICommands() {
 }
 
 // initProactiveManager 初始化主动聊天管理器。
-func (s *appState) initProactiveManager() *ai.ProactiveManager {
+//
+// 返回管理器实例和错误，支持测试和优雅关闭。
+func (s *appState) initProactiveManager() (*ai.ProactiveManager, error) {
 	slog.Info("正在初始化主动聊天管理器...")
 	roomService := matrix.NewRoomService(s.services.client)
 
@@ -312,12 +311,11 @@ func (s *appState) initProactiveManager() *ai.ProactiveManager {
 		&s.cfg.AI,
 	)
 	if err != nil {
-		slog.Error("主动聊天管理器初始化失败", "error", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("主动聊天管理器初始化失败: %w", err)
 	}
 
 	slog.Info("主动聊天管理器初始化成功")
-	return mgr
+	return mgr, nil
 }
 
 // setupEventHandlers 设置事件处理器。
@@ -411,9 +409,12 @@ func (s *appState) startSync(ctx context.Context) {
 }
 
 // waitForShutdown 等待关闭信号并执行优雅关闭。
-func (s *appState) waitForShutdown(ctx context.Context, cancel context.CancelFunc) {
+//
+// 返回 nil 表示正常关闭。
+func (s *appState) waitForShutdown(ctx context.Context, cancel context.CancelFunc) error {
 	<-ctx.Done()
 	s.shutdown(cancel)
+	return nil
 }
 
 // shutdown 执行优雅关闭。
