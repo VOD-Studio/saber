@@ -893,6 +893,56 @@ func (s *Service) buildMultimodalMessages(_ context.Context, roomID id.RoomID, u
 	return messages
 }
 
+// buildMultiImageMessages 构建包含多张图片的多模态消息列表。
+// 支持同时处理用户发送的图片和引用消息中的图片。
+//
+// 参数:
+//   - ctx: 上下文
+//   - roomID: Matrix 房间 ID
+//   - userInput: 用户输入的文本
+//   - imageDataList: Base64 Data URL 格式的图片数据列表
+//
+// 返回值:
+//   - []openai.ChatCompletionMessage: 构建的消息列表
+func (s *Service) buildMultiImageMessages(_ context.Context, roomID id.RoomID, userInput string, imageDataList []string) []openai.ChatCompletionMessage {
+	var messages []openai.ChatCompletionMessage
+	if s.contextManager != nil {
+		messages = s.contextManager.GetContext(roomID)
+	}
+
+	// 构建消息部分，首先是文本
+	parts := []openai.ChatMessagePart{
+		{
+			Type: openai.ChatMessagePartTypeText,
+			Text: userInput,
+		},
+	}
+
+	// 添加所有图片
+	for _, imageData := range imageDataList {
+		parts = append(parts, openai.ChatMessagePart{
+			Type: openai.ChatMessagePartTypeImageURL,
+			ImageURL: &openai.ChatMessageImageURL{
+				URL:    imageData,
+				Detail: openai.ImageURLDetailAuto,
+			},
+		})
+	}
+
+	userMessage := openai.ChatCompletionMessage{
+		Role:         openai.ChatMessageRoleUser,
+		MultiContent: parts,
+	}
+
+	messages = append(messages, userMessage)
+
+	if s.globalConfig.SystemPrompt != "" {
+		messages = s.prependSystemPrompt(messages, s.globalConfig.SystemPrompt)
+	}
+
+	return messages
+}
+
 func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID id.RoomID, modelName string, args []string) error {
 	ctx = mcp.WithUserContext(ctx, userID, roomID)
 
@@ -915,22 +965,53 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 		s.contextManager.AddMessage(roomID, RoleUser, userInput, userID)
 	}
 
-	// 检查是否有媒体信息
+	// 检查是否有媒体信息（当前消息的图片）
 	mediaInfo := matrix.GetMediaInfo(ctx)
+	// 检查是否有引用消息的媒体信息（引用消息中的图片）
+	referencedMediaInfo := matrix.GetReferencedMediaInfo(ctx)
+
 	var messages []openai.ChatCompletionMessage
 	hasImage := false
 
+	// 收集所有需要下载的图片
+	var imageDataList []string
+	imageCount := 0
+
+	// 处理当前消息的图片
 	if mediaInfo != nil && mediaInfo.Type == "image" && s.mediaService != nil && s.globalConfig.Media.Enabled {
-		// 下载并编码图片
 		imageData, err := s.mediaService.DownloadImage(ctx, mediaInfo)
 		if err != nil {
-			slog.Warn("下载图片失败，仅处理文本", "error", err)
-			messages = s.buildTextMessages(roomID, userInput)
+			slog.Warn("下载当前消息图片失败", "error", err)
 		} else {
-			messages = s.buildMultimodalMessages(ctx, roomID, userInput, imageData)
-			hasImage = true
-			slog.Debug("构建多模态消息", "has_image", true)
+			imageDataList = append(imageDataList, imageData)
+			imageCount++
+			slog.Debug("下载当前消息图片成功", "image_count", imageCount)
 		}
+	}
+
+	// 处理引用消息的图片
+	if referencedMediaInfo != nil && referencedMediaInfo.Type == "image" && s.mediaService != nil && s.globalConfig.Media.Enabled {
+		imageData, err := s.mediaService.DownloadImage(ctx, referencedMediaInfo)
+		if err != nil {
+			slog.Warn("下载引用消息图片失败", "error", err)
+		} else {
+			imageDataList = append(imageDataList, imageData)
+			imageCount++
+			slog.Debug("下载引用消息图片成功", "image_count", imageCount)
+		}
+	}
+
+	// 根据图片数量构建消息
+	if imageCount > 0 {
+		hasImage = true
+		if imageCount == 1 {
+			// 单图片情况，使用原有函数
+			messages = s.buildMultimodalMessages(ctx, roomID, userInput, imageDataList[0])
+		} else {
+			// 多图片情况，使用新函数
+			messages = s.buildMultiImageMessages(ctx, roomID, userInput, imageDataList)
+		}
+		slog.Debug("构建多模态消息", "has_image", true, "image_count", imageCount)
 	} else {
 		messages = s.buildTextMessages(roomID, userInput)
 	}

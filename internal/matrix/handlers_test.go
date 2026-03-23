@@ -974,9 +974,9 @@ func TestHandleEvent_ReplyToBot(t *testing.T) {
 				t.Errorf("Handler called = %v, want %v", wasCalled, tt.expectHandlerCalled)
 			}
 
-			// 如果处理器被调用，验证参数是否正确（应该包含清理后的回复内容）
+			// 如果处理器被调用，验证参数是否正确（应该包含引用消息上下文）
 			if tt.expectHandlerCalled && wasCalled {
-				expectedContent := "Reply content" // TrimReplyFallbackText 应该去除回复前缀
+				expectedContent := "[引用消息]\ntest message\n\n[回复]\nReply content"
 				if len(args) == 0 || args[0] != expectedContent {
 					t.Errorf("Handler received args = %v, want [%s]", args, expectedContent)
 				}
@@ -1080,8 +1080,8 @@ func TestHandleEvent_ReplyIntegration(t *testing.T) {
 			t.Error("期望 replyAI 处理器被调用，但未被调用")
 		}
 
-		// 验证清理后的内容（去除回复前缀）
-		expectedContent := "请帮我写一段代码"
+		// 验证内容包含引用消息上下文
+		expectedContent := "[引用消息]\ntest message\n\n[回复]\n请帮我写一段代码"
 		if len(args) == 0 || args[0] != expectedContent {
 			t.Errorf("处理器收到 args = %v，期望 [%s]", args, expectedContent)
 		}
@@ -1460,8 +1460,8 @@ func TestHandleEvent_ReplyIntegration(t *testing.T) {
 		args := receivedArgs
 		mu.Unlock()
 
-		// 验证清理后的内容
-		expectedContent := "**重要内容** 和 *斜体*"
+		// 验证内容包含引用消息上下文
+		expectedContent := "[引用消息]\ntest message\n\n[回复]\n**重要内容** 和 *斜体*"
 		if len(args) == 0 || args[0] != expectedContent {
 			t.Errorf("处理器收到 args = %v，期望 [%s]", args, expectedContent)
 		}
@@ -1807,4 +1807,196 @@ func TestOnMessage_ZeroTimestamp(t *testing.T) {
 	if count != 1 {
 		t.Errorf("期望处理 1 条消息（时间戳为零不应被过滤），实际处理 %d 条", count)
 	}
+}
+
+// TestHandleReply_ReferencedImage 测试引用图片消息的处理。
+//
+// 验证当用户引用图片消息回复机器人时，图片信息被正确注入上下文。
+func TestHandleReply_ReferencedImage(t *testing.T) {
+	botUserID := id.UserID("@saber:example.com")
+	senderID := id.UserID("@sender:example.com")
+	roomID := id.RoomID("!test:example.com")
+	botImageEventID := id.EventID("$bot_image:example.com")
+
+	t.Run("引用图片消息时注入 ReferencedMediaInfo", func(t *testing.T) {
+		var (
+			handlerCalled       bool
+			referencedMediaInfo *MediaInfo
+			mu                  sync.Mutex
+		)
+
+		mockReplyHandler := &mockCommandHandler{
+			handleFunc: func(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
+				mu.Lock()
+				defer mu.Unlock()
+				handlerCalled = true
+				referencedMediaInfo = GetReferencedMediaInfo(ctx)
+				return nil
+			},
+		}
+
+		// 使用 mustMarshalImageEvent 创建图片消息的 JSON 响应
+		roundTripper := &mockRoundTripper{
+			responseBody: mustMarshalImageEvent(botUserID, botImageEventID, "test-image.png", "image/png", "mxc://example.com/abc123"),
+		}
+
+		homeserverURL, _ := url.Parse("https://example.com")
+		httpClient := &http.Client{Transport: roundTripper}
+		client := &mautrix.Client{
+			UserID:        botUserID,
+			Client:        httpClient,
+			HomeserverURL: homeserverURL,
+		}
+
+		service := NewCommandService(client, botUserID, nil)
+		service.SetReplyAIHandler(mockReplyHandler)
+
+		// 创建回复图片消息的事件
+		replyEvent := &event.Event{
+			Type:   event.EventMessage,
+			RoomID: roomID,
+			Sender: senderID,
+			ID:     id.EventID("$reply_to_image:example.com"),
+			Content: event.Content{
+				Parsed: &event.MessageEventContent{
+					MsgType: event.MsgText,
+					Body:    "> <@saber:example.com> test-image.png\n\n请描述这张图片",
+					RelatesTo: &event.RelatesTo{
+						InReplyTo: &event.InReplyTo{
+							EventID: botImageEventID,
+						},
+					},
+				},
+			},
+		}
+
+		err := service.HandleEvent(context.Background(), replyEvent)
+		if err != nil {
+			t.Fatalf("HandleEvent() returned error: %v", err)
+		}
+
+		mu.Lock()
+		wasCalled := handlerCalled
+		refMedia := referencedMediaInfo
+		mu.Unlock()
+
+		if !wasCalled {
+			t.Error("期望 replyAI 处理器被调用，但未被调用")
+		}
+
+		if refMedia == nil {
+			t.Error("期望 ReferencedMediaInfo 不为 nil，但得到 nil")
+		} else {
+			if refMedia.Type != "image" {
+				t.Errorf("ReferencedMediaInfo.Type = %v, want image", refMedia.Type)
+			}
+			if refMedia.Body != "test-image.png" {
+				t.Errorf("ReferencedMediaInfo.Body = %v, want test-image.png", refMedia.Body)
+			}
+		}
+	})
+
+	t.Run("引用文本消息时不注入 ReferencedMediaInfo", func(t *testing.T) {
+		var (
+			handlerCalled       bool
+			referencedMediaInfo *MediaInfo
+			mu                  sync.Mutex
+		)
+
+		mockReplyHandler := &mockCommandHandler{
+			handleFunc: func(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
+				mu.Lock()
+				defer mu.Unlock()
+				handlerCalled = true
+				referencedMediaInfo = GetReferencedMediaInfo(ctx)
+				return nil
+			},
+		}
+
+		// 模拟 GetEvent 返回 bot 发送的文本消息
+		roundTripper := &mockRoundTripper{
+			responseBody: mustMarshalEvent(botUserID, botImageEventID),
+		}
+
+		homeserverURL, _ := url.Parse("https://example.com")
+		httpClient := &http.Client{Transport: roundTripper}
+		client := &mautrix.Client{
+			UserID:        botUserID,
+			Client:        httpClient,
+			HomeserverURL: homeserverURL,
+		}
+
+		service := NewCommandService(client, botUserID, nil)
+		service.SetReplyAIHandler(mockReplyHandler)
+
+		// 创建回复文本消息的事件
+		replyEvent := &event.Event{
+			Type:   event.EventMessage,
+			RoomID: roomID,
+			Sender: senderID,
+			ID:     id.EventID("$reply_to_text:example.com"),
+			Content: event.Content{
+				Parsed: &event.MessageEventContent{
+					MsgType: event.MsgText,
+					Body:    "> <@saber:example.com> 你好\n\n继续对话",
+					RelatesTo: &event.RelatesTo{
+						InReplyTo: &event.InReplyTo{
+							EventID: botImageEventID,
+						},
+					},
+				},
+			},
+		}
+
+		err := service.HandleEvent(context.Background(), replyEvent)
+		if err != nil {
+			t.Fatalf("HandleEvent() returned error: %v", err)
+		}
+
+		mu.Lock()
+		wasCalled := handlerCalled
+		refMedia := referencedMediaInfo
+		mu.Unlock()
+
+		if !wasCalled {
+			t.Error("期望 replyAI 处理器被调用，但未被调用")
+		}
+
+		if refMedia != nil {
+			t.Errorf("期望 ReferencedMediaInfo 为 nil，但得到 %+v", refMedia)
+		}
+	})
+}
+
+// mustMarshalEventFromEvent 从事件对象创建 JSON 响应。
+func mustMarshalEventFromEvent(userID id.UserID, evt *event.Event) []byte {
+	// 使用事件的 JSON 序列化
+	data, err := json.Marshal(evt)
+	if err != nil {
+		panic(err)
+	}
+	return data
+}
+
+// mustMarshalImageEvent 将图片事件信息序列化为 Matrix API 返回的 JSON 格式。
+func mustMarshalImageEvent(sender id.UserID, eventID id.EventID, body, mimeType, mxcURL string) []byte {
+	event := map[string]any{
+		"sender":   string(sender),
+		"event_id": string(eventID),
+		"type":     "m.room.message",
+		"content": map[string]any{
+			"msgtype": "m.image",
+			"body":    body,
+			"url":     mxcURL,
+			"info": map[string]any{
+				"mimetype": mimeType,
+			},
+		},
+		"origin_server_ts": 1234567890,
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		panic(err)
+	}
+	return data
 }

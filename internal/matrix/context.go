@@ -14,6 +14,7 @@ type contextKey struct {
 
 var eventIDKey = &contextKey{"eventID"}
 var mediaKey = &contextKey{"media"}
+var referencedMediaKey = &contextKey{"referenced_media"}
 
 // WithEventID 返回一个新的上下文，其中包含给定的 EventID。
 //
@@ -64,6 +65,35 @@ func WithMediaInfo(ctx context.Context, info *MediaInfo) context.Context {
 //   - *MediaInfo: 存储在上下文中的媒体信息，如果未找到则返回 nil
 func GetMediaInfo(ctx context.Context) *MediaInfo {
 	if v := ctx.Value(mediaKey); v != nil {
+		if info, ok := v.(*MediaInfo); ok {
+			return info
+		}
+	}
+	return nil
+}
+
+// WithReferencedMediaInfo 返回一个新的上下文，其中包含给定的引用消息媒体信息。
+// 用于在回复消息场景中传递被引用消息的媒体内容。
+//
+// 参数:
+//   - ctx: 父上下文
+//   - info: 要注入的引用消息媒体信息
+//
+// 返回值:
+//   - context.Context: 包含引用媒体信息的新上下文
+func WithReferencedMediaInfo(ctx context.Context, info *MediaInfo) context.Context {
+	return context.WithValue(ctx, referencedMediaKey, info)
+}
+
+// GetReferencedMediaInfo 从上下文中检索引用消息的媒体信息。
+//
+// 参数:
+//   - ctx: 要检索的上下文
+//
+// 返回值:
+//   - *MediaInfo: 存储在上下文中的引用媒体信息，如果未找到则返回 nil
+func GetReferencedMediaInfo(ctx context.Context) *MediaInfo {
+	if v := ctx.Value(referencedMediaKey); v != nil {
 		if info, ok := v.(*MediaInfo); ok {
 			return info
 		}

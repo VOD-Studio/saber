@@ -308,6 +308,7 @@ func (s *CommandService) handleDirectChat(ctx context.Context, sender id.UserID,
 //
 // 当消息是回复机器人发送的消息时，触发 replyAI 处理器。
 // 会自动清理回复内容中的引用前缀，并可能包含被回复消息的上下文。
+// 如果被引用的消息是图片，会将图片信息注入上下文供 AI 分析。
 //
 // 参数:
 //   - ctx: 上下文
@@ -334,7 +335,24 @@ func (s *CommandService) handleReply(ctx context.Context, sender id.UserID, room
 
 	replyContext := ""
 	if evt, err := s.client.GetEvent(ctx, roomID, replyToEventID); err == nil {
+		// 确保事件内容被正确解析
+		if evt.Content.Parsed == nil {
+			if parseErr := evt.Content.ParseRaw(event.EventMessage); parseErr != nil {
+				slog.Debug("解析被引用消息内容失败", "error", parseErr)
+			}
+		}
 		if msgContent, ok := evt.Content.Parsed.(*event.MessageEventContent); ok {
+			// 检查被引用消息是否为图片消息
+			if msgContent.MsgType == event.MsgImage {
+				mediaInfo := ExtractMediaInfo(msgContent)
+				if mediaInfo != nil {
+					ctx = WithReferencedMediaInfo(ctx, mediaInfo)
+					slog.Debug("检测到引用图片消息",
+						"reply_to", replyToEventID.String(),
+						"media_type", mediaInfo.Type,
+						"mime_type", mediaInfo.MimeType)
+				}
+			}
 			replyContext = msgContent.Body
 		}
 	}

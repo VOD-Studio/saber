@@ -182,7 +182,7 @@ func TestHandleReply(t *testing.T) {
 			setupReplyAI:        true,
 			replyToSender:       botUserID,
 			expectHandlerCalled: true,
-			expectedContent:     "回复内容",
+			expectedContent:     "[引用消息]\ntest message\n\n[回复]\n回复内容",
 		},
 		{
 			name: "回复非 bot 消息不触发处理器",
