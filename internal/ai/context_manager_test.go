@@ -768,6 +768,161 @@ func TestContextManager_ExpiryCleanup(t *testing.T) {
 	})
 }
 
+// TestContextManager_InactiveRoomCleanup 测试不活跃房间清理功能。
+//
+// 该测试覆盖以下场景：
+//   - InactiveRoomHours 为 0 时不清理
+//   - 不活跃房间被正确清理
+//   - 活跃房间不受影响
+//   - 清理后 lastActivity 记录也被删除
+func TestContextManager_InactiveRoomCleanup(t *testing.T) {
+	roomID := id.RoomID("!inactive:example.com")
+	activeRoomID := id.RoomID("!active:example.com")
+	userID := id.UserID("@user:example.com")
+
+	t.Run("no cleanup when InactiveRoomHours is zero", func(t *testing.T) {
+		cm := NewContextManager(config.ContextConfig{
+			MaxMessages:       10,
+			MaxTokens:         0,
+			ExpiryMinutes:     0,
+			InactiveRoomHours: 0,
+		})
+
+		cm.AddMessage(roomID, RoleUser, "Message", userID)
+
+		// 手动设置 lastActivity 为很久以前
+		cm.mu.Lock()
+		cm.lastActivity[roomID] = time.Now().Add(-48 * time.Hour)
+		cm.mu.Unlock()
+
+		// 调用清理方法
+		cm.cleanupInactiveRooms()
+
+		// 房间上下文应该仍然存在
+		if len(cm.GetContext(roomID)) != 1 {
+			t.Errorf("Expected 1 message, got %d (InactiveRoomHours=0 should not clean up)", len(cm.GetContext(roomID)))
+		}
+	})
+
+	t.Run("inactive room is cleaned up", func(t *testing.T) {
+		cm := NewContextManager(config.ContextConfig{
+			MaxMessages:       10,
+			MaxTokens:         0,
+			ExpiryMinutes:     0,
+			InactiveRoomHours: 24, // 24 小时不活跃清理
+		})
+
+		// 添加消息
+		cm.AddMessage(roomID, RoleUser, "Old message", userID)
+
+		// 手动设置 lastActivity 为 48 小时前（超过阈值）
+		cm.mu.Lock()
+		cm.lastActivity[roomID] = time.Now().Add(-48 * time.Hour)
+		cm.mu.Unlock()
+
+		// 调用清理方法
+		cm.cleanupInactiveRooms()
+
+		// 房间上下文应该被清理
+		if len(cm.GetContext(roomID)) != 0 {
+			t.Errorf("Expected 0 messages after cleanup, got %d", len(cm.GetContext(roomID)))
+		}
+
+		// lastActivity 记录也应该被删除
+		cm.mu.RLock()
+		_, exists := cm.lastActivity[roomID]
+		cm.mu.RUnlock()
+
+		if exists {
+			t.Error("lastActivity record should be deleted after cleanup")
+		}
+	})
+
+	t.Run("active room is not cleaned up", func(t *testing.T) {
+		cm := NewContextManager(config.ContextConfig{
+			MaxMessages:       10,
+			MaxTokens:         0,
+			ExpiryMinutes:     0,
+			InactiveRoomHours: 24,
+		})
+
+		// 添加消息到活跃房间
+		cm.AddMessage(activeRoomID, RoleUser, "Recent message", userID)
+
+		// 手动设置不活跃房间的 lastActivity
+		cm.mu.Lock()
+		cm.lastActivity[roomID] = time.Now().Add(-48 * time.Hour)
+		cm.contexts[roomID] = []ChatMessage{
+			{Role: RoleUser, Content: "Old", UserID: userID, RoomID: roomID, Timestamp: time.Now()},
+		}
+		cm.mu.Unlock()
+
+		// 调用清理方法
+		cm.cleanupInactiveRooms()
+
+		// 活跃房间应该仍然存在
+		if len(cm.GetContext(activeRoomID)) != 1 {
+			t.Errorf("Active room should have 1 message, got %d", len(cm.GetContext(activeRoomID)))
+		}
+
+		// 不活跃房间应该被清理
+		if len(cm.GetContext(roomID)) != 0 {
+			t.Errorf("Inactive room should be cleaned up, got %d messages", len(cm.GetContext(roomID)))
+		}
+	})
+
+	t.Run("AddMessage updates lastActivity", func(t *testing.T) {
+		cm := NewContextManager(config.ContextConfig{
+			MaxMessages:       10,
+			MaxTokens:         0,
+			ExpiryMinutes:     0,
+			InactiveRoomHours: 24,
+		})
+
+		// 添加消息
+		beforeAdd := time.Now()
+		cm.AddMessage(roomID, RoleUser, "Message", userID)
+		afterAdd := time.Now()
+
+		// 检查 lastActivity 被更新
+		cm.mu.RLock()
+		lastActivity, exists := cm.lastActivity[roomID]
+		cm.mu.RUnlock()
+
+		if !exists {
+			t.Fatal("lastActivity should be set after AddMessage")
+		}
+
+		if lastActivity.Before(beforeAdd) || lastActivity.After(afterAdd) {
+			t.Errorf("lastActivity = %v, expected to be between %v and %v", lastActivity, beforeAdd, afterAdd)
+		}
+	})
+
+	t.Run("ClearContext also removes lastActivity", func(t *testing.T) {
+		cm := NewContextManager(config.ContextConfig{
+			MaxMessages:       10,
+			MaxTokens:         0,
+			ExpiryMinutes:     0,
+			InactiveRoomHours: 24,
+		})
+
+		// 添加消息
+		cm.AddMessage(roomID, RoleUser, "Message", userID)
+
+		// 清除上下文
+		cm.ClearContext(roomID)
+
+		// 检查 lastActivity 也被删除
+		cm.mu.RLock()
+		_, exists := cm.lastActivity[roomID]
+		cm.mu.RUnlock()
+
+		if exists {
+			t.Error("lastActivity should be deleted after ClearContext")
+		}
+	})
+}
+
 // TestContextManager_Concurrency 测试并发安全性。
 //
 // 该测试覆盖以下场景：
