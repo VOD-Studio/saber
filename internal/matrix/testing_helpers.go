@@ -4,8 +4,10 @@ package matrix
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
@@ -270,4 +272,57 @@ func eventIDFromParts(parts ...string) string {
 
 func ptr[T any](v T) *T {
 	return &v
+}
+
+// GenerateTestEvents 生成测试事件列表。
+//
+// 用于基准测试时批量生成指定数量的测试事件。
+//
+// 参数:
+//   - count: 事件数量
+//   - roomID: 房间 ID
+//   - senderID: 发送者 ID
+//
+// 返回值:
+//   - []*event.Event: 生成的事件列表
+func GenerateTestEvents(count int, roomID id.RoomID, senderID id.UserID) []*event.Event {
+	events := make([]*event.Event, count)
+	for i := 0; i < count; i++ {
+		events[i] = &event.Event{
+			ID:        id.EventID(fmt.Sprintf("$event%d", i)),
+			RoomID:    roomID,
+			Sender:    senderID,
+			Type:      event.EventMessage,
+			Timestamp: time.Now().UnixMilli(),
+			Content: event.Content{
+				Parsed: &event.MessageEventContent{
+					MsgType: event.MsgText,
+					Body:    fmt.Sprintf("Test message %d", i),
+				},
+			},
+		}
+	}
+	return events
+}
+
+// TestRoomID 生成测试用房间 ID。
+//
+// 参数:
+//   - n: 房间序号
+//
+// 返回值:
+//   - id.RoomID: 格式为 !test{n}:example.com 的房间 ID
+func TestRoomID(n int) id.RoomID {
+	return id.RoomID(fmt.Sprintf("!test%d:example.com", n))
+}
+
+// TestUserID 生成测试用用户 ID。
+//
+// 参数:
+//   - n: 用户序号
+//
+// 返回值:
+//   - id.UserID: 格式为 @user{n}:example.com 的用户 ID
+func TestUserID(n int) id.UserID {
+	return id.UserID(fmt.Sprintf("@user%d:example.com", n))
 }
