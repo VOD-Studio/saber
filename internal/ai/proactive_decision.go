@@ -64,6 +64,9 @@ type DecisionContext struct {
 	TriggerType TriggerType
 	// MemberCount 是房间成员数量。
 	MemberCount int
+	// IsDirect 表示是否为私聊房间（成员数为2）。
+	// 用于区分消息语气：私聊使用亲密个人化语气，群聊使用群体语气。
+	IsDirect bool
 	// IsEncrypted 表示房间是否启用了端到端加密。
 	IsEncrypted bool
 	// SilenceThresholdMinutes 是静默检测的阈值（分钟）。
@@ -136,6 +139,9 @@ func GatherDecisionContext(
 	// 计算活动水平
 	activityLevel := calculateActivityLevel(state.LastMessageTime, state.MessagesToday)
 
+	// 判断是否为私聊房间（成员数为2）
+	isDirect := roomInfo.MemberCount == 2
+
 	return &DecisionContext{
 		RoomID:                  roomID,
 		RoomName:                roomInfo.Name,
@@ -144,6 +150,7 @@ func GatherDecisionContext(
 		MessagesToday:           state.MessagesToday,
 		TriggerType:             triggerType,
 		MemberCount:             roomInfo.MemberCount,
+		IsDirect:                isDirect,
 		IsEncrypted:             roomInfo.IsEncrypted,
 		SilenceThresholdMinutes: silenceThresholdMinutes,
 	}, nil
