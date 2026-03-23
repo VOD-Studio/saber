@@ -24,6 +24,15 @@ func TestImageVisionFlow(t *testing.T) {
 		if !content.MsgType.IsMedia() {
 			t.Error("MsgImage should be detected as media")
 		}
+		if content.Body != "test-image.png" {
+			t.Errorf("unexpected Body: got %q", content.Body)
+		}
+		if content.URL != "mxc://example.com/abc123" {
+			t.Errorf("unexpected URL: got %q", content.URL)
+		}
+		if content.Info.MimeType != "image/png" {
+			t.Errorf("unexpected MimeType: got %q", content.Info.MimeType)
+		}
 	})
 
 	t.Run("media info extraction from video message", func(t *testing.T) {
@@ -36,6 +45,12 @@ func TestImageVisionFlow(t *testing.T) {
 		if !content.MsgType.IsMedia() {
 			t.Error("MsgVideo should be detected as media")
 		}
+		if content.Body != "test-video.mp4" {
+			t.Errorf("unexpected Body: got %q", content.Body)
+		}
+		if content.URL != "mxc://example.com/video123" {
+			t.Errorf("unexpected URL: got %q", content.URL)
+		}
 	})
 
 	t.Run("text message is not media", func(t *testing.T) {
@@ -46,6 +61,9 @@ func TestImageVisionFlow(t *testing.T) {
 
 		if content.MsgType.IsMedia() {
 			t.Error("MsgText should not be detected as media")
+		}
+		if content.Body != "Hello world" {
+			t.Errorf("unexpected Body: got %q", content.Body)
 		}
 	})
 }
@@ -62,6 +80,12 @@ func TestImageVisionContext(t *testing.T) {
 
 	if !content.MsgType.IsMedia() {
 		t.Fatal("expected MsgImage to be media")
+	}
+	if content.Body != "test.png" {
+		t.Errorf("unexpected Body: got %q", content.Body)
+	}
+	if content.URL != "mxc://example.com/test" {
+		t.Errorf("unexpected URL: got %q", content.URL)
 	}
 
 	_ = ctx

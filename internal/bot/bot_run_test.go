@@ -482,29 +482,46 @@ func TestShutdownSequence(t *testing.T) {
 
 // TestProactiveManagerNilCheck 测试 ProactiveManager 的 nil 检查模式。
 func TestProactiveManagerNilCheck(t *testing.T) {
-	// 模拟 Run 函数中的 nil 检查模式
-	var proactiveManager interface{}
-
-	// 验证 nil 检查不会 panic
-	if proactiveManager != nil {
-		t.Error("未初始化的管理器应该是 nil")
+	// 测试 nil 和非 nil 两种情况
+	tests := []struct {
+		name     string
+		manager  *int
+		isNil    bool
+	}{
+		{"未初始化的管理器", nil, true},
+		{"已初始化的管理器", new(int), false},
 	}
 
-	// 验证对 nil 的操作不会 panic（通过检查）
-	t.Log("nil 检查模式验证通过")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isNil := tt.manager == nil
+			if isNil != tt.isNil {
+				t.Errorf("管理器 nil 状态 = %v, 期望 %v", isNil, tt.isNil)
+			}
+		})
+	}
 }
 
 // TestMCPManagerNilCheck 测试 MCPManager 的 nil 检查模式。
 func TestMCPManagerNilCheck(t *testing.T) {
-	// 模拟 Run 函数中的 nil 检查模式
-	var mcpManager interface{}
-
-	// 验证 nil 检查不会 panic
-	if mcpManager != nil {
-		t.Error("未初始化的管理器应该是 nil")
+	// 测试 nil 和非 nil 两种情况
+	tests := []struct {
+		name    string
+		manager *int
+		isNil   bool
+	}{
+		{"未初始化的管理器", nil, true},
+		{"已初始化的管理器", new(int), false},
 	}
 
-	t.Log("MCP nil 检查模式验证通过")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isNil := tt.manager == nil
+			if isNil != tt.isNil {
+				t.Errorf("管理器 nil 状态 = %v, 期望 %v", isNil, tt.isNil)
+			}
+		})
+	}
 }
 
 // TestAIConditionalInitialization 测试 AI 服务的条件初始化。
@@ -521,14 +538,14 @@ func TestAIConditionalInitialization(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// 模拟条件初始化逻辑
-			var aiService interface{}
-			var mcpManager interface{}
+			// 使用指针类型模拟真实服务类型，避免 interface{} 的 nilness 警告
+			var aiService *int
+			var mcpManager *int
 
 			if tt.aiEnabled {
 				// 模拟初始化（实际代码中会创建实例）
-				aiService = "initialized"
-				mcpManager = "initialized"
+				aiService = new(int)
+				mcpManager = new(int)
 			}
 
 			hasAI := aiService != nil

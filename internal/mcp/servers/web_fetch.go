@@ -53,7 +53,7 @@ func NewWebFetchServer() *mcp.Server {
 		Version: "1.0.0",
 	}, nil)
 
-	mcp.AddTool[FetchInput, FetchOutput](server, &mcp.Tool{
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "fetch_url",
 		Description: "获取网页内容并转换为文本",
 	}, handleFetchURL)

@@ -292,7 +292,7 @@ func (s *Service) executeStreamingWithToolCalling(
 	req ChatCompletionRequest,
 	roomID id.RoomID,
 	messages []openai.ChatCompletionMessage,
-	tools []openai.Tool,
+	_ []openai.Tool,
 	model string,
 ) (any, error) {
 	currentMessages := make([]openai.ChatCompletionMessage, len(messages))
@@ -300,7 +300,7 @@ func (s *Service) executeStreamingWithToolCalling(
 
 	eventID := matrix.GetEventID(ctx)
 
-	for i := 0; i < maxToolIterations; i++ {
+	for i := range maxToolIterations {
 		// 创建流编辑器和处理器
 		editor := NewStreamEditor(s.matrixService, roomID, "", s.globalConfig.StreamEdit, eventID)
 		handler := NewStreamToolHandler(editor, s.globalConfig.StreamEdit)
@@ -860,7 +860,7 @@ func (s *Service) buildTextMessages(roomID id.RoomID, userInput string) []openai
 //
 // 返回值:
 //   - []openai.ChatCompletionMessage: 构建的消息列表
-func (s *Service) buildMultimodalMessages(ctx context.Context, roomID id.RoomID, userInput, imageData string) []openai.ChatCompletionMessage {
+func (s *Service) buildMultimodalMessages(_ context.Context, roomID id.RoomID, userInput, imageData string) []openai.ChatCompletionMessage {
 	var messages []openai.ChatCompletionMessage
 	if s.contextManager != nil {
 		messages = s.contextManager.GetContext(roomID)
@@ -1028,8 +1028,8 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 // executeDirectResponseWithTools 执行带工具调用的直接响应。
 func (s *Service) executeDirectResponseWithTools(
 	ctx context.Context,
-	client *Client,
-	req ChatCompletionRequest,
+	_ *Client,
+	_ ChatCompletionRequest,
 	respCtx *ResponseContext,
 ) (*ChatCompletionResponse, error) {
 	roomID := respCtx.RoomID

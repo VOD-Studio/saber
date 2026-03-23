@@ -435,7 +435,7 @@ func (m *ProactiveManager) OnNewMember(ctx context.Context, roomID id.RoomID, us
 	logger.Info("处理新成员欢迎")
 
 	// 生成欢迎消息
-	welcomeMsg, err := m.generateWelcomeMessage(ctx, roomID, userID)
+	welcomeMsg, err := m.generateWelcomeMessage(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("生成欢迎消息失败: %w", err)
 	}
@@ -497,13 +497,12 @@ func (m *ProactiveManager) canSendMessage(roomID id.RoomID) bool {
 //
 // 参数:
 //   - ctx: 上下文，用于取消操作
-//   - roomID: 房间 ID（用于获取房间上下文）
 //   - userID: 新成员的用户 ID
 //
 // 返回值:
 //   - string: 生成的欢迎消息
 //   - error: 生成过程中发生的错误
-func (m *ProactiveManager) generateWelcomeMessage(ctx context.Context, roomID id.RoomID, userID id.UserID) (string, error) {
+func (m *ProactiveManager) generateWelcomeMessage(ctx context.Context, userID id.UserID) (string, error) {
 	// 构建欢迎提示词
 	welcomePrompt := m.config.NewMember.WelcomePrompt
 	if welcomePrompt == "" {

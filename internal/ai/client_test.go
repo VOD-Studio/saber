@@ -445,6 +445,15 @@ func TestChatCompletionRequest(t *testing.T) {
 	if req.Model != "gpt-4" {
 		t.Errorf("expected model gpt-4, got %s", req.Model)
 	}
+	if !req.Stream {
+		t.Errorf("expected Stream to be true")
+	}
+	if req.MaxTokens != 100 {
+		t.Errorf("expected MaxTokens 100, got %d", req.MaxTokens)
+	}
+	if req.Temperature != 0.7 {
+		t.Errorf("expected Temperature 0.7, got %f", req.Temperature)
+	}
 }
 
 // TestChatCompletionResponse 测试响应结构体。
@@ -464,5 +473,8 @@ func TestChatCompletionResponse(t *testing.T) {
 	}
 	if resp.Usage.TotalTokens != 15 {
 		t.Errorf("unexpected total tokens: %d", resp.Usage.TotalTokens)
+	}
+	if resp.Model != "gpt-4" {
+		t.Errorf("expected Model gpt-4, got %s", resp.Model)
 	}
 }
