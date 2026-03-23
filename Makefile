@@ -6,7 +6,7 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d %H:%M:%S UTC')
 GO_VERSION := $(shell go version | awk '{print $$3}')
-PLATFORM := $(shell go env GOOS)/$(shell go env GOARCH)
+BUILD_PLATFORM := $(shell go env GOOS)/$(shell go env GOARCH)
 BUILD_DIR := bin
 MAIN_FILE := main.go
 
@@ -17,7 +17,7 @@ LDFLAGS := -s -w -v \
 	-X 'main.gitBranch=$(GIT_BRANCH)' \
 	-X 'main.buildTime=$(BUILD_TIME)' \
 	-X 'main.goVersion=$(GO_VERSION)' \
-	-X 'main.platform=$(PLATFORM)'
+	-X 'main.buildPlatform=$(BUILD_PLATFORM)'
 
 # 跨平台兼容
 ifeq ($(OS),Windows_NT)
@@ -32,12 +32,12 @@ build: ## 构建二进制文件
 
 build-all: ## 构建所有平台 (macOS/Linux/Windows, arm64/amd64)
 	@mkdir -p $(BUILD_DIR)/release
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/release/$(APP_NAME)-darwin-amd64 .
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/release/$(APP_NAME)-darwin-arm64 .
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/release/$(APP_NAME)-linux-amd64 .
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/release/$(APP_NAME)-linux-arm64 .
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/release/$(APP_NAME)-windows-amd64.exe .
-	GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/release/$(APP_NAME)-windows-arm64.exe .
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="-s -w -v -X 'main.version=$(VERSION)' -X 'main.gitCommit=$(GIT_COMMIT)' -X 'main.gitBranch=$(GIT_BRANCH)' -X 'main.buildTime=$(BUILD_TIME)' -X 'main.goVersion=$(GO_VERSION)' -X 'main.buildPlatform=darwin/amd64'" -o $(BUILD_DIR)/release/$(APP_NAME)-darwin-amd64 .
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="-s -w -v -X 'main.version=$(VERSION)' -X 'main.gitCommit=$(GIT_COMMIT)' -X 'main.gitBranch=$(GIT_BRANCH)' -X 'main.buildTime=$(BUILD_TIME)' -X 'main.goVersion=$(GO_VERSION)' -X 'main.buildPlatform=darwin/arm64'" -o $(BUILD_DIR)/release/$(APP_NAME)-darwin-arm64 .
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="-s -w -v -X 'main.version=$(VERSION)' -X 'main.gitCommit=$(GIT_COMMIT)' -X 'main.gitBranch=$(GIT_BRANCH)' -X 'main.buildTime=$(BUILD_TIME)' -X 'main.goVersion=$(GO_VERSION)' -X 'main.buildPlatform=linux/amd64'" -o $(BUILD_DIR)/release/$(APP_NAME)-linux-amd64 .
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="-s -w -v -X 'main.version=$(VERSION)' -X 'main.gitCommit=$(GIT_COMMIT)' -X 'main.gitBranch=$(GIT_BRANCH)' -X 'main.buildTime=$(BUILD_TIME)' -X 'main.goVersion=$(GO_VERSION)' -X 'main.buildPlatform=linux/arm64'" -o $(BUILD_DIR)/release/$(APP_NAME)-linux-arm64 .
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="-s -w -v -X 'main.version=$(VERSION)' -X 'main.gitCommit=$(GIT_COMMIT)' -X 'main.gitBranch=$(GIT_BRANCH)' -X 'main.buildTime=$(BUILD_TIME)' -X 'main.goVersion=$(GO_VERSION)' -X 'main.buildPlatform=windows/amd64'" -o $(BUILD_DIR)/release/$(APP_NAME)-windows-amd64.exe .
+	GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="-s -w -v -X 'main.version=$(VERSION)' -X 'main.gitCommit=$(GIT_COMMIT)' -X 'main.gitBranch=$(GIT_BRANCH)' -X 'main.buildTime=$(BUILD_TIME)' -X 'main.goVersion=$(GO_VERSION)' -X 'main.buildPlatform=windows/arm64'" -o $(BUILD_DIR)/release/$(APP_NAME)-windows-arm64.exe .
 build-prod: ## 构建优化的生产版本（静态链接，去除调试信息）
 	@$(MKDIR_P)
 	CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="$(LDFLAGS)" -gcflags="-l=4" -o $(BUILD_DIR)/$(APP_NAME)$(shell go env GOEXE) .

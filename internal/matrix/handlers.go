@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -20,12 +21,17 @@ import (
 
 // BuildInfo 包含构建时的版本信息。
 type BuildInfo struct {
-	Version   string
-	GitCommit string
-	GitBranch string
-	BuildTime string
-	GoVersion string
-	Platform  string
+	Version       string
+	GitCommit     string
+	GitBranch     string
+	BuildTime     string
+	GoVersion     string
+	BuildPlatform string
+}
+
+// RuntimePlatform 返回运行时平台信息 (GOOS/GOARCH)。
+func (b BuildInfo) RuntimePlatform() string {
+	return runtime.GOOS + "/" + runtime.GOARCH
 }
 
 // CommandHandler 定义处理机器人命令的接口。
@@ -1037,7 +1043,8 @@ func (c *VersionCommand) Handle(ctx context.Context, userID id.UserID, roomID id
 	fmt.Fprintf(&html, "<tr><td><strong>Git 分支</strong></td><td><code>%s</code></td></tr>", info.GitBranch)
 	fmt.Fprintf(&html, "<tr><td><strong>构建时间</strong></td><td><code>%s</code></td></tr>", info.BuildTime)
 	fmt.Fprintf(&html, "<tr><td><strong>Go 版本</strong></td><td><code>%s</code></td></tr>", info.GoVersion)
-	fmt.Fprintf(&html, "<tr><td><strong>平台</strong></td><td><code>%s</code></td></tr>", info.Platform)
+	fmt.Fprintf(&html, "<tr><td><strong>构建平台</strong></td><td><code>%s</code></td></tr>", info.BuildPlatform)
+	fmt.Fprintf(&html, "<tr><td><strong>运行平台</strong></td><td><code>%s</code></td></tr>", info.RuntimePlatform())
 	html.WriteString("</tbody></table>")
 
 	var plain strings.Builder
@@ -1047,7 +1054,8 @@ func (c *VersionCommand) Handle(ctx context.Context, userID id.UserID, roomID id
 	fmt.Fprintf(&plain, "Git 分支: %s\n", info.GitBranch)
 	fmt.Fprintf(&plain, "构建时间: %s\n", info.BuildTime)
 	fmt.Fprintf(&plain, "Go 版本: %s\n", info.GoVersion)
-	fmt.Fprintf(&plain, "平台: %s\n", info.Platform)
+	fmt.Fprintf(&plain, "构建平台: %s\n", info.BuildPlatform)
+	fmt.Fprintf(&plain, "运行平台: %s\n", info.RuntimePlatform())
 
 	return c.service.SendFormattedText(ctx, roomID, html.String(), plain.String())
 }

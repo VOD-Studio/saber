@@ -79,7 +79,8 @@ func (s *appState) initConfig() bool {
 		fmt.Printf("  Git: %s (%s)\n", s.info.GitCommit, s.info.GitBranch)
 		fmt.Printf("  Built: %s\n", s.info.BuildTime)
 		fmt.Printf("  Go: %s\n", s.info.GoVersion)
-		fmt.Printf("  Platform: %s\n", s.info.Platform)
+		fmt.Printf("  Build Platform: %s\n", s.info.BuildPlatform)
+		fmt.Printf("  Runtime Platform: %s\n", s.info.RuntimePlatform())
 		os.Exit(0)
 	}
 

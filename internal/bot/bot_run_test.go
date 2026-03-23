@@ -65,12 +65,12 @@ func TestSetupLogging_NoPanic(t *testing.T) {
 // TestBuildInfo_Fields 测试 BuildInfo 结构体的字段。
 func TestBuildInfo_Fields(t *testing.T) {
 	info := matrix.BuildInfo{
-		Version:   "1.0.0",
-		GitCommit: "abc123",
-		GitBranch: "main",
-		BuildTime: "2024-01-01",
-		GoVersion: "go1.21.0",
-		Platform:  "linux/amd64",
+		Version:       "1.0.0",
+		GitCommit:     "abc123",
+		GitBranch:     "main",
+		BuildTime:     "2024-01-01",
+		GoVersion:     "go1.21.0",
+		BuildPlatform: "linux/amd64",
 	}
 
 	tests := []struct {
@@ -83,7 +83,7 @@ func TestBuildInfo_Fields(t *testing.T) {
 		{"GitBranch", info.GitBranch, "main"},
 		{"BuildTime", info.BuildTime, "2024-01-01"},
 		{"GoVersion", info.GoVersion, "go1.21.0"},
-		{"Platform", info.Platform, "linux/amd64"},
+		{"BuildPlatform", info.BuildPlatform, "linux/amd64"},
 	}
 
 	for _, tt := range tests {
@@ -713,12 +713,12 @@ func TestGracefulShutdownTimeout(t *testing.T) {
 // TestBuildInfoStringFormatting 测试 BuildInfo 的字符串格式化。
 func TestBuildInfoStringFormatting(t *testing.T) {
 	info := matrix.BuildInfo{
-		Version:   "1.0.0",
-		GitCommit: "abc123",
-		GitBranch: "main",
-		BuildTime: "2024-01-01T00:00:00Z",
-		GoVersion: "go1.21.0",
-		Platform:  "linux/amd64",
+		Version:       "1.0.0",
+		GitCommit:     "abc123",
+		GitBranch:     "main",
+		BuildTime:     "2024-01-01T00:00:00Z",
+		GoVersion:     "go1.21.0",
+		BuildPlatform: "linux/amd64",
 	}
 
 	// 验证所有字段都可以安全地格式化为字符串
@@ -731,7 +731,7 @@ func TestBuildInfoStringFormatting(t *testing.T) {
 		{"GitBranch", info.GitBranch},
 		{"BuildTime", info.BuildTime},
 		{"GoVersion", info.GoVersion},
-		{"Platform", info.Platform},
+		{"BuildPlatform", info.BuildPlatform},
 	}
 
 	for _, tt := range tests {

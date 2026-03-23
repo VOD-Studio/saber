@@ -20,8 +20,8 @@ func TestVersionVariables(t *testing.T) {
 	if goVersion == "" {
 		t.Error("goVersion should not be empty")
 	}
-	if platform == "" {
-		t.Error("platform should not be empty")
+	if buildPlatform == "" {
+		t.Error("buildPlatform should not be empty")
 	}
 }
 
@@ -41,7 +41,7 @@ func TestDefaultVersionValues(t *testing.T) {
 	if goVersion != "unknown" {
 		t.Errorf("default goVersion = %q, want %q", goVersion, "unknown")
 	}
-	if platform != "unknown" {
-		t.Errorf("default platform = %q, want %q", platform, "unknown")
+	if buildPlatform != "unknown" {
+		t.Errorf("default buildPlatform = %q, want %q", buildPlatform, "unknown")
 	}
 }

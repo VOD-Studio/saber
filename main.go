@@ -13,21 +13,21 @@ import (
 )
 
 var (
-	version   = "dev"
-	gitCommit = "unknown"
-	gitBranch = "unknown"
-	buildTime = "unknown"
-	goVersion = "unknown"
-	platform  = "unknown"
+	version       = "dev"
+	gitCommit     = "unknown"
+	gitBranch     = "unknown"
+	buildTime     = "unknown"
+	goVersion     = "unknown"
+	buildPlatform = "unknown"
 )
 
 func main() {
 	bot.Run(matrix.BuildInfo{
-		Version:   version,
-		GitCommit: gitCommit,
-		GitBranch: gitBranch,
-		BuildTime: buildTime,
-		GoVersion: goVersion,
-		Platform:  platform,
+		Version:       version,
+		GitCommit:     gitCommit,
+		GitBranch:     gitBranch,
+		BuildTime:     buildTime,
+		GoVersion:     goVersion,
+		BuildPlatform: buildPlatform,
 	})
 }
