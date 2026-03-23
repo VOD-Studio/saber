@@ -1,7 +1,7 @@
 .PHONY: build build-prod clean test fmt lint run help
 
 APP_NAME := saber
-VERSION := 0.0.3
+VERSION := 0.0.4
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d %H:%M:%S UTC')
