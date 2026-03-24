@@ -1,5 +1,11 @@
 # 阶段1: 构建
-FROM golang:1.24-alpine AS builder
+FROM golang:1.26-alpine AS builder
+
+# 设置 Alpine 镜像加速
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+
+# 设置 Go 代理加速
+ENV GOPROXY=https://goproxy.cn,direct
 
 WORKDIR /build
 
@@ -34,7 +40,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 
 # 阶段2: 运行（Distroless 镜像）
 # static-debian12 已包含 CA 证书、时区数据、非 root 用户
-FROM gcr.io/distroless/static-debian12:latest
+# 使用 m.daocloud.io 镜像加速
+FROM m.daocloud.io/gcr.io/distroless/static-debian12:latest
 
 # 复制二进制
 COPY --from=builder /build/saber /saber
