@@ -1,4 +1,4 @@
-.PHONY: build build-prod clean test fmt lint run help
+.PHONY: build build-all build-prod build-freebsd build-openbsd build-loong64 clean test fmt lint run help
 
 APP_NAME := saber
 VERSION := 0.0.4
