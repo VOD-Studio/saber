@@ -42,6 +42,7 @@ build-all: ## 构建所有平台 (macOS/Linux/Windows/FreeBSD/OpenBSD/Loong64, a
 	GOOS=freebsd GOARCH=arm64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="-s -w -v -X 'main.version=$(VERSION)' -X 'main.gitCommit=$(GIT_COMMIT)' -X 'main.gitBranch=$(GIT_BRANCH)' -X 'main.buildTime=$(BUILD_TIME)' -X 'main.goVersion=$(GO_VERSION)' -X 'main.buildPlatform=freebsd/arm64'" -gcflags="-l=4" -o $(BUILD_DIR)/release/$(APP_NAME)-freebsd-arm64 .
 	GOOS=openbsd GOARCH=amd64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="-s -w -v -X 'main.version=$(VERSION)' -X 'main.gitCommit=$(GIT_COMMIT)' -X 'main.gitBranch=$(GIT_BRANCH)' -X 'main.buildTime=$(BUILD_TIME)' -X 'main.goVersion=$(GO_VERSION)' -X 'main.buildPlatform=openbsd/amd64'" -gcflags="-l=4" -o $(BUILD_DIR)/release/$(APP_NAME)-openbsd-amd64 .
 	GOOS=openbsd GOARCH=arm64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="-s -w -v -X 'main.version=$(VERSION)' -X 'main.gitCommit=$(GIT_COMMIT)' -X 'main.gitBranch=$(GIT_BRANCH)' -X 'main.buildTime=$(BUILD_TIME)' -X 'main.goVersion=$(GO_VERSION)' -X 'main.buildPlatform=openbsd/arm64'" -gcflags="-l=4" -o $(BUILD_DIR)/release/$(APP_NAME)-openbsd-arm64 .
+	GOOS=linux GOARCH=loong64 CGO_ENABLED=0 go build -tags goolm -trimpath -ldflags="-s -w -v -X 'main.version=$(VERSION)' -X 'main.gitCommit=$(GIT_COMMIT)' -X 'main.gitBranch=$(GIT_BRANCH)' -X 'main.buildTime=$(BUILD_TIME)' -X 'main.goVersion=$(GO_VERSION)' -X 'main.buildPlatform=linux/loong64'" -gcflags="-l=4" -o $(BUILD_DIR)/release/$(APP_NAME)-linux-loong64 .
 
 build-prod: ## 构建优化的生产版本（静态链接，去除调试信息）
 	@$(MKDIR_P)
