@@ -1,4 +1,4 @@
-.PHONY: build build-all build-prod build-freebsd build-openbsd build-loong64 clean test fmt lint run help
+.PHONY: build build-all build-prod build-freebsd build-openbsd build-loong64 clean test fmt lint run help docker-build docker-buildx docker-push docker-load docker-run docker-clean
 
 APP_NAME := saber
 VERSION := 0.0.4
@@ -99,6 +99,56 @@ lint: ## 运行 golangci-lint 检查
 
 run: ## 运行应用程序
 	go run -tags goolm $(MAIN_FILE)
+
+# ============================================
+# Docker 构建命令
+# ============================================
+
+DOCKER_REGISTRY ?=
+IMAGE_NAME := saber
+
+docker-build: ## 构建 Docker 镜像（当前平台）
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
+		--build-arg GIT_BRANCH=$(GIT_BRANCH) \
+		--build-arg BUILD_TIME="$(BUILD_TIME)" \
+		-t $(IMAGE_NAME):$(VERSION) \
+		-t $(IMAGE_NAME):latest \
+		.
+
+docker-buildx: ## 构建多架构 Docker 镜像（amd64 + arm64）
+	docker buildx bake \
+		--set saber.platform=linux/amd64,linux/arm64 \
+		--set saber.tags=$(IMAGE_NAME):$(VERSION) \
+		--set saber.tags=$(IMAGE_NAME):latest
+
+docker-push: ## 构建并推送多架构镜像到仓库
+	@if [ -z "$(DOCKER_REGISTRY)" ]; then \
+		echo "错误: 请设置 DOCKER_REGISTRY 变量"; \
+		exit 1; \
+	fi
+	docker buildx bake \
+		--push \
+		--set saber.platform=linux/amd64,linux/arm64 \
+		--set saber.tags=$(DOCKER_REGISTRY)/$(IMAGE_NAME):$(VERSION) \
+		--set saber.tags=$(DOCKER_REGISTRY)/$(IMAGE_NAME):latest
+
+docker-load: ## 构建多架构镜像并加载到本地
+	docker buildx bake \
+		--load \
+		--set saber.platform=linux/$(shell go env GOARCH) \
+		--set saber.tags=$(IMAGE_NAME):$(VERSION)
+
+docker-run: ## 运行 Docker 容器（开发环境）
+	docker run --rm -it \
+		-v $(PWD)/config.yaml:/data/config.yaml:ro \
+		-v $(PWD)/data:/data \
+		--name saber \
+		$(IMAGE_NAME):latest
+
+docker-clean: ## 清理 Docker 构建缓存
+	docker builder prune -f
 
 help: ## 显示帮助信息
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-12s\033[0m %s\n", $$1, $$2}'
