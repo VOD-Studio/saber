@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"os"
 
-	// 注册 SQLite 驱动 (纯 Go 或 CGO，取决于构建标签)
+	// 注册 SQLite 驱动 (纯 Go 实现)
 	_ "rua.plus/saber/internal/db"
 
 	"rua.plus/saber/internal/bot"

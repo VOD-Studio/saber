@@ -1,7 +1,5 @@
-//go:build !cgo
-
 // Package db 提供 SQLite 数据库驱动注册。
-// 本文件是非 CGO 构建，使用 modernc.org/sqlite 纯 Go 实现。
+// 使用 modernc.org/sqlite 纯 Go 实现。
 package db
 
 import (

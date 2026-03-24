@@ -73,7 +73,76 @@ ai:
 ./bin/saber
 # 或指定配置文件路径
 ./bin/saber -c /path/to/config.yaml
+# 启用调试日志
+./bin/saber -v
 ```
+
+### CLI 标志
+
+| 标志 | 缩写 | 默认值 | 描述 |
+|------|------|--------|------|
+| `-config` | `-c` | `./config.yaml` | 配置文件路径 |
+| `-verbose` | `-v` | `false` | 启用调试日志 |
+| `-version` | | | 显示版本信息 |
+| `-generate-config` | | | 生成示例配置文件 |
+
+### Docker 部署
+
+项目提供完整的 Docker 支持，使用多阶段构建和 Distroless 镜像。
+
+#### 构建镜像
+
+```bash
+# 构建当前平台镜像
+make docker-build
+
+# 构建多架构镜像（amd64 + arm64）
+make docker-buildx
+
+# 构建并加载到本地
+make docker-load
+```
+
+#### 运行容器
+
+```bash
+# 使用 make 运行（开发环境）
+make docker-run
+
+# 或手动运行
+docker run --rm -it \
+  -v ./config.yaml:/data/config.yaml:ro \
+  -v ./data:/data \
+  --name saber \
+  saber:latest
+```
+
+#### 推送到仓库
+
+```bash
+# 设置仓库地址并推送
+make docker-push DOCKER_REGISTRY=your-registry.com/
+```
+
+#### Docker 镜像特点
+
+- **基础镜像**: Distroless（无 shell，最小攻击面）
+- **多架构**: 支持 linux/amd64 和 linux/arm64
+- **静态链接**: 无需运行时依赖
+- **非 root 运行**: 安全默认配置
+- **体积优化**: 约 20MB（最终镜像）
+
+#### docker-bake.hcl
+
+项目使用 `docker-bake.hcl` 配置多架构构建，支持以下变量：
+
+| 变量 | 默认值 | 描述 |
+|------|--------|------|
+| `REGISTRY` | `""` | Docker 仓库地址 |
+| `VERSION` | `dev` | 镜像版本标签 |
+| `GIT_COMMIT` | `unknown` | Git commit hash |
+| `GIT_BRANCH` | `unknown` | Git 分支名 |
+| `BUILD_TIME` | `""` | 构建时间 |
 
 ## 使用说明
 
@@ -666,67 +735,75 @@ meme:
 
 ```
 saber/
-  main.go                 # 入口点
+  main.go                          # 入口点
+  main_test.go                     # 主测试
+  Makefile                         # 构建和 Docker 命令
+  Dockerfile                       # Docker 多阶段构建
+  docker-bake.hcl                  # Docker 多架构构建配置
+  config.example.yaml              # 示例配置文件
   internal/
     bot/
-      bot.go              # 机器人初始化和生命周期
-      errors.go           # 错误定义
+      bot.go                       # 机器人初始化和生命周期
+      errors.go                    # 错误定义
     cli/
-      flags.go            # 命令行标志解析
+      flags.go                     # 命令行标志解析
     config/
-      config.go           # 配置加载和验证
-      provider.go         # 提供商配置和模型 ID 解析
+      config.go                    # 配置加载和验证
+      provider.go                  # 提供商配置和模型 ID 解析
     context/
-      keys.go             # 上下文键定义
-      user.go             # 用户上下文工具
+      keys.go                      # 上下文键定义
+      user.go                      # 用户上下文工具
     db/
-      sqlite_cgo.go       # SQLite CGO 驱动（开发环境）
-      sqlite_nocgo.go     # SQLite 纯 Go 驱动（生产环境）
+      sqlite_cgo.go                # SQLite CGO 驱动（仅 CGO 构建时使用）
+      sqlite_nocgo.go              # SQLite 纯 Go 驱动（默认使用）
     matrix/
-      client.go           # Matrix 客户端封装
-      crypto.go           # E2EE 支持
-      handlers.go         # 事件处理和命令分发
-      presence.go         # 在线状态管理
-      rooms.go            # 房间操作
-      context.go          # 上下文工具
-      mention.go          # 提及解析服务
-      reply.go            # 回复工具
-      media.go            # 媒体上传和处理
+      client.go                    # Matrix 客户端封装
+      crypto.go                    # E2EE 支持
+      handlers.go                  # 事件处理和命令分发
+      presence.go                  # 在线状态管理
+      rooms.go                     # 房间操作
+      context.go                   # 上下文工具
+      mention.go                   # 提及解析服务
+      reply.go                     # 回复工具
+      media.go                     # 媒体上传和处理
+      testing_helpers.go           # 测试辅助工具
     ai/
-      service.go          # AI 服务编排
-      client.go           # OpenAI 兼容客户端
-      strategy.go         # AI 提供商策略模式
-      model_registry.go   # 多模型注册管理
-      model_commands.go   # 模型特定命令处理
-      context_manager.go  # 对话上下文管理
-      stream_handler.go   # 流式响应处理
-      stream_editor.go    # 流式消息编辑
-      stream_tool_handler.go # 工具调用流处理
-      retry_handler.go    # 重试逻辑和退避
-      circuit_breaker.go  # 熔断器模式
-      proactive.go        # 主动聊天管理器
-      proactive_triggers.go # 触发器实现（静默/定时）
-      proactive_state.go  # 房间状态跟踪
-      proactive_decision.go # AI 决策引擎
+      service.go                   # AI 服务编排
+      client.go                    # OpenAI 兼容客户端
+      strategy.go                  # AI 提供商策略模式
+      model_registry.go            # 多模型注册管理
+      model_commands.go            # 模型特定命令处理
+      context_manager.go           # 对话上下文管理
+      stream_handler.go            # 流式响应处理
+      stream_editor.go             # 流式消息编辑
+      stream_tool_handler.go       # 工具调用流处理
+      retry_handler.go             # 重试逻辑和退避
+      circuit_breaker.go           # 熔断器模式
+      proactive.go                 # 主动聊天管理器
+      proactive_triggers.go        # 触发器实现（静默/定时）
+      proactive_state.go           # 房间状态跟踪
+      proactive_decision.go        # AI 决策引擎
+      testing_helpers.go           # 测试辅助工具
     mcp/
-      manager.go          # MCP 管理器
-      factory.go          # MCP 服务器工厂模式
-      config.go           # MCP 配置验证
-      tools.go            # 工具管理
-      middleware.go       # 中间件
-      validation.go       # 输入验证
-      logging.go          # 日志中间件
+      manager.go                   # MCP 管理器
+      factory.go                   # MCP 服务器工厂模式
+      config.go                    # MCP 配置验证
+      tools.go                     # 工具管理
+      middleware.go                # 中间件
+      validation.go                # 输入验证
+      logging.go                   # 日志中间件
+      testing_helpers.go           # 测试辅助工具
       servers/
-        builtin.go        # 内置服务器注册
-        shared_client.go  # 共享 HTTP 客户端
-        web_fetch.go      # 网页抓取工具
-        web_search.go     # 网络搜索工具
-        js_sandbox.go     # JavaScript 沙箱
-        stdio.go          # Stdio MCP 服务器
-        http.go           # HTTP MCP 服务器
+        builtin.go                 # 内置服务器注册
+        shared_client.go           # 共享 HTTP 客户端
+        web_fetch.go               # 网页抓取工具
+        web_search.go              # 网络搜索工具
+        js_sandbox.go              # JavaScript 沙箱
+        stdio.go                   # Stdio MCP 服务器
+        http.go                    # HTTP MCP 服务器
     meme/
-      service.go          # Meme 服务（Klipy API）
-      command.go          # !meme 命令处理
+      service.go                   # Meme 服务（Klipy API）
+      command.go                   # !meme 命令处理
 ```
 
 ## 开发
@@ -741,38 +818,28 @@ export GOFLAGS="-tags=goolm"
 ### 构建命令
 
 ```bash
-make build       # 构建二进制文件（可能使用 CGO）
-make build-prod  # 生产构建（纯 Go，静态链接，无 CGO）
+make build       # 构建二进制文件（纯 Go，静态链接）
+make build-prod  # 构建优化的生产版本（额外内联优化）
+make build-all   # 构建所有平台（macOS/Linux/Windows/FreeBSD/OpenBSD/Loong64）
 make run         # 使用 go run 运行
 make test        # 运行测试
+make test-cover  # 运行测试并生成覆盖率报告
 make fmt         # 格式化代码
 make lint        # 运行代码检查
 make clean       # 清理构建产物
 ```
 
-### 构建模式说明
+### 构建说明
 
-项目支持两种 SQLite 实现，通过 CGO 开关选择：
+项目使用纯 Go 编译（`CGO_ENABLED=0`），使用 `modernc/sqlite` 作为 SQLite 驱动：
 
-| 命令 | CGO | SQLite 驱动 | 适用场景 |
-|------|-----|-------------|----------|
-| `make build` | 自动检测 | `mattn/go-sqlite3` (CGO) | 开发环境 |
-| `make build-prod` | 禁用 | `modernc/sqlite` (纯 Go) | 生产部署、容器化 |
+| 命令 | 特点 | 适用场景 |
+|------|------|----------|
+| `make build` | 纯 Go，静态链接 | 日常开发 |
+| `make build-prod` | 纯 Go + 激进内联优化 (`-gcflags="-l=4"`) | 生产部署 |
+| `make build-all` | 交叉编译 6 个平台 × 2 架构 | 发布版本 |
 
-**推荐生产环境使用 `make build-prod`**：
-
-- 纯 Go 构建，无需 C 编译器
-- 静态链接，可在任意 Linux 发行版运行（包括 Alpine）
-- 构建更快，二进制更小
-- 跨平台部署更简单
-
-**`build-prod` 构建参数**：
-
-```bash
-CGO_ENABLED=0 go build -tags goolm -trimpath \
-  -ldflags="-s -w -X 'main.version=...'" \
-  -gcflags="-l=4" -o bin/saber .
-```
+**构建参数说明**：
 
 | 参数 | 作用 |
 |------|------|
@@ -781,7 +848,7 @@ CGO_ENABLED=0 go build -tags goolm -trimpath \
 | `-trimpath` | 移除文件系统路径，可复现构建 |
 | `-ldflags="-s -w"` | 移除符号表和调试信息，减小体积 |
 | `-ldflags="-X ..."` | 运行时注入版本、Git commit 等信息 |
-| `-gcflags="-l=4"` | 激进内联优化，提升性能 |
+| `-gcflags="-l=4"` | 激进内联优化（仅 build-prod） |
 
 ### 使用 E2EE 构建
 

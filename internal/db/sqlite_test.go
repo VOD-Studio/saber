@@ -1,5 +1,3 @@
-//go:build !cgo
-
 // Package db_test 包含 SQLite 驱动的单元测试。
 package db
 

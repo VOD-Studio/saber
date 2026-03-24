@@ -28,10 +28,7 @@ make lint                               # golangci-lint
 make run                                # Run app
 ```
 
-**Editor config**:
-```bash
-export GOFLAGS="-tags=goolm"
-```
+**Editor config**: `export GOFLAGS="-tags=goolm"`
 
 ---
 
@@ -44,18 +41,14 @@ export GOFLAGS="-tags=goolm"
 - **Names**: Package lowercase, exported PascalCase, unexported camelCase
 - **Errors**: `Err` prefix | **Strategies/Factories**: `*Strategy`, `*Factory` suffix
 
-### Error Handling
+### Error Handling & Logging
 
 ```go
 // Wrap with context using %w
 if err != nil {
     return fmt.Errorf("failed to load: %w", err)
 }
-```
 
-### Logging
-
-```go
 // Use slog structured logging, never log secrets
 slog.Info("service initialized", "model", cfg.DefaultModel)
 ```
@@ -64,7 +57,7 @@ slog.Info("service initialized", "model", cfg.DefaultModel)
 
 **All comments in Chinese.** All exported identifiers must have comments starting with the identifier name. See [`docs/comments.md`](docs/comments.md) for details.
 
-### Import Groups Example
+### Import Groups
 
 ```go
 import (
@@ -88,53 +81,13 @@ import (
 
 **Service deps**: MCPManager → AIService (AI needs MCP tools); MediaService before AIService; ProactiveManager last.
 
-### Shared HTTP Client
+### Key Patterns
 
-All MCP servers share one HTTP client:
-
-```go
-import "rua.plus/saber/internal/mcp/servers"
-client := servers.GetSharedHTTPClient()
-```
-
-### Strategy Pattern (AI Clients)
-
-```go
-type ClientStrategy interface {
-    CreateClientConfig(cfg *config.ModelConfig) openai.ClientConfig
-    Name() string
-}
-factory.GetDefaultFactory().RegisterStrategy(&MyProviderStrategy{})
-```
-
-Built-in: `openai` (Ollama/vLLM/LocalAI compatible), `azure`
-
-### Factory Pattern (MCP Servers)
-
-```go
-type MCPServerFactory interface {
-    Create(ctx context.Context, name string, cfg *config.ServerConfig) (*mcp.Client, *mcp.ClientSession, error)
-    Type() string
-}
-```
-
-Types: `builtin`, `stdio`, `http`
-
-### Circuit Breaker
-
-```go
-cb := NewCircuitBreaker(5, 30*time.Second)
-if !cb.Allow() { return ErrCircuitOpen }
-cb.RecordSuccess()  // or cb.RecordFailure()
-```
-
-### Context Metadata
-
-```go
-ctx = ai.WithUserContext(ctx, userID, roomID)
-ctx = matrix.WithEventID(ctx, eventID)
-userID, _ := ai.GetUserFromContext(ctx)
-```
+- **Strategy (AI Clients)**: `ClientStrategy` interface → `factory.GetDefaultFactory().RegisterStrategy()`. Built-in: `openai`, `azure`
+- **Factory (MCP Servers)**: `MCPServerFactory` interface. Types: `builtin`, `stdio`, `http`
+- **Circuit Breaker**: `NewCircuitBreaker(5, 30*time.Second)` → `cb.Allow()`, `cb.RecordSuccess/Failure()`
+- **Shared HTTP Client**: `servers.GetSharedHTTPClient()` for all MCP servers
+- **Context Metadata**: `ai.WithUserContext()`, `matrix.WithEventID()`, `ai.GetUserFromContext()`
 
 ### SQLite Dual Driver
 
@@ -147,18 +100,13 @@ userID, _ := ai.GetUserFromContext(ctx)
 
 ## Testing
 
-### Naming
+### Naming & Structure
 
-`Test<FunctionName>_<Scenario>`
+`Test<FunctionName>_<Scenario>` — Helper prefix: `create` or `new`
 
 ```go
 func TestNewService_NilConfig(t *testing.T) { ... }
-func TestNewService_ValidConfig(t *testing.T) { ... }
-```
 
-### Table-Driven
-
-```go
 func TestValidate(t *testing.T) {
     tests := []struct {
         name    string
@@ -176,14 +124,6 @@ func TestValidate(t *testing.T) {
         })
     }
 }
-```
-
-### Helpers
-
-Prefix `create` or `new`:
-
-```go
-func createTestAIConfig() *config.AIConfig { ... }
 ```
 
 **Requirements**: Cover success/failure paths | Use `t.TempDir()` | Table-driven | Independent tests
