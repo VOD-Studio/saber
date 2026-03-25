@@ -290,7 +290,7 @@ ai:
   api_key: "test-key"
   default_model: "gpt-4"
 `
-		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
 			t.Fatalf("写入测试配置文件失败: %v", err)
 		}
 
@@ -338,7 +338,7 @@ ai:
   user_id: "@test:test.org"
   access_token: "token"
 `
-		if err := os.WriteFile("config.yaml", []byte(content), 0o644); err != nil {
+		if err := os.WriteFile("config.yaml", []byte(content), 0o600); err != nil {
 			t.Fatalf("写入测试配置文件失败: %v", err)
 		}
 
@@ -377,7 +377,7 @@ matrix:
   user_id: "@custom:matrix.org"
   access_token: "token"
 `
-		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
 			t.Fatalf("写入测试配置文件失败: %v", err)
 		}
 

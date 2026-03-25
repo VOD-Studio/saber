@@ -294,7 +294,7 @@ func TestRun_ConfigLoadFailure(t *testing.T) {
 			setupConfig: func(dir string) string {
 				configPath := filepath.Join(dir, "invalid.yaml")
 				invalidYAML := "invalid: [yaml: content"
-				_ = os.WriteFile(configPath, []byte(invalidYAML), 0o644)
+				_ = os.WriteFile(configPath, []byte(invalidYAML), 0o600)
 				return configPath
 			},
 			expectedExit:   1,
@@ -308,7 +308,7 @@ func TestRun_ConfigLoadFailure(t *testing.T) {
   homeserver: "https://matrix.org"
   # 缺少 user_id 和认证信息
 `
-				_ = os.WriteFile(configPath, []byte(incompleteConfig), 0o644)
+				_ = os.WriteFile(configPath, []byte(incompleteConfig), 0o600)
 				return configPath
 			},
 			expectedExit:   1,

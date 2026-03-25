@@ -4,6 +4,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,9 +35,9 @@ func TestGenerateExamplePermissions(t *testing.T) {
 	}
 }
 
-// TestLoadWarnsOnInsecurePermissions 测试 Load 在权限不安全时警告。
-func TestLoadWarnsOnInsecurePermissions(t *testing.T) {
-	t.Parallel()
+// TestLoadRejectsOnInsecurePermissions 测试 Load 在权限不安全时拒绝加载。
+func TestLoadRejectsOnInsecurePermissions(t *testing.T) {
+	// 注意：此测试不能使用 t.Parallel()，因为使用了 t.Setenv
 
 	// 创建权限过于宽松的临时配置文件
 	tmpDir := t.TempDir()
@@ -54,6 +55,19 @@ func TestLoadWarnsOnInsecurePermissions(t *testing.T) {
 		t.Fatalf("config file not created")
 	}
 
-	// 注意：由于 Load 会验证配置，我们只需要验证权限检查逻辑存在
-	// 实际的警告输出需要通过日志捕获来验证，这里跳过以简化测试
+	// 验证 Load 会返回权限错误
+	_, err = Load(configPath)
+	if err == nil {
+		t.Error("期望 Load 拒绝权限不安全的配置文件，但没有返回错误")
+	}
+	if !strings.Contains(err.Error(), "配置文件权限不安全") {
+		t.Errorf("期望错误包含 '配置文件权限不安全'，实际错误: %v", err)
+	}
+
+	// 设置环境变量后应该可以加载
+	t.Setenv("SABER_ALLOW_INSECURE_CONFIG", "true")
+	_, err = Load(configPath)
+	if err != nil {
+		t.Errorf("设置环境变量后应该可以加载配置文件: %v", err)
+	}
 }
