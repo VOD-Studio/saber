@@ -19,6 +19,7 @@
 - **回复延续对话**: 回复机器人的消息时自动继续对话
 - **主动聊天**: AI 驱动的主动消息，支持静默检测、定时触发、新成员欢迎
 - **Meme 搜索**: 支持搜索 GIF/Sticker/Meme 并发送到聊天（使用 Klipy API）
+- **人格管理**: 支持为不同房间设置不同的机器人人格，包括内置人格和自定义人格
 
 ## 快速开始
 
@@ -163,6 +164,12 @@ make docker-push DOCKER_REGISTRY=your-registry.com/
 | `!meme <keyword>`   | 搜索并发送 GIF/Sticker/Meme                |
 | `!gif <keyword>`    | 搜索并发送 GIF 动图                        |
 | `!sticker <keyword>`| 搜索并发送 Sticker 贴纸                    |
+| `!persona list`     | 列出所有可用人格                           |
+| `!persona set <id>` | 设置当前房间的人格                         |
+| `!persona clear`    | 清除当前房间的人格设置                     |
+| `!persona status`   | 显示当前房间的人格状态                     |
+| `!persona new ...`  | 创建新的自定义人格                         |
+| `!persona del <id>` | 删除自定义人格                             |
 
 ### 私聊
 
@@ -532,6 +539,53 @@ meme:
 !sticker hello        # 快捷方式：搜索 Sticker
 ```
 
+### 人格管理
+
+人格功能允许为不同房间设置不同的机器人"性格"，每个人格有独特的系统提示词，会在 AI 对话时与基础系统提示词合并。
+
+#### 内置人格
+
+| ID | 名称 | 描述 |
+|---|---|---|
+| `catgirl` | 猫娘 | 可爱活泼，句尾加"喵～" |
+| `butler` | 管家 | 优雅恭敬，英伦风格 |
+| `pirate` | 海盗 | 豪爽冒险，说话带"啊哈" |
+| `tsundere` | 傲娇 | 表面冷淡内心温柔 |
+| `poet` | 诗人 | 文雅古风，喜用诗词 |
+
+#### 使用方式
+
+```
+!persona list              # 列出所有可用人格
+!persona set catgirl       # 设置当前房间为猫娘人格
+!persona status            # 查看当前房间的人格状态
+!persona clear             # 清除当前房间的人格设置
+```
+
+#### 创建自定义人格
+
+```
+!persona new robot "机器人" "你是一个友好的机器人助手" "机器人人格"
+```
+
+参数说明：
+- `robot` - 人格 ID（唯一标识符）
+- `"机器人"` - 显示名称
+- `"你是一个友好的机器人助手"` - 系统提示词
+- `"机器人人格"` - 描述信息
+
+#### 删除自定义人格
+
+```
+!persona del robot
+```
+
+注意：内置人格不可删除。
+
+#### 数据存储
+
+人格数据存储在 SQLite 数据库中，默认位于配置文件同目录下的 `persona.db`。
+
 ## 配置参考
 
 ### Matrix 设置
@@ -804,6 +858,11 @@ saber/
     meme/
       service.go                   # Meme 服务（Klipy API）
       command.go                   # !meme 命令处理
+    persona/
+      types.go                     # Persona 结构体定义
+      builtin.go                   # 内置人格定义
+      service.go                   # 人格服务（CRUD、房间映射）
+      commands.go                  # !persona 命令处理
 ```
 
 ## 开发
