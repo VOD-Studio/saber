@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -15,23 +14,13 @@ import (
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
+	"rua.plus/saber/internal/matrix/commands"
 	"rua.plus/saber/internal/mcp"
 )
 
 // BuildInfo 包含构建时的版本信息。
-type BuildInfo struct {
-	Version       string
-	GitCommit     string
-	GitBranch     string
-	BuildTime     string
-	GoVersion     string
-	BuildPlatform string
-}
-
-// RuntimePlatform 返回运行时平台信息 (GOOS/GOARCH)。
-func (b *BuildInfo) RuntimePlatform() string {
-	return runtime.GOOS + "/" + runtime.GOARCH
-}
+// 使用 commands 包的 BuildInfo 类型，保持一致性。
+type BuildInfo = commands.BuildInfo
 
 // CommandHandler 定义处理机器人命令的接口。
 type CommandHandler interface {
@@ -193,6 +182,21 @@ func (s *CommandService) ListCommands() []CommandInfo {
 	list := make([]CommandInfo, 0, len(s.commands))
 	for _, info := range s.commands {
 		list = append(list, info)
+	}
+	return list
+}
+
+// List 实现 commands.CommandLister 接口。
+func (s *CommandService) List() []commands.CommandInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	list := make([]commands.CommandInfo, 0, len(s.commands))
+	for _, info := range s.commands {
+		list = append(list, commands.CommandInfo{
+			Name:        info.Name,
+			Description: info.Description,
+		})
 	}
 	return list
 }
@@ -814,10 +818,11 @@ func (c *VersionCommand) Handle(ctx context.Context, userID id.UserID, roomID id
 }
 
 // RegisterBuiltinCommands 注册默认命令。
+// 使用 commands 包的 HTML 版本命令，提供更好的显示效果。
 func RegisterBuiltinCommands(service *CommandService) {
-	service.RegisterCommandWithDesc("ping", "检查机器人是否在线", NewPingCommand(service))
-	service.RegisterCommandWithDesc("help", "列出可用命令", NewHelpCommand(service))
-	service.RegisterCommandWithDesc("version", "显示版本信息", NewVersionCommand(service))
+	service.RegisterCommandWithDesc("ping", "检查机器人是否在线", commands.NewPingCommand(service))
+	service.RegisterCommandWithDesc("help", "列出可用命令", commands.NewHelpCommand(service, service))
+	service.RegisterCommandWithDesc("version", "显示版本信息", commands.NewVersionCommand(service, service))
 }
 
 // MCPListCommand 列出所有可用的 MCP 服务器和工具。
