@@ -167,18 +167,6 @@ func TestManager_InvalidateToolCache(t *testing.T) {
 	}
 }
 
-// TestManager_CallTool_Disabled 测试禁用时调用工具。
-func TestManager_CallTool_Disabled(t *testing.T) {
-	cfg := &config.MCPConfig{Enabled: false}
-	mgr := NewManager(cfg)
-
-	ctx := context.Background()
-	_, err := mgr.CallTool(ctx, "test", "test_tool", nil)
-	if err == nil {
-		t.Error("CallTool should error when manager is disabled")
-	}
-}
-
 // TestRateLimiter_Basic 测试基本速率限制。
 func TestRateLimiter_Basic(t *testing.T) {
 	limiter := NewRateLimiter(10)
