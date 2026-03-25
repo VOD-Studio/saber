@@ -117,15 +117,28 @@ func TestStreamToolHandler_MultipleToolCalls(t *testing.T) {
 		t.Fatalf("expected 2 tool calls, got %d", len(toolCalls))
 	}
 
-	// 验证工具调用内容
-	tc0 := toolCalls[0]
-	if tc0.ID != "call_1" || tc0.Function.Name != "get_weather" {
-		t.Errorf("first tool call mismatch: %+v", tc0)
+	// 验证工具调用内容 - 由于 map 遍历顺序不确定，使用 map 来查找
+	callMap := make(map[string]openai.ToolCall)
+	for _, tc := range toolCalls {
+		callMap[tc.ID] = tc
 	}
 
-	tc1 := toolCalls[1]
-	if tc1.ID != "call_2" || tc1.Function.Name != "get_time" {
-		t.Errorf("second tool call mismatch: %+v", tc1)
+	// 验证第一个工具调用
+	if tc, ok := callMap["call_1"]; ok {
+		if tc.Function.Name != "get_weather" {
+			t.Errorf("call_1 function name mismatch: got %s", tc.Function.Name)
+		}
+	} else {
+		t.Error("call_1 not found")
+	}
+
+	// 验证第二个工具调用
+	if tc, ok := callMap["call_2"]; ok {
+		if tc.Function.Name != "get_time" {
+			t.Errorf("call_2 function name mismatch: got %s", tc.Function.Name)
+		}
+	} else {
+		t.Error("call_2 not found")
 	}
 }
 
