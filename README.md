@@ -887,6 +887,12 @@ go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 - 生产环境使用访问令牌而非密码
 - E2EE pickle 密钥应安全存储
 
+### 环境变量
+
+| 变量 | 描述 |
+|------|------|
+| `SABER_ALLOW_INSECURE_CONFIG` | 设置为 `true` 允许加载权限过宽的配置文件（仅用于测试环境，不推荐生产使用） |
+
 ## 依赖
 
 - [mautrix-go](https://github.com/mautrix/go) - Matrix 客户端库
