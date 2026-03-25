@@ -6,13 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/microcosm-cc/bluemonday"
-	"golang.org/x/sync/semaphore"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
@@ -31,7 +29,7 @@ type BuildInfo struct {
 }
 
 // RuntimePlatform 返回运行时平台信息 (GOOS/GOARCH)。
-func (b BuildInfo) RuntimePlatform() string {
+func (b *BuildInfo) RuntimePlatform() string {
 	return runtime.GOOS + "/" + runtime.GOARCH
 }
 
@@ -199,12 +197,6 @@ func (s *CommandService) ListCommands() []CommandInfo {
 	return list
 }
 
-// ParsedCommand 表示从消息中解析的命令。
-type ParsedCommand struct {
-	Command string
-	Args    []string
-}
-
 // ParseCommand 从消息体中提取命令和参数。
 // 支持基于前缀的命令 (!command args) 和提及 (@bot:command args)。
 // 如果消息不是有效命令则返回 nil。
@@ -227,8 +219,14 @@ func (s *CommandService) ParseCommand(body string) *ParsedCommand {
 	return nil
 }
 
+// ParsedCommand 表示从消息中解析的命令。
+type ParsedCommand struct {
+	Command string
+	Args    []string
+}
+
 func (s *CommandService) parsePrefixedCommand(body string) *ParsedCommand {
-	parts := strings.Fields(body)
+	parts := splitArgs(body)
 	if len(parts) == 0 {
 		return nil
 	}
@@ -242,7 +240,7 @@ func (s *CommandService) parsePrefixedCommand(body string) *ParsedCommand {
 func (s *CommandService) parseMentionCommand(body string) *ParsedCommand {
 	// 格式: @bot:server.com command args
 	// 或: @bot:server.com: command args
-	parts := strings.Fields(body)
+	parts := splitArgs(body)
 	if len(parts) == 0 {
 		return nil
 	}
@@ -270,20 +268,35 @@ func (s *CommandService) parseMentionCommand(body string) *ParsedCommand {
 	}
 }
 
+func splitArgs(s string) []string {
+	var args []string
+	var current string
+	inQuote := false
+
+	for _, r := range s {
+		switch r {
+		case ' ', '\t':
+			if inQuote {
+				current += string(r)
+			} else if current != "" {
+				args = append(args, current)
+				current = ""
+			}
+		case '"':
+			inQuote = !inQuote
+		default:
+			current += string(r)
+		}
+	}
+
+	if current != "" {
+		args = append(args, current)
+	}
+
+	return args
+}
+
 // handleDirectChat 处理私聊消息自动回复。
-//
-// 当消息来自私聊房间（只有2个成员）且 directChatAI 处理器已设置时，
-// 自动触发 AI 回复。
-//
-// 参数:
-//   - ctx: 上下文
-//   - sender: 消息发送者 ID
-//   - roomID: 房间 ID
-//   - body: 消息内容
-//
-// 返回值:
-//   - handled: 是否已处理
-//   - error: 处理过程中发生的错误
 func (s *CommandService) handleDirectChat(ctx context.Context, sender id.UserID, roomID id.RoomID, body string) (handled bool, err error) {
 	if s.directChatAI == nil || !s.isDirectChat(ctx, roomID) {
 		return false, nil
@@ -306,20 +319,6 @@ func (s *CommandService) handleDirectChat(ctx context.Context, sender id.UserID,
 }
 
 // handleReply 处理回复消息。
-//
-// 当消息是回复机器人发送的消息时，触发 replyAI 处理器。
-// 会自动清理回复内容中的引用前缀，并可能包含被回复消息的上下文。
-// 如果被引用的消息是图片，会将图片信息注入上下文供 AI 分析。
-//
-// 参数:
-//   - ctx: 上下文
-//   - sender: 消息发送者 ID
-//   - roomID: 房间 ID
-//   - content: 消息内容对象
-//
-// 返回值:
-//   - handled: 是否已处理
-//   - error: 处理过程中发生的错误
 func (s *CommandService) handleReply(ctx context.Context, sender id.UserID, roomID id.RoomID, content *event.MessageEventContent) (handled bool, err error) {
 	if s.replyAI == nil || content.RelatesTo == nil || content.RelatesTo.GetReplyTo() == "" {
 		return false, nil
@@ -336,14 +335,12 @@ func (s *CommandService) handleReply(ctx context.Context, sender id.UserID, room
 
 	replyContext := ""
 	if evt, err := s.client.GetEvent(ctx, roomID, replyToEventID); err == nil {
-		// 确保事件内容被正确解析
 		if evt.Content.Parsed == nil {
 			if parseErr := evt.Content.ParseRaw(event.EventMessage); parseErr != nil {
 				slog.Debug("解析被引用消息内容失败", "error", parseErr)
 			}
 		}
 		if msgContent, ok := evt.Content.Parsed.(*event.MessageEventContent); ok {
-			// 检查被引用消息是否为图片消息
 			if msgContent.MsgType == event.MsgImage {
 				mediaInfo := ExtractMediaInfo(msgContent)
 				if mediaInfo != nil {
@@ -379,19 +376,6 @@ func (s *CommandService) handleReply(ctx context.Context, sender id.UserID, room
 }
 
 // handleGroupMention 处理群聊中的提及消息。
-//
-// 当群聊消息中包含对机器人的 @mention 时，触发 mentionAI 处理器。
-// 使用 MentionService 解析多种 mention 格式。
-//
-// 参数:
-//   - ctx: 上下文
-//   - sender: 消息发送者 ID
-//   - roomID: 房间 ID
-//   - content: 消息内容对象
-//
-// 返回值:
-//   - handled: 是否已处理
-//   - error: 处理过程中发生的错误
 func (s *CommandService) handleGroupMention(ctx context.Context, sender id.UserID, roomID id.RoomID, content *event.MessageEventContent) (handled bool, err error) {
 	if s.mentionAI == nil || s.mentionService == nil || s.isDirectChat(ctx, roomID) {
 		return false, nil
@@ -417,19 +401,6 @@ func (s *CommandService) handleGroupMention(ctx context.Context, sender id.UserI
 }
 
 // handleCommand 处理命令消息。
-//
-// 解析消息中的命令并执行对应的处理器。
-// 命令格式支持 `!command args` 或 `@bot:command args`。
-//
-// 参数:
-//   - ctx: 上下文
-//   - sender: 消息发送者 ID
-//   - roomID: 房间 ID
-//   - parsed: 解析后的命令对象
-//
-// 返回值:
-//   - handled: 是否已处理
-//   - error: 处理过程中发生的错误
 func (s *CommandService) handleCommand(ctx context.Context, sender id.UserID, roomID id.RoomID, parsed *ParsedCommand) (handled bool, err error) {
 	cmdInfo, ok := s.GetCommand(parsed.Command)
 	if !ok {
@@ -530,6 +501,7 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 	return nil
 }
 
+// reportError 报告命令执行错误。
 func (s *CommandService) reportError(ctx context.Context, roomID id.RoomID, cmd string, err error) error {
 	msg := fmt.Sprintf("Error executing command '%s': %v", cmd, err)
 
@@ -620,6 +592,7 @@ func (s *CommandService) SendFormattedText(ctx context.Context, roomID id.RoomID
 	return err
 }
 
+// SendFormattedReply 发送格式化回复消息。
 func (s *CommandService) SendFormattedReply(ctx context.Context, roomID id.RoomID, html, plain string, replyTo id.EventID) (id.EventID, error) {
 	relatesTo := &event.RelatesTo{
 		InReplyTo: &event.InReplyTo{
@@ -686,12 +659,9 @@ func (s *CommandService) SendTextWithRelatesTo(ctx context.Context, roomID id.Ro
 		}
 		// 如果是回复消息，自动添加 fallback 文本
 		if relatesTo.InReplyTo != nil {
-			// Matrix 客户端需要 fallback 文本来显示回复关系
-			// fallback 格式：> <@user:example.com> Original message\n\nbody
 			senderID := id.UserID("")
 			originalMsg := ""
 
-			// 获取原始事件以提取发送者和消息内容
 			if evt, err := s.client.GetEvent(ctx, roomID, relatesTo.InReplyTo.EventID); err == nil {
 				senderID = evt.Sender
 				if msgContent, ok := evt.Content.Parsed.(*event.MessageEventContent); ok {
@@ -702,7 +672,6 @@ func (s *CommandService) SendTextWithRelatesTo(ctx context.Context, roomID id.Ro
 					"room", roomID.String(),
 					"event_id", relatesTo.InReplyTo.EventID.String(),
 					"error", err)
-				// 使用 EventID 作为 fallback 的发送者（虽然不理想，但比什么都不好）
 				senderID = id.UserID(relatesTo.InReplyTo.EventID.String())
 			}
 
@@ -727,16 +696,6 @@ func (s *CommandService) SendTextWithRelatesTo(ctx context.Context, roomID id.Ro
 }
 
 // SendReply 发送回复消息到指定的事件。
-//
-// 参数:
-//   - ctx: 上下文
-//   - roomID: 房间 ID
-//   - body: 消息内容
-//   - replyTo: 要回复的事件 ID
-//
-// 返回值:
-//   - id.EventID: 发送的消息事件 ID
-//   - error: 操作过程中发生的错误
 func (s *CommandService) SendReply(ctx context.Context, roomID id.RoomID, body string, replyTo id.EventID) (id.EventID, error) {
 	relatesTo := &event.RelatesTo{
 		InReplyTo: &event.InReplyTo{
@@ -752,14 +711,6 @@ func (s *CommandService) BotID() id.UserID {
 }
 
 // StartTyping 在房间中显示"正在输入"指示器。
-//
-// 参数:
-//   - ctx: 上下文
-//   - roomID: 房间 ID
-//   - timeout: 超时时间（毫秒），默认 30000ms
-//
-// 返回值:
-//   - error: 操作过程中发生的错误
 func (s *CommandService) StartTyping(ctx context.Context, roomID id.RoomID, timeout int) error {
 	if timeout <= 0 {
 		timeout = 30000
@@ -777,13 +728,6 @@ func (s *CommandService) StartTyping(ctx context.Context, roomID id.RoomID, time
 }
 
 // StopTyping 停止房间中的"正在输入"指示器。
-//
-// 参数:
-//   - ctx: 上下文
-//   - roomID: 房间 ID
-//
-// 返回值:
-//   - error: 操作过程中发生的错误
 func (s *CommandService) StopTyping(ctx context.Context, roomID id.RoomID) error {
 	slog.Debug("Stopping typing indicator", "room", roomID.String())
 
@@ -796,207 +740,13 @@ func (s *CommandService) StopTyping(ctx context.Context, roomID id.RoomID) error
 	return nil
 }
 
-// EventHandler 封装 CommandService 并实现 mautrix 事件处理。
-type EventHandler struct {
-	service          *CommandService
-	logger           *slog.Logger
-	startTime        time.Time           // 机器人启动时间，用于过滤历史消息
-	sem              *semaphore.Weighted // 并发限制信号量
-	proactiveManager interface {
-		OnNewMember(ctx context.Context, roomID id.RoomID, userID id.UserID) error
-		RecordUserMessage(roomID id.RoomID)
-	}
+// htmlPolicy 是 HTML 净化策略。
+var htmlPolicy = bluemonday.UGCPolicy()
+
+// SanitizeHTML 净化 HTML 内容，移除危险标签和属性。
+func SanitizeHTML(html string) string {
+	return htmlPolicy.Sanitize(html)
 }
-
-// NewEventHandler 创建一个新的事件处理器。
-// 记录启动时间，用于过滤启动前的历史消息。
-//
-// 参数:
-//   - service: 命令服务
-//   - maxConcurrent: 最大并发事件处理数
-func NewEventHandler(service *CommandService, maxConcurrent int) *EventHandler {
-	if maxConcurrent <= 0 {
-		maxConcurrent = 10 // 默认值
-	}
-
-	return &EventHandler{
-		service:   service,
-		logger:    slog.With("component", "event_handler"),
-		startTime: time.Now(),
-		sem:       semaphore.NewWeighted(int64(maxConcurrent)),
-	}
-}
-
-// SetProactiveManager 设置主动聊天管理器。
-func (h *EventHandler) SetProactiveManager(manager interface {
-	OnNewMember(ctx context.Context, roomID id.RoomID, userID id.UserID) error
-	RecordUserMessage(roomID id.RoomID)
-}) {
-	h.proactiveManager = manager
-	slog.Debug("设置主动聊天管理器")
-}
-
-// OnMessage 处理传入的消息事件。
-// 这设计用于作为 Syncer.OnEvent 回调使用。
-func (h *EventHandler) OnMessage(ctx context.Context, evt *event.Event) {
-	logger := h.logger.With(
-		"event_id", evt.ID.String(),
-		"type", evt.Type.String(),
-		"sender", evt.Sender.String())
-
-	logger.Debug("Processing event")
-
-	// 过滤启动前的历史消息
-	// 检查消息时间戳是否早于机器人启动时间
-	if evt.Timestamp != 0 && evt.Timestamp < h.startTime.UnixMilli() {
-		logger.Debug("跳过启动前的历史消息",
-			"event_time", time.UnixMilli(evt.Timestamp).Format(time.RFC3339),
-			"start_time", h.startTime.Format(time.RFC3339))
-		return
-	}
-
-	// 记录用户消息时间（排除机器人自己的消息）
-	if h.proactiveManager != nil && evt.Sender != h.service.botID {
-		h.proactiveManager.RecordUserMessage(evt.RoomID)
-	}
-
-	// 为每个消息创建独立的 goroutine 进行并发处理
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				stack := debug.Stack()
-				logger.Error("Panic recovered in message handler",
-					"panic", r,
-					"stack_trace", string(stack))
-			}
-		}()
-
-		// 获取信号量，限制并发
-		// 使用 context.Background() 避免因父上下文取消导致请求被拒绝
-		semCtx, semCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer semCancel()
-
-		if err := h.sem.Acquire(semCtx, 1); err != nil {
-			logger.Warn("无法获取并发槽位，跳过事件处理",
-				"error", err,
-				"event_id", evt.ID.String())
-			return
-		}
-		defer h.sem.Release(1)
-
-		// 创建独立上下文，带有 5 分钟超时
-		msgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-
-		// 复制 SyncTokenContextKey 到新上下文（如果存在）
-		if token := ctx.Value(mautrix.SyncTokenContextKey); token != nil {
-			msgCtx = context.WithValue(msgCtx, mautrix.SyncTokenContextKey, token)
-		}
-
-		if err := h.service.HandleEvent(msgCtx, evt); err != nil {
-			logger.Error("Event handling failed", "error", err)
-		}
-	}()
-}
-
-// OnMember 处理成员事件（包括邀请和新成员加入）。
-func (h *EventHandler) OnMember(ctx context.Context, evt *event.Event) {
-	logger := h.logger.With(
-		"event_id", evt.ID.String(),
-		"room", evt.RoomID.String(),
-		"sender", evt.Sender.String())
-
-	// 解析成员事件内容
-	content, ok := evt.Content.Parsed.(*event.MemberEventContent)
-	if !ok {
-		logger.Debug("无法解析成员事件内容")
-		return
-	}
-
-	// 检查 StateKey 是否存在
-	if evt.StateKey == nil {
-		logger.Debug("成员事件没有 state key")
-		return
-	}
-
-	targetUserID := id.UserID(*evt.StateKey)
-
-	// 处理不同类型的成员事件
-	switch content.Membership {
-	case event.MembershipInvite:
-		// 处理邀请事件：检查是否邀请机器人自己
-		if targetUserID != h.service.botID {
-			logger.Debug("邀请目标不是本机器人", "target", targetUserID)
-			return
-		}
-
-		// 接受邀请
-		logger.Info("接受房间邀请", "inviter", evt.Sender.String())
-		_, err := h.service.client.JoinRoom(ctx, evt.RoomID.String(), nil)
-		if err != nil {
-			logger.Error("接受邀请失败", "error", err)
-			return
-		}
-
-		logger.Info("成功接受邀请")
-
-	case event.MembershipJoin:
-		// 处理成员加入事件：触发新成员欢迎
-		// 忽略机器人自己的加入事件
-		if targetUserID == h.service.botID {
-			logger.Debug("忽略机器人自己的加入事件")
-			return
-		}
-
-		// 检查是否需要触发新成员欢迎
-		if h.proactiveManager != nil {
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						stack := debug.Stack()
-						logger.Error("新成员欢迎处理发生 panic",
-							"panic", r,
-							"stack_trace", string(stack))
-					}
-				}()
-
-				// 创建独立上下文，带有超时
-				welcomeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-
-				logger.Info("触发新成员欢迎",
-					"room", evt.RoomID.String(),
-					"new_member", targetUserID.String())
-
-				if err := h.proactiveManager.OnNewMember(welcomeCtx, evt.RoomID, targetUserID); err != nil {
-					logger.Error("新成员欢迎处理失败", "error", err)
-				}
-			}()
-		}
-
-	default:
-		logger.Debug("忽略其他成员事件", "membership", content.Membership)
-	}
-}
-
-// OnEvent 是通用事件处理器，分发到适当的处理器。
-func (h *EventHandler) OnEvent(ctx context.Context, evt *event.Event) {
-	switch evt.Type {
-	case event.EventMessage:
-		h.OnMessage(ctx, evt)
-	case event.StateMember:
-		h.OnMember(ctx, evt)
-	default:
-		h.logger.Debug("Ignoring non-message event", "type", evt.Type.String())
-	}
-}
-
-// Service 返回底层的 CommandService。
-func (h *EventHandler) Service() *CommandService {
-	return h.service
-}
-
-// 内置命令
 
 // PingCommand 响应 "Pong!"。
 type PingCommand struct {
@@ -1025,7 +775,7 @@ func NewHelpCommand(service *CommandService) *HelpCommand {
 	return &HelpCommand{service: service}
 }
 
-// Handle 实现 CommandHandler，生成 HTML 表格格式的帮助信息。
+// Handle 实现 CommandHandler。
 func (c *HelpCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
 	commands := c.service.ListCommands()
 
@@ -1033,31 +783,12 @@ func (c *HelpCommand) Handle(ctx context.Context, userID id.UserID, roomID id.Ro
 		return c.service.SendText(ctx, roomID, "暂无可用命令")
 	}
 
-	var htmlBuilder strings.Builder
-	htmlBuilder.WriteString("<table>")
-	htmlBuilder.WriteString("<thead><tr><th>命令</th><th>描述</th></tr></thead>")
-	htmlBuilder.WriteString("<tbody>")
+	var result string
 	for _, cmd := range commands {
-		desc := cmd.Description
-		if desc == "" {
-			desc = "-"
-		}
-		fmt.Fprintf(&htmlBuilder, "<tr><td><code>!%s</code></td><td>%s</td></tr>",
-			SanitizeHTML(cmd.Name), SanitizeHTML(desc))
-	}
-	htmlBuilder.WriteString("</tbody></table>")
-
-	var plainBuilder strings.Builder
-	plainBuilder.WriteString("可用命令：\n\n")
-	for _, cmd := range commands {
-		fmt.Fprintf(&plainBuilder, "  !%s", cmd.Name)
-		if cmd.Description != "" {
-			fmt.Fprintf(&plainBuilder, " - %s", cmd.Description)
-		}
-		plainBuilder.WriteString("\n")
+		result += fmt.Sprintf("!%s - %s\n", cmd.Name, cmd.Description)
 	}
 
-	return c.service.SendFormattedText(ctx, roomID, htmlBuilder.String(), plainBuilder.String())
+	return c.service.SendText(ctx, roomID, "可用命令：\n"+result)
 }
 
 // VersionCommand 显示构建版本信息。
@@ -1070,39 +801,19 @@ func NewVersionCommand(service *CommandService) *VersionCommand {
 	return &VersionCommand{service: service}
 }
 
-// Handle 实现 CommandHandler，生成 HTML 表格格式的版本信息。
+// Handle 实现 CommandHandler。
 func (c *VersionCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
 	info := c.service.GetBuildInfo()
 	if info == nil {
 		return c.service.SendText(ctx, roomID, "版本信息不可用")
 	}
 
-	var html strings.Builder
-	html.WriteString("<h3>📦 Saber 版本信息</h3>")
-	html.WriteString("<table><thead><tr><th>项目</th><th>值</th></tr></thead><tbody>")
-	fmt.Fprintf(&html, "<tr><td><strong>版本</strong></td><td><code>%s</code></td></tr>", info.Version)
-	fmt.Fprintf(&html, "<tr><td><strong>Git 提交</strong></td><td><code>%s</code></td></tr>", info.GitCommit)
-	fmt.Fprintf(&html, "<tr><td><strong>Git 分支</strong></td><td><code>%s</code></td></tr>", info.GitBranch)
-	fmt.Fprintf(&html, "<tr><td><strong>构建时间</strong></td><td><code>%s</code></td></tr>", info.BuildTime)
-	fmt.Fprintf(&html, "<tr><td><strong>Go 版本</strong></td><td><code>%s</code></td></tr>", info.GoVersion)
-	fmt.Fprintf(&html, "<tr><td><strong>构建平台</strong></td><td><code>%s</code></td></tr>", info.BuildPlatform)
-	fmt.Fprintf(&html, "<tr><td><strong>运行平台</strong></td><td><code>%s</code></td></tr>", info.RuntimePlatform())
-	html.WriteString("</tbody></table>")
-
-	var plain strings.Builder
-	plain.WriteString("📦 Saber 版本信息\n\n")
-	fmt.Fprintf(&plain, "版本: %s\n", info.Version)
-	fmt.Fprintf(&plain, "Git 提交: %s\n", info.GitCommit)
-	fmt.Fprintf(&plain, "Git 分支: %s\n", info.GitBranch)
-	fmt.Fprintf(&plain, "构建时间: %s\n", info.BuildTime)
-	fmt.Fprintf(&plain, "Go 版本: %s\n", info.GoVersion)
-	fmt.Fprintf(&plain, "构建平台: %s\n", info.BuildPlatform)
-	fmt.Fprintf(&plain, "运行平台: %s\n", info.RuntimePlatform())
-
-	return c.service.SendFormattedText(ctx, roomID, html.String(), plain.String())
+	msg := fmt.Sprintf("版本: %s\n提交: %s\n分支: %s\n构建时间: %s",
+		info.Version, info.GitCommit, info.GitBranch, info.BuildTime)
+	return c.service.SendText(ctx, roomID, msg)
 }
 
-// RegisterBuiltinCommands 注册默认命令（!ping, !help, !version）。
+// RegisterBuiltinCommands 注册默认命令。
 func RegisterBuiltinCommands(service *CommandService) {
 	service.RegisterCommandWithDesc("ping", "检查机器人是否在线", NewPingCommand(service))
 	service.RegisterCommandWithDesc("help", "列出可用命令", NewHelpCommand(service))
@@ -1120,60 +831,19 @@ func NewMCPListCommand(service *CommandService, mcpMgr *mcp.Manager) *MCPListCom
 	return &MCPListCommand{service: service, mcp: mcpMgr}
 }
 
-// Handle 实现 CommandHandler，生成 HTML 表格格式的 MCP 服务器和工具列表。
+// Handle 实现 CommandHandler。
 func (c *MCPListCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
 	if c.mcp == nil || !c.mcp.IsEnabled() {
 		return c.service.SendText(ctx, roomID, "MCP 功能未启用")
 	}
 
 	servers := c.mcp.ListServers()
-	tools := c.mcp.ListTools()
-
-	var html strings.Builder
-	html.WriteString("<h3>🔧 MCP 服务器</h3><table><thead><tr><th>服务器</th><th>类型</th><th>状态</th></tr></thead><tbody>")
+	var result string
 	for _, srv := range servers {
-		status := "❌ 禁用"
-		if srv.Enabled {
-			status = "✅ 启用"
-		}
-		fmt.Fprintf(&html, "<tr><td><code>%s</code></td><td>%s</td><td>%s</td></tr>", SanitizeHTML(srv.Name), SanitizeHTML(srv.Type), status)
-	}
-	html.WriteString("</tbody></table>")
-
-	if len(tools) > 0 {
-		html.WriteString("<h3>🛠️ 可用工具</h3><table><thead><tr><th>工具</th><th>描述</th></tr></thead><tbody>")
-		for _, tool := range tools {
-			desc := tool.Description
-			if desc == "" {
-				desc = "-"
-			}
-			fmt.Fprintf(&html, "<tr><td><code>%s</code></td><td>%s</td></tr>", SanitizeHTML(tool.Name), SanitizeHTML(desc))
-		}
-		html.WriteString("</tbody></table>")
+		result += fmt.Sprintf("- %s (%s)\n", srv.Name, srv.Type)
 	}
 
-	var plain strings.Builder
-	plain.WriteString("🔧 MCP 服务器:\n")
-	for _, srv := range servers {
-		status := "❌ 禁用"
-		if srv.Enabled {
-			status = "✅ 启用"
-		}
-		fmt.Fprintf(&plain, "  %s (%s) - %s\n", srv.Name, srv.Type, status)
-	}
-
-	if len(tools) > 0 {
-		plain.WriteString("\n🛠️ 可用工具:\n")
-		for _, tool := range tools {
-			desc := tool.Description
-			if desc == "" {
-				desc = "无描述"
-			}
-			fmt.Fprintf(&plain, "  %s - %s\n", tool.Name, desc)
-		}
-	}
-
-	return c.service.SendFormattedText(ctx, roomID, html.String(), plain.String())
+	return c.service.SendText(ctx, roomID, "MCP 服务器：\n"+result)
 }
 
 // RegisterMCPCommands 注册 MCP 相关命令。
@@ -1181,14 +851,4 @@ func RegisterMCPCommands(service *CommandService, mcpMgr *mcp.Manager) {
 	if mcpMgr != nil {
 		service.RegisterCommandWithDesc("mcp-list", "列出所有 MCP 服务器和工具", NewMCPListCommand(service, mcpMgr))
 	}
-}
-
-// htmlPolicy 是 HTML 净化策略。
-// 允许基本的格式化标签，移除危险内容。
-var htmlPolicy = bluemonday.UGCPolicy()
-
-// SanitizeHTML 净化 HTML 内容，移除危险标签和属性。
-// 允许基本格式标签：b, i, code, a, pre, blockquote, p, br, ul, ol, li
-func SanitizeHTML(html string) string {
-	return htmlPolicy.Sanitize(html)
 }
