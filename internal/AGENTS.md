@@ -24,6 +24,7 @@
 | `matrix/` | Matrix 客户端封装：连接、认证、事件处理、媒体服务（见 `matrix/AGENTS.md`） |
 | `mcp/` | MCP (Model Context Protocol) 集成：服务器管理、工具调用（见 `mcp/AGENTS.md`） |
 | `meme/` | GIF/Sticker 搜索服务（Klipy API 集成）（见 `meme/AGENTS.md`） |
+| `persona/` | 人格管理：每房间独立的机器人性格、提示词合并（见 `persona/AGENTS.md`） |
 
 ## For AI Agents
 
