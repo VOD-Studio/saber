@@ -85,9 +85,10 @@ func TestDetermineResponseMode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := determineResponseMode(tt.streamEnable, tt.streamEdit, tt.useToolCall)
+			rh := NewResponseHandler(nil)
+			got := rh.DetermineResponseMode(tt.streamEnable, tt.streamEdit, tt.useToolCall)
 			if got != tt.expected {
-				t.Errorf("determineResponseMode(%v, %v, %v) = %v, want %v",
+				t.Errorf("DetermineResponseMode(%v, %v, %v) = %v, want %v",
 					tt.streamEnable, tt.streamEdit, tt.useToolCall, got, tt.expected)
 			}
 		})

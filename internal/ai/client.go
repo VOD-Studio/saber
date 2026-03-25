@@ -10,11 +10,19 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sashabaranov/go-openai"
 	"rua.plus/saber/internal/config"
 )
+
+// clients 存储模型名称到客户端实例的映射，用于客户端复用。
+// 键为模型名称，值为对应的 AI 客户端实例。
+var clients = make(map[string]*Client)
+
+// clientsMu 保护 clients 映射的并发访问。
+var clientsMu sync.RWMutex
 
 // sharedTransport 是共享的 HTTP Transport，用于连接复用。
 // 所有 AI 客户端共享同一个 Transport，减少 TCP 连接和 TLS 握手开销。
