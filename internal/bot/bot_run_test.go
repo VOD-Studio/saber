@@ -610,7 +610,7 @@ func TestCommandRegistration(t *testing.T) {
 			directChatReply:  true,
 			groupChatMention: true,
 			replyToBotReply:  true,
-			expectedCommands: []string{"ping", "help", "ai", "ai-clear", "ai-context"},
+			expectedCommands: []string{"ping", "help", "ai"},
 		},
 		{
 			name:             "AI 启用但无自动回复",
@@ -618,7 +618,7 @@ func TestCommandRegistration(t *testing.T) {
 			directChatReply:  false,
 			groupChatMention: false,
 			replyToBotReply:  false,
-			expectedCommands: []string{"ping", "help", "ai", "ai-clear", "ai-context"},
+			expectedCommands: []string{"ping", "help", "ai"},
 		},
 	}
 
@@ -631,7 +631,8 @@ func TestCommandRegistration(t *testing.T) {
 			registeredCommands = append(registeredCommands, "ping", "help")
 
 			if tt.aiEnabled {
-				registeredCommands = append(registeredCommands, "ai", "ai-clear", "ai-context")
+				// AI 命令现在使用子命令路由器，只注册 ai 命令
+				registeredCommands = append(registeredCommands, "ai")
 			}
 
 			if len(registeredCommands) < len(tt.expectedCommands) {

@@ -72,12 +72,13 @@ if parsed != nil {
 
 | 命令 | 描述 | 文件 |
 |------|------|------|
-| `!ai` | 与 AI 对话 | `ai.go` |
-| `!ai-clear` | 清除对话上下文 | `ai.go` |
-| `!ai-context` | 显示对话上下文信息 | `ai.go` |
-| `!ai-models` | 列出可用模型 | `ai.go` |
-| `!ai-current` | 显示当前模型 | `ai.go` |
-| `!ai-switch` | 切换模型 | `ai.go` |
+| `!ai <message>` | 与 AI 对话（支持子命令） | `ai.go` |
+| `!ai clear` | 清除对话上下文 | `ai.go` |
+| `!ai context` | 显示对话上下文信息 | `ai.go` |
+| `!ai models` | 列出可用模型 | `ai.go` |
+| `!ai current` | 显示当前模型 | `ai.go` |
+| `!ai switch <model-id>` | 切换模型 | `ai.go` |
+| `!mcp list` | 列出 MCP 服务器 | `handlers.go` |
 | `!help` | 显示帮助信息 | `help.go` |
 | `!meme` | 搜索 Meme | `meme.go` |
 | `!gif` | 搜索 GIF | `meme.go` |

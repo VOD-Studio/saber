@@ -155,12 +155,12 @@ make docker-push DOCKER_REGISTRY=your-registry.com/
 | `!help`             | 列出所有可用命令                           |
 | `!version`          | 显示版本信息                               |
 | `!ai <message>`     | 与 AI 对话                                 |
-| `!ai-clear`         | 清除对话上下文                             |
-| `!ai-context`       | 显示上下文信息                             |
-| `!ai-models`        | 列出所有可用模型                           |
-| `!ai-switch <id>`   | 切换默认模型                               |
-| `!ai-current`       | 显示当前默认模型                           |
-| `!mcp-list`         | 列出所有 MCP 服务器和工具                  |
+| `!ai clear`         | 清除对话上下文                             |
+| `!ai context`       | 显示上下文信息                             |
+| `!ai models`        | 列出所有可用模型                           |
+| `!ai switch <id>`   | 切换默认模型                               |
+| `!ai current`       | 显示当前默认模型                           |
+| `!mcp list`         | 列出所有 MCP 服务器和工具                  |
 | `!meme <keyword>`   | 搜索并发送 GIF/Sticker/Meme                |
 | `!gif <keyword>`    | 搜索并发送 GIF 动图                        |
 | `!sticker <keyword>`| 搜索并发送 Sticker 贴纸                    |
@@ -421,9 +421,9 @@ ai:
 ### 模型切换命令
 
 ```bash
-!ai-models              # 查看所有可用模型（显示完全限定名称）
-!ai-switch openai.gpt-4o   # 切换到指定模型
-!ai-current             # 查看当前默认模型
+!ai models              # 查看所有可用模型（显示完全限定名称）
+!ai switch openai.gpt-4o   # 切换到指定模型
+!ai current             # 查看当前默认模型
 ```
 
 **注意**: 通过命令切换的默认模型在重启后会恢复为配置文件中的设置。
@@ -512,7 +512,7 @@ AI: [调用 web_search 工具] 我找到了以下信息...
 
 #### 查看可用工具
 
-使用 `!mcp-list` 命令查看当前可用的所有 MCP 服务器和工具。
+使用 `!mcp list` 命令查看当前可用的所有 MCP 服务器和工具。
 
 ### Meme 搜索
 

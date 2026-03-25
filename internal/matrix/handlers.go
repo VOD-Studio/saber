@@ -849,6 +849,9 @@ func (c *MCPListCommand) Handle(ctx context.Context, userID id.UserID, roomID id
 // RegisterMCPCommands 注册 MCP 相关命令。
 func RegisterMCPCommands(service *CommandService, mcpMgr *mcp.Manager) {
 	if mcpMgr != nil {
-		service.RegisterCommandWithDesc("mcp-list", "列出所有 MCP 服务器和工具", NewMCPListCommand(service, mcpMgr))
+		// 创建 MCP 命令路由器，统一处理 !mcp <subcommand> 格式
+		mcpRouter := NewMCPCommandRouter(service, mcpMgr)
+		mcpRouter.RegisterSubcommand("list", NewMCPListCommand(service, mcpMgr))
+		service.RegisterCommandWithDesc("mcp", "MCP 相关命令 (用法: !mcp <子命令>)", mcpRouter)
 	}
 }

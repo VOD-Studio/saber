@@ -117,8 +117,8 @@ func (c *SwitchModelCommand) Handle(ctx context.Context, userID id.UserID, roomI
 	registry := c.service.GetModelRegistry()
 
 	if len(args) == 0 || args[0] == "" {
-		html := "<strong>❌ 请指定模型 ID</strong><br>用法: <code>!ai-switch &lt;model-id&gt;</code>"
-		plain := "❌ 请指定模型 ID\n用法: !ai-switch <model-id>"
+		html := "<strong>❌ 请指定模型 ID</strong><br>用法: <code>!ai switch &lt;model-id&gt;</code>"
+		plain := "❌ 请指定模型 ID\n用法: !ai switch <model-id>"
 		return c.service.matrixService.SendFormattedText(ctx, roomID, html, plain)
 	}
 

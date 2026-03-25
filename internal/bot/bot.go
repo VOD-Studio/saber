@@ -269,13 +269,17 @@ func (s *appState) registerAICommands() {
 	cs := svc.commandService
 	aiSvc := svc.aiService
 
-	cs.RegisterCommandWithDesc("ai", "与AI对话", ai.NewAICommand(aiSvc))
-	cs.RegisterCommandWithDesc("ai-clear", "清除AI对话上下文", ai.NewClearContextCommand(aiSvc))
-	cs.RegisterCommandWithDesc("ai-context", "显示AI对话上下文信息", ai.NewContextInfoCommand(aiSvc))
-	cs.RegisterCommandWithDesc("ai-models", "列出所有可用模型", ai.NewModelsCommand(aiSvc))
-	cs.RegisterCommandWithDesc("ai-switch", "切换默认模型 (用法: !ai-switch <model-id>)", ai.NewSwitchModelCommand(aiSvc))
-	cs.RegisterCommandWithDesc("ai-current", "显示当前默认模型", ai.NewCurrentModelCommand(aiSvc))
+	// 创建 AI 命令路由器，统一处理 !ai <subcommand> 格式
+	aiRouter := ai.NewAICommandRouter(aiSvc)
+	aiRouter.RegisterSubcommand("clear", ai.NewClearContextCommand(aiSvc))
+	aiRouter.RegisterSubcommand("context", ai.NewContextInfoCommand(aiSvc))
+	aiRouter.RegisterSubcommand("models", ai.NewModelsCommand(aiSvc))
+	aiRouter.RegisterSubcommand("switch", ai.NewSwitchModelCommand(aiSvc))
+	aiRouter.RegisterSubcommand("current", ai.NewCurrentModelCommand(aiSvc))
 
+	cs.RegisterCommandWithDesc("ai", "AI 相关命令 (用法: !ai <子命令>)", aiRouter)
+
+	// 注册模型快捷命令（如 !ai-gpt-4）
 	for modelName := range s.cfg.AI.Models {
 		commandName := fmt.Sprintf("ai-%s", modelName)
 		desc := fmt.Sprintf("使用%s模型与AI对话", modelName)
