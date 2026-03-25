@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/mcp"
 	"rua.plus/saber/internal/meme"
+	"rua.plus/saber/internal/persona"
 )
 
 // services 持有所有需要管理的服务实例。
@@ -33,6 +35,7 @@ type services struct {
 	presence         *matrix.PresenceService
 	mediaService     *matrix.MediaService
 	memeService      *meme.Service
+	personaService   *persona.Service
 	client           *matrix.MatrixClient
 }
 
@@ -222,6 +225,9 @@ func (s *appState) initServices() error {
 		"provider", s.cfg.AI.Provider,
 		"default_model", s.cfg.AI.DefaultModel)
 
+	// 初始化人格服务
+	s.initPersonaService()
+
 	s.registerAICommands()
 
 	if s.cfg.AI.Proactive.Enabled {
@@ -301,6 +307,33 @@ func (s *appState) registerAICommands() {
 	}
 
 	slog.Info("AI 命令注册完成")
+}
+
+// initPersonaService 初始化人格服务。
+func (s *appState) initPersonaService() {
+	svc := s.services
+
+	// 确定 persona 数据库路径
+	configDir := filepath.Dir(s.flags.ConfigPath)
+	dbPath := filepath.Join(configDir, "persona.db")
+
+	personaSvc, err := persona.NewService(dbPath)
+	if err != nil {
+		slog.Warn("人格服务初始化失败", "error", err, "db_path", dbPath)
+		return
+	}
+	svc.personaService = personaSvc
+
+	// 设置 AI 服务的人格服务
+	svc.aiService.SetPersonaService(personaSvc)
+
+	// 注册 persona 命令
+	cs := svc.commandService
+	cs.RegisterCommandWithDesc("persona",
+		"人格管理 (用法: !persona [list|set|clear|status|new|del])",
+		persona.NewPersonaCommand(cs, personaSvc))
+
+	slog.Info("人格服务已启用", "db_path", dbPath)
 }
 
 // initMemeService 初始化 Meme 服务。

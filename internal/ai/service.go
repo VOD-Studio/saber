@@ -35,6 +35,12 @@ import (
 	"rua.plus/saber/internal/mcp"
 )
 
+// PersonaService 定义人格服务接口。
+// 用于获取房间的系统提示词（合并基础提示词和人格提示词）。
+type PersonaService interface {
+	GetSystemPrompt(roomID id.RoomID, basePrompt string) string
+}
+
 // Service 是 AI 服务的核心结构体。
 type Service struct {
 	globalConfig   *config.AIConfig
@@ -42,6 +48,7 @@ type Service struct {
 	contextManager *ContextManager
 	mcpManager     *mcp.Manager
 	mediaService   *matrix.MediaService
+	personaService PersonaService // 人格服务（可选）
 	clients        map[string]*Client
 	clientsMu      sync.RWMutex
 	rateLimiter    *rate.Limiter
@@ -155,6 +162,12 @@ func (s *Service) getClient(modelName string) (*Client, error) {
 //   - bool: 如果 AI 服务已启用则返回 true
 func (s *Service) IsEnabled() bool {
 	return s.globalConfig.Enabled
+}
+
+// SetPersonaService 设置人格服务。
+// 人格服务用于获取房间的系统提示词（合并基础提示词和人格提示词）。
+func (s *Service) SetPersonaService(ps PersonaService) {
+	s.personaService = ps
 }
 
 // GetModelRegistry 获取模型注册表。

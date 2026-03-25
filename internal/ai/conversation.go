@@ -46,8 +46,10 @@ func (b *MessageBuilder) BuildTextMessages(service *Service, roomID id.RoomID, u
 		}
 	}
 
-	if service.globalConfig.SystemPrompt != "" {
-		messages = b.prependSystemPrompt(messages, service.globalConfig.SystemPrompt)
+	// 获取系统提示词（合并基础提示词和人格提示词）
+	systemPrompt := b.getSystemPrompt(service, roomID)
+	if systemPrompt != "" {
+		messages = b.prependSystemPrompt(messages, systemPrompt)
 	}
 
 	return messages
@@ -91,8 +93,10 @@ func (b *MessageBuilder) BuildMultimodalMessages(service *Service, _ context.Con
 
 	messages = append(messages, userMessage)
 
-	if service.globalConfig.SystemPrompt != "" {
-		messages = b.prependSystemPrompt(messages, service.globalConfig.SystemPrompt)
+	// 获取系统提示词（合并基础提示词和人格提示词）
+	systemPrompt := b.getSystemPrompt(service, roomID)
+	if systemPrompt != "" {
+		messages = b.prependSystemPrompt(messages, systemPrompt)
 	}
 
 	return messages
@@ -142,11 +146,23 @@ func (b *MessageBuilder) BuildMultiImageMessages(service *Service, _ context.Con
 
 	messages = append(messages, userMessage)
 
-	if service.globalConfig.SystemPrompt != "" {
-		messages = b.prependSystemPrompt(messages, service.globalConfig.SystemPrompt)
+	// 获取系统提示词（合并基础提示词和人格提示词）
+	systemPrompt := b.getSystemPrompt(service, roomID)
+	if systemPrompt != "" {
+		messages = b.prependSystemPrompt(messages, systemPrompt)
 	}
 
 	return messages
+}
+
+// getSystemPrompt 获取系统提示词。
+// 如果设置了人格服务，会合并基础提示词和人格提示词。
+func (b *MessageBuilder) getSystemPrompt(service *Service, roomID id.RoomID) string {
+	basePrompt := service.globalConfig.SystemPrompt
+	if service.personaService != nil {
+		return service.personaService.GetSystemPrompt(roomID, basePrompt)
+	}
+	return basePrompt
 }
 
 // prependSystemPrompt 在消息列表前添加系统提示词（如果还没有）。
