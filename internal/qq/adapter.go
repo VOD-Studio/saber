@@ -36,6 +36,7 @@ import (
 //
 // 字段说明：
 //   - config: QQ 配置
+//   - aiConfig: AI 配置（复用全局配置）
 //   - client: QQ 客户端，处理 Token 和 API 调用
 //   - aiService: 简化版 AI 服务
 //   - handler: 事件处理器
@@ -46,6 +47,7 @@ import (
 // 线程安全：该结构体是并发安全的。
 type Adapter struct {
 	config    *config.QQConfig
+	aiConfig  *config.AIConfig
 	client    *Client
 	aiService *ai.SimpleService
 	handler   *DefaultHandler
@@ -60,6 +62,7 @@ type Adapter struct {
 //
 // 参数:
 //   - cfg: QQ 配置，必须包含有效的 AppID 和 AppSecret
+//   - aiCfg: AI 配置，复用全局配置
 //   - aiService: AI 服务，用于生成回复
 //
 // 返回值:
@@ -68,11 +71,15 @@ type Adapter struct {
 //
 // 错误情况：
 //   - 配置为空
+//   - AI 配置为空
 //   - AI 服务为空
 //   - 创建客户端失败
-func NewAdapter(cfg *config.QQConfig, aiService *ai.SimpleService) (*Adapter, error) {
+func NewAdapter(cfg *config.QQConfig, aiCfg *config.AIConfig, aiService *ai.SimpleService) (*Adapter, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("QQ配置不能为空")
+	}
+	if aiCfg == nil {
+		return nil, fmt.Errorf("AI配置不能为空")
 	}
 	if aiService == nil {
 		return nil, fmt.Errorf("AI服务不能为空")
@@ -84,10 +91,11 @@ func NewAdapter(cfg *config.QQConfig, aiService *ai.SimpleService) (*Adapter, er
 	}
 
 	// 创建包装处理器，适配 ai.SimpleService 到 SimpleAIService
-	handler := NewDefaultHandler(client, &aiServiceAdapter{aiService}, cfg)
+	handler := NewDefaultHandler(client, &aiServiceAdapter{aiService}, aiCfg)
 
 	return &Adapter{
 		config:    cfg,
+		aiConfig:  aiCfg,
 		client:    client,
 		aiService: aiService,
 		handler:   handler,

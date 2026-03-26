@@ -394,6 +394,13 @@ func (s *appState) initQQAdapter() {
 		return
 	}
 
+	// 检查 AI 是否启用
+	if !s.cfg.AI.Enabled {
+		slog.Warn("QQ 机器人已启用但 AI 功能已禁用，机器人将无法回复消息",
+			"hint", "设置 ai.enabled: true 以启用 AI 功能")
+		return
+	}
+
 	// 创建简化版 AI 服务供 QQ 使用
 	simpleService, err := ai.NewSimpleService(&s.cfg.AI)
 	if err != nil {
@@ -401,7 +408,8 @@ func (s *appState) initQQAdapter() {
 		return
 	}
 
-	adapter, err := qq.NewAdapter(&s.cfg.QQ, simpleService)
+	// 传入全局 AI 配置，QQ 复用 Matrix 的 AI 配置
+	adapter, err := qq.NewAdapter(&s.cfg.QQ, &s.cfg.AI, simpleService)
 	if err != nil {
 		slog.Warn("创建 QQ 适配器失败", "error", err)
 		return

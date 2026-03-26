@@ -19,7 +19,7 @@ import (
 type DefaultHandler struct {
 	client    *Client          // QQ 客户端
 	aiService SimpleAIService  // AI 服务接口
-	config    *config.QQConfig // QQ 配置
+	aiConfig  *config.AIConfig // AI 配置（复用全局配置）
 }
 
 // NewDefaultHandler 创建一个新的默认事件处理器。
@@ -27,15 +27,15 @@ type DefaultHandler struct {
 // 参数:
 //   - client: QQ 客户端
 //   - aiService: AI 服务
-//   - config: QQ 配置
+//   - aiConfig: AI 配置
 //
 // 返回值:
 //   - *DefaultHandler: 创建的处理器实例
-func NewDefaultHandler(client *Client, aiService SimpleAIService, config *config.QQConfig) *DefaultHandler {
+func NewDefaultHandler(client *Client, aiService SimpleAIService, aiConfig *config.AIConfig) *DefaultHandler {
 	return &DefaultHandler{
 		client:    client,
 		aiService: aiService,
-		config:    config,
+		aiConfig:  aiConfig,
 	}
 }
 
@@ -64,7 +64,7 @@ func (h *DefaultHandler) HandleReady(event *dto.WSPayload, data *dto.WSReadyData
 // 返回值:
 //   - error: 处理过程中发生的错误
 func (h *DefaultHandler) HandleC2CMessage(event *dto.WSPayload, data *dto.WSC2CMessageData) error {
-	if !h.config.DirectChatAutoReply {
+	if !h.aiConfig.DirectChatAutoReply {
 		slog.Debug("私聊自动回复已禁用，忽略消息")
 		return nil
 	}
@@ -93,7 +93,7 @@ func (h *DefaultHandler) HandleC2CMessage(event *dto.WSPayload, data *dto.WSC2CM
 	response, err := h.aiService.ChatWithSystem(
 		ctx,
 		authorID,
-		h.config.SystemPrompt,
+		h.aiConfig.SystemPrompt,
 		content,
 	)
 	if err != nil {
@@ -125,7 +125,7 @@ func (h *DefaultHandler) HandleC2CMessage(event *dto.WSPayload, data *dto.WSC2CM
 // 返回值:
 //   - error: 处理过程中发生的错误
 func (h *DefaultHandler) HandleGroupATMessage(event *dto.WSPayload, data *dto.WSGroupATMessageData) error {
-	if !h.config.GroupChatMentionReply {
+	if !h.aiConfig.GroupChatMentionReply {
 		slog.Debug("群@回复已禁用，忽略消息")
 		return nil
 	}
@@ -157,7 +157,7 @@ func (h *DefaultHandler) HandleGroupATMessage(event *dto.WSPayload, data *dto.WS
 	response, err := h.aiService.ChatWithSystem(
 		ctx,
 		authorID,
-		h.config.SystemPrompt,
+		h.aiConfig.SystemPrompt,
 		content,
 	)
 	if err != nil {
