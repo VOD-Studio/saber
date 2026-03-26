@@ -890,6 +890,59 @@ func TestModelConfigValidate(t *testing.T) {
 	}
 }
 
+func TestQQConfigValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  QQConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{"禁用时不验证", QQConfig{Enabled: false}, false, ""},
+		{"有效配置", QQConfig{
+			Enabled:        true,
+			AppID:          "123456",
+			AppSecret:      "secret",
+			WebhookPort:    8080,
+			WebhookPath:    "/qq/webhook",
+			TimeoutSeconds: 30,
+		}, false, ""},
+		{"缺少 app_id", QQConfig{Enabled: true, AppSecret: "secret"}, true, "app_id is required"},
+		{"缺少 app_secret", QQConfig{Enabled: true, AppID: "123456"}, true, "app_secret is required"},
+		{"webhook_port 无效", QQConfig{Enabled: true, AppID: "123", AppSecret: "s", WebhookPort: 0, TimeoutSeconds: 30}, true, "webhook_port must be between"},
+		{"webhook_port 过大", QQConfig{Enabled: true, AppID: "123", AppSecret: "s", WebhookPort: 70000, TimeoutSeconds: 30}, true, "webhook_port must be between"},
+		{"缺少 webhook_path", QQConfig{Enabled: true, AppID: "123", AppSecret: "s", WebhookPort: 8080, TimeoutSeconds: 30}, true, "webhook_path is required"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil && tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				t.Errorf("Validate() error = %v, want error containing %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+func TestDefaultQQConfig(t *testing.T) {
+	cfg := DefaultQQConfig()
+	if cfg.Enabled {
+		t.Error("Default QQ should be disabled")
+	}
+	if cfg.WebhookPort != 8080 {
+		t.Errorf("Default WebhookPort = %d, want 8080", cfg.WebhookPort)
+	}
+	if cfg.TimeoutSeconds != 30 {
+		t.Errorf("Default TimeoutSeconds = %d, want 30", cfg.TimeoutSeconds)
+	}
+	if cfg.MaxConcurrentEvents != 10 {
+		t.Errorf("Default MaxConcurrentEvents = %d, want 10", cfg.MaxConcurrentEvents)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
 }
