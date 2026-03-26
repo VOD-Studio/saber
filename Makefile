@@ -1,7 +1,7 @@
 .PHONY: build build-all build-prod build-freebsd build-openbsd build-loong64 clean test fmt lint run help docker-build docker-buildx docker-push docker-load docker-run docker-clean
 
 APP_NAME := saber
-VERSION := 0.0.4
+VERSION := 0.0.5
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d %H:%M:%S UTC')

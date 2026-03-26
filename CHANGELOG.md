@@ -5,6 +5,93 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.5] - 2026-03-26
+
+### Added
+
+#### Persona 人格系统
+
+- Persona 人格系统：支持自定义 AI 人格和行为模式
+- 内置人格定义：预设多种人格模板
+- Persona 数据库服务层：持久化人格配置
+- `!persona` 命令：动态切换和管理人格
+
+#### Meme 表情命令
+
+- `!meme` 命令：对接 Klipy API 获取表情图片
+
+#### 私聊/群聊语气区分
+
+- 决策提示词模板支持房间类型区分
+- 欢迎消息和主动聊天消息支持私聊/群聊语气区分
+- DecisionContext 添加 IsDirect 字段
+
+#### 多提供商 AI 配置
+
+- ProviderConfig 结构：支持配置多个 AI 提供商
+- AIConfig 集成多提供商配置
+- 兼容旧版单提供商配置格式
+
+#### 配置增强
+
+- ShutdownConfig：优雅关闭配置（超时时间等）
+- MaxConcurrentEvents：最大并发事件数配置
+- 可配置的 semaphore 数量
+
+#### 上下文管理
+
+- 清理不活跃房间功能：自动清理长期未活跃的对话上下文
+
+#### 错误处理
+
+- 机器人错误处理结构：结构化错误类型
+- 相关错误处理方法
+
+#### 构建与部署
+
+- Docker 支持：Distroless 基础镜像，多架构支持 (amd64/arm64)
+- 新平台构建：FreeBSD、OpenBSD、LoongArch64 (龙芯)
+
+### Changed
+
+#### 架构重构
+
+- Matrix 命令模块化：拆分 ping/help/ai/meme/version 命令到独立文件
+- 命令注册机制：统一的命令注册和管理
+- AI 服务拆分：service.go 拆分为职责单一的模块
+- 事件处理拆分：提取到 events.go，精简 handlers.go
+- BuildInfo 统一：移动到 commands 包
+
+#### 代码质量
+
+- 使用 ruacontext 包统一管理上下文操作
+- 优雅关闭超时与错误类型增强
+- 移除 CGO 相关 SQLite 驱动，简化部署
+
+### Performance
+
+- 上下文清理与并发限制优化
+- HTTP 连接池复用
+
+### Security
+
+- 配置文件权限强制检查（0600）
+- SABER_ALLOW_INSECURE_CONFIG 环境变量允许禁用权限检查
+
+### Fixed
+
+- 工具调用迭代次数逻辑错误
+- 测试环境中的驱动重复注册问题
+- 并发测试中的竞态条件
+- 配置加载时保留默认值
+
+### Tests
+
+- 添加 bot 初始化和 shutdown 的单元测试
+- 添加 AI 配置相关功能的单元测试
+- 添加 IsDirect 相关功能的单元测试
+- 添加加密存根实现
+
 ## [0.0.4] - 2026-03-23
 
 ### Added
@@ -171,6 +258,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 结构化日志
 - 基础命令系统（`!ping`, `!help`）
 
+[0.0.5]: https://github.com/your-username/saber/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/your-username/saber/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/your-username/saber/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/your-username/saber/compare/v0.0.1...v0.0.2
