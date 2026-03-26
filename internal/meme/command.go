@@ -58,14 +58,14 @@ func defaultUploadMedia(client *mautrix.Client) UploadMediaFunc {
 // 用法:
 //
 //	!meme <关键词>           - 搜索 GIF（默认）
-//	!meme --gif <关键词>     - 搜索 GIF
-//	!meme --sticker <关键词> - 搜索 Sticker
-//	!meme --meme <关键词>    - 搜索 Meme
+//	!meme gif <关键词>       - 搜索 GIF
+//	!meme sticker <关键词>   - 搜索 Sticker
+//	!meme meme <关键词>      - 搜索 Meme
 //
 // 示例:
 //
 //	!meme happy
-//	!meme --sticker hello
+//	!meme sticker hello
 func (c *MemeCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
 	// 检查服务是否可用
 	if c.service == nil || !c.service.IsEnabled() {
@@ -75,7 +75,17 @@ func (c *MemeCommand) Handle(ctx context.Context, userID id.UserID, roomID id.Ro
 	// 解析参数
 	contentType, query := parseArgs(args)
 	if query == "" {
-		return c.cmdService.SendText(ctx, roomID, "请提供搜索关键词，例如：!meme happy")
+		helpText := `Meme 命令用法:
+!meme <关键词>          - 搜索 GIF（默认）
+!meme gif <关键词>      - 搜索 GIF 动图
+!meme sticker <关键词>  - 搜索 Sticker 贴纸
+!meme meme <关键词>     - 搜索 Meme 梗图
+
+示例:
+  !meme happy
+  !meme sticker hello
+  !meme meme funny`
+		return c.cmdService.SendText(ctx, roomID, helpText)
 	}
 
 	slog.Info("处理 meme 命令",
@@ -142,30 +152,48 @@ func (c *MemeCommand) Handle(ctx context.Context, userID id.UserID, roomID id.Ro
 }
 
 // parseArgs 解析命令参数，返回内容类型和搜索关键词。
+//
+// 支持的格式:
+//   - !meme <keyword>         → 默认搜索 GIF
+//   - !meme gif <keyword>     → 搜索 GIF
+//   - !meme sticker <keyword> → 搜索 Sticker
+//   - !meme meme <keyword>    → 搜索 Meme
+//
+// 参数:
+//   - args: 命令参数列表（不含命令名本身）
+//
+// 返回值:
+//   - ContentType: 内容类型（GIF/Sticker/Meme）
+//   - string: 搜索关键词
 func parseArgs(args []string) (ContentType, string) {
 	if len(args) == 0 {
+		// 无参数，返回默认类型和空关键词
 		return ContentTypeGIF, ""
 	}
 
-	// 检查是否有类型标志
+	// 检查第一个参数是否为子命令
 	switch args[0] {
-	case "--gif":
+	case "gif":
+		// !meme gif <keyword>
 		if len(args) > 1 {
 			return ContentTypeGIF, strings.Join(args[1:], " ")
 		}
 		return ContentTypeGIF, ""
-	case "--sticker":
+	case "sticker":
+		// !meme sticker <keyword>
 		if len(args) > 1 {
 			return ContentTypeSticker, strings.Join(args[1:], " ")
 		}
 		return ContentTypeSticker, ""
-	case "--meme":
+	case "meme":
+		// !meme meme <keyword>
 		if len(args) > 1 {
 			return ContentTypeMeme, strings.Join(args[1:], " ")
 		}
 		return ContentTypeMeme, ""
 	default:
-		// 默认使用 GIF 类型
+		// 无子命令，默认使用 GIF 类型
+		// !meme <keyword>
 		return ContentTypeGIF, strings.Join(args, " ")
 	}
 }
