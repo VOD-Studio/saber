@@ -225,11 +225,6 @@ type QQConfig struct {
 	TimeoutSeconds int         `yaml:"timeout_seconds"` // API 调用超时时间（秒）
 	Retry          RetryConfig `yaml:"retry"`           // 重试配置
 
-	// AI 交互配置
-	DirectChatAutoReply   bool   `yaml:"direct_chat_auto_reply"`   // 私聊自动回复
-	GroupChatMentionReply bool   `yaml:"group_chat_mention_reply"` // 群 @ 回复
-	SystemPrompt          string `yaml:"system_prompt"`            // 自定义系统提示词
-
 	// 并发控制
 	MaxConcurrentEvents int `yaml:"max_concurrent_events"` // 最大并发事件数
 }
@@ -385,19 +380,16 @@ func DefaultMemeConfig() MemeConfig {
 // DefaultQQConfig 返回带有合理默认值的 QQ 机器人配置
 func DefaultQQConfig() QQConfig {
 	return QQConfig{
-		Enabled:               false,
-		AppID:                 "",
-		AppSecret:             "",
-		Sandbox:               false,
-		WebhookPort:           8080,
-		WebhookPath:           "/qq/webhook",
-		WebhookSecret:         "",
-		TimeoutSeconds:        30,
-		Retry:                 DefaultRetryConfig(),
-		DirectChatAutoReply:   true,
-		GroupChatMentionReply: true,
-		SystemPrompt:          "",
-		MaxConcurrentEvents:   10,
+		Enabled:             false,
+		AppID:               "",
+		AppSecret:           "",
+		Sandbox:             false,
+		WebhookPort:         8080,
+		WebhookPath:         "/qq/webhook",
+		WebhookSecret:       "",
+		TimeoutSeconds:      30,
+		Retry:               DefaultRetryConfig(),
+		MaxConcurrentEvents: 10,
 	}
 }
 
@@ -1142,12 +1134,6 @@ qq:
     initial_delay_ms: 1000
     max_delay_ms: 30000
     backoff_factor: 2.0
-  # 私聊自动回复（无需 @）
-  direct_chat_auto_reply: true
-  # 群聊 @ 回复
-  group_chat_mention_reply: true
-  # 自定义系统提示词（可选）
-  system_prompt: ""
   # 最大并发事件数
   max_concurrent_events: 10
 
