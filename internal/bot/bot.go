@@ -384,6 +384,7 @@ func (s *appState) initMemeService() {
 // initQQAdapter 初始化 QQ 机器人适配器。
 //
 // 如果 QQ 配置启用，创建并启动 QQ 适配器。
+// AI 服务变为可选：未启用时仅基础命令可用。
 func (s *appState) initQQAdapter() {
 	if !s.cfg.QQ.Enabled {
 		return
@@ -394,22 +395,31 @@ func (s *appState) initQQAdapter() {
 		return
 	}
 
-	// 检查 AI 是否启用
-	if !s.cfg.AI.Enabled {
-		slog.Warn("QQ 机器人已启用但 AI 功能已禁用，机器人将无法回复消息",
+	// 构建 BuildInfo
+	qqBuildInfo := &qq.BuildInfo{
+		Version:       s.info.Version,
+		GitCommit:     s.info.GitCommit,
+		GitBranch:     s.info.GitBranch,
+		BuildTime:     s.info.BuildTime,
+		GoVersion:     s.info.GoVersion,
+		BuildPlatform: s.info.BuildPlatform,
+	}
+
+	// 创建简化版 AI 服务（可选，如果 AI 未启用则为 nil）
+	var simpleService *ai.SimpleService
+	if s.cfg.AI.Enabled {
+		var err error
+		simpleService, err = ai.NewSimpleService(&s.cfg.AI)
+		if err != nil {
+			slog.Warn("创建简化版 AI 服务失败，AI 命令将不可用", "error", err)
+		}
+	} else {
+		slog.Info("AI 功能未启用，仅基础命令可用",
 			"hint", "设置 ai.enabled: true 以启用 AI 功能")
-		return
 	}
 
-	// 创建简化版 AI 服务供 QQ 使用
-	simpleService, err := ai.NewSimpleService(&s.cfg.AI)
-	if err != nil {
-		slog.Warn("创建简化版 AI 服务失败", "error", err)
-		return
-	}
-
-	// 传入全局 AI 配置，QQ 复用 Matrix 的 AI 配置
-	adapter, err := qq.NewAdapter(&s.cfg.QQ, &s.cfg.AI, simpleService)
+	// 传入全局 AI 配置和 BuildInfo
+	adapter, err := qq.NewAdapter(&s.cfg.QQ, &s.cfg.AI, simpleService, qqBuildInfo)
 	if err != nil {
 		slog.Warn("创建 QQ 适配器失败", "error", err)
 		return

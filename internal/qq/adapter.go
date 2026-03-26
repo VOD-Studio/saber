@@ -63,7 +63,8 @@ type Adapter struct {
 // 参数:
 //   - cfg: QQ 配置，必须包含有效的 AppID 和 AppSecret
 //   - aiCfg: AI 配置，复用全局配置
-//   - aiService: AI 服务，用于生成回复
+//   - aiService: AI 服务（可选，为 nil 时仅基础命令可用）
+//   - buildInfo: 构建信息（可选，用于 !version 命令）
 //
 // 返回值:
 //   - *Adapter: 创建的适配器实例
@@ -72,17 +73,13 @@ type Adapter struct {
 // 错误情况：
 //   - 配置为空
 //   - AI 配置为空
-//   - AI 服务为空
 //   - 创建客户端失败
-func NewAdapter(cfg *config.QQConfig, aiCfg *config.AIConfig, aiService *ai.SimpleService) (*Adapter, error) {
+func NewAdapter(cfg *config.QQConfig, aiCfg *config.AIConfig, aiService *ai.SimpleService, buildInfo *BuildInfo) (*Adapter, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("QQ配置不能为空")
 	}
 	if aiCfg == nil {
 		return nil, fmt.Errorf("AI配置不能为空")
-	}
-	if aiService == nil {
-		return nil, fmt.Errorf("AI服务不能为空")
 	}
 
 	client, err := NewClient(cfg)
@@ -90,8 +87,30 @@ func NewAdapter(cfg *config.QQConfig, aiCfg *config.AIConfig, aiService *ai.Simp
 		return nil, fmt.Errorf("创建QQ客户端失败: %w", err)
 	}
 
-	// 创建包装处理器，适配 ai.SimpleService 到 SimpleAIService
-	handler := NewDefaultHandler(client, &aiServiceAdapter{aiService}, aiCfg)
+	// 创建命令注册表
+	registry := NewCommandRegistry()
+
+	// 注册基础命令（始终可用）
+	registry.Register("ping", &PingCommand{}, "检查机器人是否在线")
+	registry.Register("help", &HelpCommand{registry: registry}, "列出所有可用命令")
+	if buildInfo != nil {
+		registry.Register("version", &VersionCommand{buildInfo: buildInfo}, "显示版本信息")
+	}
+
+	// 注册 AI 命令（仅当 AI 服务可用时）
+	var contextMgr *ContextManager
+	var serviceAdapter SimpleAIService
+	if aiService != nil {
+		contextMgr = NewContextManager(aiCfg.Context)
+		registry.Register("ai", NewAICommand(aiService, contextMgr), "与 AI 对话")
+		serviceAdapter = &aiServiceAdapter{aiService}
+		slog.Info("QQ AI 命令已启用")
+	} else {
+		slog.Info("QQ AI 命令未启用（AI 服务不可用）")
+	}
+
+	// 创建处理器
+	handler := NewDefaultHandler(client, serviceAdapter, aiCfg, registry, contextMgr, buildInfo)
 
 	return &Adapter{
 		config:    cfg,
