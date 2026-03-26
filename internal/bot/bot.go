@@ -369,15 +369,6 @@ func (s *appState) initMemeService() {
 		"搜索并发送梗图 (用法: !meme [--gif|--sticker|--meme] <关键词>)",
 		meme.NewMemeCommand(cs, mautrixClient, memeSvc))
 
-	// 注册便捷命令
-	cs.RegisterCommandWithDesc("gif",
-		"搜索 GIF 动图 (用法: !gif <关键词>)",
-		meme.NewTypedMemeCommand(cs, mautrixClient, memeSvc, meme.ContentTypeGIF))
-
-	cs.RegisterCommandWithDesc("sticker",
-		"搜索贴纸 (用法: !sticker <关键词>)",
-		meme.NewTypedMemeCommand(cs, mautrixClient, memeSvc, meme.ContentTypeSticker))
-
 	slog.Info("Meme 服务已启用")
 }
 
