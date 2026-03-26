@@ -620,13 +620,15 @@ func TestOnMessage_ErrorHandling(t *testing.T) {
 		mu           sync.Mutex
 		errorCount   int
 		successCount int
+		done         = make(chan struct{}, 20) // 跟踪处理完成
 	)
 
 	errorHandler := &mockCommandHandler{
 		handleFunc: func(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
 			mu.Lock()
-			defer mu.Unlock()
 			errorCount++
+			mu.Unlock()
+			done <- struct{}{}
 			return errors.New("simulated error")
 		},
 	}
@@ -635,8 +637,9 @@ func TestOnMessage_ErrorHandling(t *testing.T) {
 	successHandler := &mockCommandHandler{
 		handleFunc: func(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
 			mu.Lock()
-			defer mu.Unlock()
 			successCount++
+			mu.Unlock()
+			done <- struct{}{}
 			return nil
 		},
 	}
@@ -685,7 +688,15 @@ func TestOnMessage_ErrorHandling(t *testing.T) {
 	}
 
 	wg.Wait()
-	time.Sleep(50 * time.Millisecond)
+
+	// 等待所有处理完成（最多 5 秒）
+	for range 20 {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("等待处理超时，已完成: error=%d, success=%d", errorCount, successCount)
+		}
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
