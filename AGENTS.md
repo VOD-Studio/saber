@@ -1,10 +1,10 @@
-<!-- Generated: 2026-03-25 | Updated: 2026-03-25 -->
+<!-- Generated: 2026-03-26 | Updated: 2026-03-26 -->
 
 # Saber
 
 ## Purpose
 
-Saber 是一个基于 Matrix 协议的 AI 机器人，支持 AI 对话、端到端加密、MCP 工具集成和主动聊天功能。使用 Go 1.26.1 开发，模块路径为 `rua.plus/saber`。
+Saber 是一个多平台 AI 机器人，支持 Matrix 协议和 QQ 官方机器人 API。功能包括 AI 对话、端到端加密、MCP 工具集成和主动聊天。使用 Go 1.26.1 开发，模块路径为 `rua.plus/saber`。
 
 ## Key Files
 
@@ -69,6 +69,7 @@ go test -cover -race -tags goolm ./...
 - `internal/context` - 上下文键定义
 - `internal/db` - SQLite 数据库驱动
 - `internal/meme` - GIF/Sticker 搜索服务
+- `internal/qq` - QQ 机器人适配器
 
 ### External
 
@@ -80,6 +81,7 @@ go test -cover -race -tags goolm ./...
 | `modernc.org/sqlite` | 纯 Go SQLite 驱动（非 CGO） |
 | `github.com/dop251/goja` | JavaScript 运行时（用于 JS 沙箱） |
 | `gopkg.in/yaml.v3` | YAML 解析 |
+| `github.com/tencent-connect/botgo` | QQ 官方机器人 SDK |
 
 ## Build Commands
 

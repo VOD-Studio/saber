@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-25 | Updated: 2026-03-25 -->
+<!-- Generated: 2026-03-26 | Updated: 2026-03-26 -->
 
 # cli
 

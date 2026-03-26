@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-03-25 | Updated: 2026-03-25 -->
+<!-- Generated: 2026-03-26 | Updated: 2026-03-26 -->
 
 # internal
 
@@ -25,6 +25,7 @@
 | `mcp/` | MCP (Model Context Protocol) 集成：服务器管理、工具调用（见 `mcp/AGENTS.md`） |
 | `meme/` | GIF/Sticker 搜索服务（Klipy API 集成）（见 `meme/AGENTS.md`） |
 | `persona/` | 人格管理：每房间独立的机器人性格、提示词合并（见 `persona/AGENTS.md`） |
+| `qq/` | QQ 机器人适配器：WebSocket 连接、事件处理、命令系统（见 `qq/AGENTS.md`） |
 
 ## For AI Agents
 
