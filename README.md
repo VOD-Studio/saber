@@ -1,25 +1,37 @@
 # Saber
 
-一个集成 AI 功能的 Matrix 机器人，使用 Go 和 mautrix SDK 构建。
+一个集成 AI 功能的多平台机器人，支持 Matrix 和 QQ，使用 Go 构建。
 
 ## 功能特性
 
+### 平台支持
+
 - **Matrix 协议**: 通过 mautrix-go 完整支持 Matrix 协议
-- **端到端加密**: 可选的 E2EE 支持，使用 goolm（纯 Go 实现，无需 CGO）
+- **QQ 机器人**: 支持 QQ 频道机器人，通过腾讯官方 API 接入
+- **端到端加密**: Matrix 可选的 E2EE 支持，使用 goolm（纯 Go 实现，无需 CGO）
+
+### AI 功能
+
 - **AI 集成**: 内置 AI 对话功能，支持 OpenAI 兼容的 API
+- **多提供商支持**: 同时配置多个 AI 提供商，运行时动态切换模型
 - **工具调用**: 支持 MCP (Model Context Protocol) 工具调用，AI 可执行网络搜索、网页抓取等操作
 - **流式响应**: 实时流式输出，智能消息编辑
 - **图片理解**: 支持发送图片让 AI 理解和分析（需模型支持视觉功能）
-- **上下文管理**: 每个房间独立的持久化对话上下文
-- **多模型支持**: 配置多个 AI 模型，各自独立参数，支持运行时切换
+- **上下文管理**: 每个房间/群组独立的持久化对话上下文
+
+### 交互特性
+
 - **可扩展命令**: 清晰的命令注册和分发系统
 - **自动重连**: 弹性连接，支持指数退避
 - **私聊自动回复**: 在私聊中自动响应 AI 消息
 - **群聊提及回复**: 在群聊中被 @mention 时自动响应
 - **回复延续对话**: 回复机器人的消息时自动继续对话
 - **主动聊天**: AI 驱动的主动消息，支持静默检测、定时触发、新成员欢迎
-- **Meme 搜索**: 支持搜索 GIF/Sticker/Meme 并发送到聊天（使用 Klipy API）
 - **人格管理**: 支持为不同房间设置不同的机器人人格，包括内置人格和自定义人格
+
+### 娱乐功能
+
+- **Meme 搜索**: 支持搜索 GIF/Sticker/Meme 并发送到聊天（使用 Klipy API）
 
 ## 快速开始
 
@@ -162,8 +174,9 @@ make docker-push DOCKER_REGISTRY=your-registry.com/
 | `!ai current`       | 显示当前默认模型                           |
 | `!mcp list`         | 列出所有 MCP 服务器和工具                  |
 | `!meme <keyword>`   | 搜索并发送 GIF/Sticker/Meme                |
-| `!gif <keyword>`    | 搜索并发送 GIF 动图                        |
-| `!sticker <keyword>`| 搜索并发送 Sticker 贴纸                    |
+| `!meme --gif <kw>`  | 搜索并发送 GIF 动图                        |
+| `!meme --sticker <kw>`| 搜索并发送 Sticker 贴纸                  |
+| `!meme --meme <kw>` | 搜索并发送 Meme 图片                       |
 | `!persona list`     | 列出所有可用人格                           |
 | `!persona set <id>` | 设置当前房间的人格                         |
 | `!persona clear`    | 清除当前房间的人格设置                     |
@@ -535,8 +548,6 @@ meme:
 !meme --gif happy     # 搜索 GIF
 !meme --sticker hello # 搜索 Sticker
 !meme --meme cat      # 搜索 Meme
-!gif happy            # 快捷方式：搜索 GIF
-!sticker hello        # 快捷方式：搜索 Sticker
 ```
 
 ### 人格管理
@@ -586,6 +597,69 @@ meme:
 
 人格数据存储在 SQLite 数据库中，默认位于配置文件同目录下的 `persona.db`。
 
+### QQ 机器人
+
+Saber 支持 QQ 频道机器人，通过腾讯官方 API 接入，提供与 Matrix 相似的 AI 对话功能。
+
+#### 配置示例
+
+```yaml
+qq:
+  enabled: true
+  app_id: "你的AppID"           # 从 QQ 开放平台获取
+  app_secret: "你的AppSecret"   # 从 QQ 开放平台获取
+  webhook_port: 8080            # Webhook 服务器端口
+  webhook_path: "/qq/callback"  # Webhook 回调路径
+  webhook_secret: ""            # Webhook 签名密钥（可选）
+  max_concurrent_events: 10     # 最大并发事件数
+```
+
+#### 前置要求
+
+1. 在 [QQ 开放平台](https://q.qq.com/) 注册开发者账号
+2. 创建机器人应用，获取 AppID 和 AppSecret
+3. 配置 Webhook 回调地址（需要公网可访问）
+
+#### 功能特性
+
+- **私聊对话**: 用户私聊机器人时自动响应 AI 消息
+- **群聊提及**: 在群聊中 @机器人 时触发 AI 响应
+- **上下文管理**: 每个用户/群组独立的对话上下文
+- **命令系统**: 支持 `!ping`、`!help`、`!version`、`!ai` 等命令
+
+#### QQ 命令列表
+
+| 命令 | 描述 |
+|------|------|
+| `!ping` | 检查机器人在线状态 |
+| `!help` | 显示帮助信息 |
+| `!version` | 显示版本信息 |
+| `!ai <message>` | 与 AI 对话 |
+| `!ai clear` | 清除对话上下文 |
+| `!ai context` | 显示上下文信息 |
+
+#### 架构说明
+
+QQ 机器人模块独立于 Matrix 模块，共享 AI 服务层：
+
+```
+QQ 平台                          Matrix 平台
+    │                                │
+    ▼                                ▼
+QQ Adapter                    Matrix Client
+    │                                │
+    └────────────┬───────────────────┘
+                 │
+                 ▼
+           AI Service (共享)
+```
+
+#### 注意事项
+
+- QQ 机器人需要公网 IP 接收 Webhook 回调
+- 开发环境可使用 ngrok 等工具进行本地调试
+- QQ 频道机器人有消息频率限制，请参考官方文档
+
 ## 配置参考
 
 ### Matrix 设置
@@ -602,6 +676,7 @@ meme:
 | `enable_e2ee`       | 否      | 启用端到端加密                   |
 | `e2ee_session_path` | 如果启用 E2EE | 加密会话数据库路径         |
 | `pickle_key_path`   | 否      | E2EE pickle 密钥路径（默认为 e2ee_session_path + ".key"） |
+| `max_concurrent_events` | 否 | 最大并发事件处理数（默认 10）   |
 
 ### AI 设置
 
@@ -779,6 +854,18 @@ meme:
 | `max_results`    | `5`     | 最大返回结果数                   |
 | `timeout_seconds`| `10`    | 请求超时时间（秒）               |
 
+### QQ 机器人设置
+
+| 字段                      | 必填 | 默认值 | 描述                             |
+| ------------------------- | ---- | ------ | -------------------------------- |
+| `enabled`                 | 否   | `false`| 启用 QQ 机器人功能               |
+| `app_id`                  | 是   | -      | QQ 机器人 AppID（从开放平台获取）|
+| `app_secret`              | 是   | -      | QQ 机器人 AppSecret              |
+| `webhook_port`            | 否   | `8080` | Webhook 服务器监听端口           |
+| `webhook_path`            | 否   | `/qq/callback` | Webhook 回调路径          |
+| `webhook_secret`          | 否   | `""`   | Webhook 签名密钥                 |
+| `max_concurrent_events`   | 否   | `10`   | 最大并发事件处理数               |
+
 ### 关闭设置
 
 | 字段             | 默认值 | 描述                   |
@@ -808,7 +895,6 @@ saber/
       keys.go                      # 上下文键定义
       user.go                      # 用户上下文工具
     db/
-      sqlite_cgo.go                # SQLite CGO 驱动（仅 CGO 构建时使用）
       sqlite_nocgo.go              # SQLite 纯 Go 驱动（默认使用）
     matrix/
       client.go                    # Matrix 客户端封装
@@ -820,13 +906,20 @@ saber/
       mention.go                   # 提及解析服务
       reply.go                     # 回复工具
       media.go                     # 媒体上传和处理
-      testing_helpers.go           # 测试辅助工具
+      commands/                    # 命令模块
+        register.go                # 命令注册
+        ping.go                    # !ping 命令
+        help.go                    # !help 命令
+        version.go                 # !version 命令
+        ai.go                      # AI 命令处理
+        meme.go                    # Meme 命令
     ai/
       service.go                   # AI 服务编排
+      core.go                      # 核心逻辑（客户端缓存、速率限制）
       client.go                    # OpenAI 兼容客户端
       strategy.go                  # AI 提供商策略模式
       model_registry.go            # 多模型注册管理
-      model_commands.go            # 模型特定命令处理
+      commands.go                  # AI 命令路由
       context_manager.go           # 对话上下文管理
       stream_handler.go            # 流式响应处理
       stream_editor.go             # 流式消息编辑
@@ -837,7 +930,8 @@ saber/
       proactive_triggers.go        # 触发器实现（静默/定时）
       proactive_state.go           # 房间状态跟踪
       proactive_decision.go        # AI 决策引擎
-      testing_helpers.go           # 测试辅助工具
+      response.go                  # 响应处理
+      tools.go                     # 工具管理
     mcp/
       manager.go                   # MCP 管理器
       factory.go                   # MCP 服务器工厂模式
@@ -846,8 +940,7 @@ saber/
       middleware.go                # 中间件
       validation.go                # 输入验证
       logging.go                   # 日志中间件
-      testing_helpers.go           # 测试辅助工具
-      servers/
+      servers/                     # MCP 服务器实现
         builtin.go                 # 内置服务器注册
         shared_client.go           # 共享 HTTP 客户端
         web_fetch.go               # 网页抓取工具
@@ -863,6 +956,14 @@ saber/
       builtin.go                   # 内置人格定义
       service.go                   # 人格服务（CRUD、房间映射）
       commands.go                  # !persona 命令处理
+    qq/                            # QQ 机器人模块
+      adapter.go                   # QQ 适配器（WebSocket 连接、事件分发）
+      client.go                    # QQ API 客户端
+      handlers.go                  # QQ 事件处理（C2C/群聊）
+      message.go                   # QQ 消息构建和发送
+      commands.go                  # QQ 命令注册
+      ai_command.go                # QQ AI 命令处理
+      context.go                   # QQ 上下文管理
 ```
 
 ## 开发
@@ -957,9 +1058,11 @@ go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 - [mautrix-go](https://github.com/mautrix/go) - Matrix 客户端库
 - [go-openai](https://github.com/sashabaranov/go-openai) - OpenAI 客户端
 - [go-sdk](https://github.com/modelcontextprotocol/go-sdk) - MCP (Model Context Protocol) SDK
+- [botgo](https://github.com/tencent-connect/botgo) - QQ 频道机器人 SDK
 - [goja](https://github.com/dop251/goja) - JavaScript 运行时（用于 JS 沙箱）
 - [tint](https://github.com/lmittmann/tint) - 带颜色的结构化日志
 - [bluemonday](https://github.com/microcosm-cc/bluemonday) - HTML 净化库
+- [modernc/sqlite](https://gitlab.com/cznic/sqlite) - 纯 Go SQLite 驱动
 
 ## 许可证
 
