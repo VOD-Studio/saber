@@ -41,15 +41,24 @@ type CommandInfo struct {
 
 // CommandService 管理命令注册和分发。
 type CommandService struct {
-	mu             sync.RWMutex
-	commands       map[string]CommandInfo
-	client         *mautrix.Client
-	botID          id.UserID
-	directChatAI   CommandHandler
-	mentionAI      CommandHandler
-	replyAI        CommandHandler
+	// mu 保护 commands 映射的并发访问。
+	mu sync.RWMutex
+	// commands 已注册的命令，键为命令名称（小写）。
+	commands map[string]CommandInfo
+	// client Matrix 客户端，用于发送消息。
+	client *mautrix.Client
+	// botID 机器人的 Matrix 用户 ID。
+	botID id.UserID
+	// directChatAI 私聊自动回复的 AI 处理器，为 nil 时禁用。
+	directChatAI CommandHandler
+	// mentionAI 群聊提及消息的 AI 处理器，为 nil 时禁用。
+	mentionAI CommandHandler
+	// replyAI 回复消息的 AI 处理器，为 nil 时禁用。
+	replyAI CommandHandler
+	// mentionService 处理消息中的提及解析。
 	mentionService *MentionService
-	buildInfo      *BuildInfo
+	// buildInfo 构建版本信息。
+	buildInfo *BuildInfo
 }
 
 // NewCommandService 创建一个新的命令服务。
