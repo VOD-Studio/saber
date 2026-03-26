@@ -62,7 +62,7 @@ func (te *ToolExecutor) ExecuteToolCallingLoop(
 	currentMessages := make([]openai.ChatCompletionMessage, len(messages))
 	copy(currentMessages, messages)
 
-	maxIterations := te.service.globalConfig.ToolCalling.MaxIterations
+	maxIterations := te.service.core.GetConfig().ToolCalling.MaxIterations
 	if maxIterations <= 0 {
 		maxIterations = 5
 	}
@@ -193,15 +193,16 @@ func (te *ToolExecutor) ExecuteStreamingWithToolCalling(
 
 	eventID := matrix.GetEventID(ctx)
 
-	maxIterations := te.service.globalConfig.ToolCalling.MaxIterations
+	maxIterations := te.service.core.GetConfig().ToolCalling.MaxIterations
 	if maxIterations <= 0 {
 		maxIterations = 5
 	}
 
 	for i := 0; i < maxIterations; i++ {
 		// 创建流编辑器和处理器
-		editor := NewStreamEditor(te.service.matrixService, roomID, "", te.service.globalConfig.StreamEdit, eventID)
-		handler := NewStreamToolHandler(editor, te.service.globalConfig.StreamEdit)
+		cfg := te.service.core.GetConfig()
+		editor := NewStreamEditor(te.service.matrixService, roomID, "", cfg.StreamEdit, eventID)
+		handler := NewStreamToolHandler(editor, cfg.StreamEdit)
 
 		// 发送流式请求
 		req.Messages = currentMessages

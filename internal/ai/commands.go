@@ -35,7 +35,7 @@ func NewAICommand(service *Service) *AICommand {
 // 返回值:
 //   - error: 处理过程中发生的错误
 func (c *AICommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
-	return c.service.handleAICommand(ctx, userID, roomID, c.service.modelRegistry.GetDefault(), args)
+	return c.service.handleAICommand(ctx, userID, roomID, c.service.GetModelRegistry().GetDefault(), args)
 }
 
 // MultiModelAICommand 处理指定模型的 AI 聊天命令。

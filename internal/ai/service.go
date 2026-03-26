@@ -22,11 +22,9 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sashabaranov/go-openai"
-	"golang.org/x/time/rate"
 	"maunium.net/go/mautrix/id"
 
 	"rua.plus/saber/internal/config"
@@ -43,16 +41,12 @@ type PersonaService interface {
 
 // Service 是 AI 服务的核心结构体。
 type Service struct {
-	globalConfig   *config.AIConfig
+	core           *Core                    // 共享核心逻辑
 	matrixService  *matrix.CommandService
 	contextManager *ContextManager
 	mcpManager     *mcp.Manager
 	mediaService   *matrix.MediaService
 	personaService PersonaService // 人格服务（可选）
-	clients        map[string]*Client
-	clientsMu      sync.RWMutex
-	rateLimiter    *rate.Limiter
-	modelRegistry  *ModelRegistry
 	msgBuilder     *MessageBuilder
 	respHandler    *ResponseHandler
 	toolExecutor   *ToolExecutor
@@ -83,20 +77,18 @@ func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpM
 		contextManager = NewContextManager(cfg.Context)
 	}
 
-	var rateLimiter *rate.Limiter
-	if cfg.RateLimitPerMinute > 0 {
-		rateLimiter = rate.NewLimiter(rate.Limit(cfg.RateLimitPerMinute)/60, cfg.RateLimitPerMinute/6)
+	// 创建 Core 实例
+	core, err := NewCore(cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	service := &Service{
-		globalConfig:   cfg,
+		core:           core,
 		matrixService:  matrixService,
 		contextManager: contextManager,
 		mcpManager:     mcpManager,
 		mediaService:   mediaService,
-		clients:        make(map[string]*Client),
-		rateLimiter:    rateLimiter,
-		modelRegistry:  NewModelRegistry(cfg),
 		msgBuilder:     NewMessageBuilder(),
 		respHandler:    NewResponseHandler(nil), // 将在下面重新初始化
 		toolExecutor:   NewToolExecutor(nil),      // 将在下面重新初始化
@@ -125,35 +117,7 @@ func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpM
 //   - *Client: AI 客户端实例
 //   - error: 获取过程中发生的错误
 func (s *Service) getClient(modelName string) (*Client, error) {
-	// 第一次检查（读锁）
-	s.clientsMu.RLock()
-	client, exists := s.clients[modelName]
-	s.clientsMu.RUnlock()
-
-	if exists {
-		return client, nil
-	}
-
-	// 获取写锁进行创建
-	s.clientsMu.Lock()
-	defer s.clientsMu.Unlock()
-
-	// 再次检查（可能其他 goroutine 已创建）
-	if client, exists := s.clients[modelName]; exists {
-		return client, nil
-	}
-
-	modelConfig, _ := s.globalConfig.GetModelConfig(modelName)
-	cfg := &modelConfig
-
-	newClient, err := NewClientWithModel(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("创建AI客户端失败 (模型: %s): %w", modelName, err)
-	}
-
-	s.clients[modelName] = newClient
-	slog.Debug("创建了新的AI客户端", "model", modelName)
-	return newClient, nil
+	return s.core.GetClient(modelName)
 }
 
 // IsEnabled 检查 AI 服务是否已启用。
@@ -161,7 +125,7 @@ func (s *Service) getClient(modelName string) (*Client, error) {
 // 返回值:
 //   - bool: 如果 AI 服务已启用则返回 true
 func (s *Service) IsEnabled() bool {
-	return s.globalConfig.Enabled
+	return s.core.IsEnabled()
 }
 
 // SetPersonaService 设置人格服务。
@@ -175,7 +139,7 @@ func (s *Service) SetPersonaService(ps PersonaService) {
 // 返回值:
 //   - *ModelRegistry: 模型注册表实例
 func (s *Service) GetModelRegistry() *ModelRegistry {
-	return s.modelRegistry
+	return s.core.GetModelRegistry()
 }
 
 // Stop 停止 AI 服务的所有后台任务。
@@ -207,17 +171,17 @@ func (s *Service) GenerateSimpleResponse(ctx context.Context, systemPrompt, user
 		return "", fmt.Errorf("AI功能未启用")
 	}
 
-	if s.rateLimiter != nil {
-		if err := s.rateLimiter.Wait(ctx); err != nil {
-			return "", fmt.Errorf("AI请求速率限制: %w", err)
-		}
+	if err := s.core.WaitForRateLimit(ctx); err != nil {
+		return "", fmt.Errorf("AI请求速率限制: %w", err)
 	}
 
-	modelName := s.modelRegistry.GetDefault()
+	modelName := s.core.GetModelRegistry().GetDefault()
 	client, err := s.getClient(modelName)
 	if err != nil {
 		return "", fmt.Errorf("获取AI客户端失败: %w", err)
 	}
+
+	cfg := s.core.GetConfig()
 
 	messages := []openai.ChatCompletionMessage{
 		{Role: string(RoleSystem), Content: systemPrompt},
@@ -227,8 +191,8 @@ func (s *Service) GenerateSimpleResponse(ctx context.Context, systemPrompt, user
 	req := ChatCompletionRequest{
 		Model:       modelName,
 		Messages:    messages,
-		MaxTokens:   s.globalConfig.MaxTokens,
-		Temperature: s.globalConfig.Temperature,
+		MaxTokens:   cfg.MaxTokens,
+		Temperature: cfg.Temperature,
 	}
 
 	slog.Debug("发送简单AI请求", "model", modelName, "system_prompt", systemPrompt, "user_message", userMessage)
@@ -262,20 +226,20 @@ func (s *Service) GenerateSimpleResponseWithModel(ctx context.Context, modelName
 		return "", fmt.Errorf("AI功能未启用")
 	}
 
-	if s.rateLimiter != nil {
-		if err := s.rateLimiter.Wait(ctx); err != nil {
-			return "", fmt.Errorf("AI请求速率限制: %w", err)
-		}
+	if err := s.core.WaitForRateLimit(ctx); err != nil {
+		return "", fmt.Errorf("AI请求速率限制: %w", err)
 	}
+
+	cfg := s.core.GetConfig()
 
 	// 使用指定的模型或默认模型
 	if modelName == "" {
-		modelName = s.modelRegistry.GetDefault()
+		modelName = s.core.GetModelRegistry().GetDefault()
 	}
 
 	// 使用指定的温度或全局默认值
 	if temperature == 0 {
-		temperature = s.globalConfig.Temperature
+		temperature = cfg.Temperature
 	}
 
 	client, err := s.getClient(modelName)
@@ -291,7 +255,7 @@ func (s *Service) GenerateSimpleResponseWithModel(ctx context.Context, modelName
 	req := ChatCompletionRequest{
 		Model:       modelName,
 		Messages:    messages,
-		MaxTokens:   s.globalConfig.MaxTokens,
+		MaxTokens:   cfg.MaxTokens,
 		Temperature: temperature,
 	}
 
@@ -327,18 +291,18 @@ func (s *Service) GenerateStreamingSimpleResponse(ctx context.Context, modelName
 		return "", fmt.Errorf("AI功能未启用")
 	}
 
-	if s.rateLimiter != nil {
-		if err := s.rateLimiter.Wait(ctx); err != nil {
-			return "", fmt.Errorf("AI请求速率限制: %w", err)
-		}
+	if err := s.core.WaitForRateLimit(ctx); err != nil {
+		return "", fmt.Errorf("AI请求速率限制: %w", err)
 	}
 
+	cfg := s.core.GetConfig()
+
 	if modelName == "" {
-		modelName = s.modelRegistry.GetDefault()
+		modelName = s.core.GetModelRegistry().GetDefault()
 	}
 
 	if temperature == 0 {
-		temperature = s.globalConfig.Temperature
+		temperature = cfg.Temperature
 	}
 
 	client, err := s.getClient(modelName)
@@ -355,7 +319,7 @@ func (s *Service) GenerateStreamingSimpleResponse(ctx context.Context, modelName
 		Model:       modelName,
 		Messages:    messages,
 		Stream:      true,
-		MaxTokens:   s.globalConfig.MaxTokens,
+		MaxTokens:   cfg.MaxTokens,
 		Temperature: temperature,
 	}
 
@@ -379,10 +343,8 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 		return fmt.Errorf("AI功能未启用")
 	}
 
-	if s.rateLimiter != nil {
-		if err := s.rateLimiter.Wait(ctx); err != nil {
-			return fmt.Errorf("AI请求速率限制: %w", err)
-		}
+	if err := s.core.WaitForRateLimit(ctx); err != nil {
+		return fmt.Errorf("AI请求速率限制: %w", err)
 	}
 
 	userInput := strings.Join(args, " ")
@@ -406,8 +368,10 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 	var imageDataList []string
 	imageCount := 0
 
+	cfg := s.core.GetConfig()
+
 	// 处理当前消息的图片
-	if mediaInfo != nil && mediaInfo.Type == "image" && s.mediaService != nil && s.globalConfig.Media.Enabled {
+	if mediaInfo != nil && mediaInfo.Type == "image" && s.mediaService != nil && cfg.Media.Enabled {
 		imageData, err := s.mediaService.DownloadImage(ctx, mediaInfo)
 		if err != nil {
 			slog.Warn("下载当前消息图片失败", "error", err)
@@ -419,7 +383,7 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 	}
 
 	// 处理引用消息的图片
-	if referencedMediaInfo != nil && referencedMediaInfo.Type == "image" && s.mediaService != nil && s.globalConfig.Media.Enabled {
+	if referencedMediaInfo != nil && referencedMediaInfo.Type == "image" && s.mediaService != nil && cfg.Media.Enabled {
 		imageData, err := s.mediaService.DownloadImage(ctx, referencedMediaInfo)
 		if err != nil {
 			slog.Warn("下载引用消息图片失败", "error", err)
@@ -447,32 +411,32 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 
 	// 如果有图片且配置了专用模型，使用专用模型
 	actualModel := modelName
-	if hasImage && s.globalConfig.Media.Model != "" {
-		actualModel = s.globalConfig.Media.Model
+	if hasImage && cfg.Media.Model != "" {
+		actualModel = cfg.Media.Model
 		slog.Debug("使用图片识别专用模型", "media_model", actualModel, "default_model", modelName)
 	}
 
 	req := ChatCompletionRequest{
 		Messages:    messages,
-		Stream:      s.globalConfig.StreamEnabled,
-		MaxTokens:   s.globalConfig.MaxTokens,
-		Temperature: s.globalConfig.Temperature,
+		Stream:      cfg.StreamEnabled,
+		MaxTokens:   cfg.MaxTokens,
+		Temperature: cfg.Temperature,
 		Model:       actualModel,
 	}
 
 	slog.Debug("AI请求准备完成",
 		"model", actualModel,
 		"messages_count", len(messages),
-		"stream", s.globalConfig.StreamEnabled,
-		"max_tokens", s.globalConfig.MaxTokens,
-		"temperature", s.globalConfig.Temperature)
+		"stream", cfg.StreamEnabled,
+		"max_tokens", cfg.MaxTokens,
+		"temperature", cfg.Temperature)
 
 	retryConfig := &RetryConfigWrapper{
-		MaxRetries:     s.globalConfig.Retry.MaxRetries,
-		InitialDelay:   time.Duration(s.globalConfig.Retry.InitialDelayMs) * time.Millisecond,
-		MaxDelay:       time.Duration(s.globalConfig.Retry.MaxDelayMs) * time.Millisecond,
-		BackoffFactor:  s.globalConfig.Retry.BackoffFactor,
-		FallbackModels: s.globalConfig.Retry.FallbackModels,
+		MaxRetries:     cfg.Retry.MaxRetries,
+		InitialDelay:   time.Duration(cfg.Retry.InitialDelayMs) * time.Millisecond,
+		MaxDelay:       time.Duration(cfg.Retry.MaxDelayMs) * time.Millisecond,
+		BackoffFactor:  cfg.Retry.BackoffFactor,
+		FallbackModels: cfg.Retry.FallbackModels,
 	}
 
 	fallbackHandler := &FallbackModelHandler{
@@ -488,7 +452,7 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 		}
 
 		req.Model = model
-		slog.Debug("发送AI请求", "model", model, "base_url", s.globalConfig.BaseURL)
+		slog.Debug("发送AI请求", "model", model, "base_url", cfg.BaseURL)
 
 		tools, useToolCalling := s.toolExecutor.PrepareTools()
 		if useToolCalling {
@@ -504,7 +468,7 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 			Tools:       tools,
 		}
 
-		mode := s.respHandler.DetermineResponseMode(s.globalConfig.StreamEnabled, s.globalConfig.StreamEdit.Enabled, useToolCalling)
+		mode := s.respHandler.DetermineResponseMode(cfg.StreamEnabled, cfg.StreamEdit.Enabled, useToolCalling)
 		slog.Debug("响应模式", "mode", mode, "model", model)
 
 		switch mode {

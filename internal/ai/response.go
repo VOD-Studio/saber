@@ -188,11 +188,12 @@ func (rh *ResponseHandler) ExecuteStreamingResponse(
 ) error {
 	roomID := respCtx.RoomID
 
-	slog.Debug("使用流式响应模式", "char_threshold", rh.service.globalConfig.StreamEdit.CharThreshold)
+	cfg := rh.service.core.GetConfig()
+	slog.Debug("使用流式响应模式", "char_threshold", cfg.StreamEdit.CharThreshold)
 
 	eventID := matrix.GetEventID(ctx)
-	editor := NewStreamEditor(rh.service.matrixService, roomID, "", rh.service.globalConfig.StreamEdit, eventID)
-	handler := NewSmartStreamHandler(editor, rh.service.globalConfig.StreamEdit.CharThreshold, rh.service.globalConfig.StreamEdit.TimeThresholdMs)
+	editor := NewStreamEditor(rh.service.matrixService, roomID, "", cfg.StreamEdit, eventID)
+	handler := NewSmartStreamHandler(editor, cfg.StreamEdit.CharThreshold, cfg.StreamEdit.TimeThresholdMs)
 
 	streamErr := client.CreateStreamingChatCompletion(ctx, req, handler)
 	if streamErr != nil {

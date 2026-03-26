@@ -71,7 +71,7 @@ func (r *AICommandRouter) RegisterSubcommand(name string, handler CommandHandler
 func (r *AICommandRouter) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
 	// 无参数时，将消息作为 AI 对话内容处理
 	if len(args) == 0 {
-		return r.service.handleAICommand(ctx, userID, roomID, r.service.modelRegistry.GetDefault(), args)
+		return r.service.handleAICommand(ctx, userID, roomID, r.service.GetModelRegistry().GetDefault(), args)
 	}
 
 	// 检查是否为已知子命令
@@ -79,7 +79,7 @@ func (r *AICommandRouter) Handle(ctx context.Context, userID id.UserID, roomID i
 	handler, ok := r.subcommands[subcmd]
 	if !ok {
 		// 不是已知子命令，将所有参数作为 AI 对话内容
-		return r.service.handleAICommand(ctx, userID, roomID, r.service.modelRegistry.GetDefault(), args)
+		return r.service.handleAICommand(ctx, userID, roomID, r.service.GetModelRegistry().GetDefault(), args)
 	}
 
 	// 分发到子命令处理器，传递剩余参数
