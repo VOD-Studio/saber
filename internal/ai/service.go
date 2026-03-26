@@ -41,15 +41,24 @@ type PersonaService interface {
 
 // Service 是 AI 服务的核心结构体。
 type Service struct {
-	core           *Core                    // 共享核心逻辑
-	matrixService  *matrix.CommandService
+	// core 是共享核心逻辑。
+	core *Core
+	// matrixService 是 Matrix 命令服务，用于发送消息。
+	matrixService *matrix.CommandService
+	// contextManager 是对话上下文管理器。
 	contextManager *ContextManager
-	mcpManager     *mcp.Manager
-	mediaService   *matrix.MediaService
-	personaService PersonaService // 人格服务（可选）
-	msgBuilder     *MessageBuilder
-	respHandler    *ResponseHandler
-	toolExecutor   *ToolExecutor
+	// mcpManager 是 MCP 管理器。
+	mcpManager *mcp.Manager
+	// mediaService 是媒体服务。
+	mediaService *matrix.MediaService
+	// personaService 是人格服务（可选字段）。
+	personaService PersonaService
+	// msgBuilder 是消息构建器。
+	msgBuilder *MessageBuilder
+	// respHandler 是响应处理器。
+	respHandler *ResponseHandler
+	// toolExecutor 是工具执行器。
+	toolExecutor *ToolExecutor
 }
 
 // NewService 创建一个新的 AI 服务实例。
