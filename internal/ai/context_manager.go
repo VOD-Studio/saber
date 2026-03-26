@@ -22,23 +22,36 @@ const (
 
 // ChatMessage 表示存储在上下文中的单个聊天消息。
 type ChatMessage struct {
-	Role      MessageRole
-	Content   string
-	UserID    id.UserID
-	RoomID    id.RoomID
+	// Role 表示消息角色（user、assistant 或 system）。
+	Role MessageRole
+	// Content 表示消息文本内容。
+	Content string
+	// UserID 表示发送消息的 Matrix 用户 ID。
+	UserID id.UserID
+	// RoomID 表示消息所在的 Matrix 房间 ID。
+	RoomID id.RoomID
+	// Timestamp 表示消息发送时间。
 	Timestamp time.Time
 }
 
 // ContextManager 管理多个房间的对话上下文。
 type ContextManager struct {
-	mu             sync.RWMutex
-	contexts       map[id.RoomID][]ChatMessage
-	tokenCount     map[id.RoomID]int
-	lastActivity   map[id.RoomID]time.Time // 记录每个房间最后活动时间
-	config         config.ContextConfig
-	stopCleanup    chan struct{}
+	// mu 保护所有字段的并发访问。
+	mu sync.RWMutex
+	// contexts 存储每个房间的对话消息列表。
+	contexts map[id.RoomID][]ChatMessage
+	// tokenCount 缓存每个房间的估算 token 数量。
+	tokenCount map[id.RoomID]int
+	// lastActivity 记录每个房间的最后活动时间。
+	lastActivity map[id.RoomID]time.Time
+	// config 表示上下文管理器的配置参数。
+	config config.ContextConfig
+	// stopCleanup 用于通知后台清理 goroutine 停止。
+	stopCleanup chan struct{}
+	// cleanupStopped 用于等待后台清理 goroutine 完全停止。
 	cleanupStopped sync.WaitGroup
-	stopOnce       sync.Once // 确保 Stop 只执行一次
+	// stopOnce 确保 Stop 方法只执行一次。
+	stopOnce sync.Once
 }
 
 // NewContextManager 创建并返回一个新的上下文管理器实例。
