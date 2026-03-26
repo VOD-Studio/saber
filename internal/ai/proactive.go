@@ -141,8 +141,6 @@ func NewProactiveManager(
 //
 // 参数:
 //   - ctx: 上下文，用于取消操作
-//
-// TODO: 在任务 6-10 中实现完整的触发逻辑
 func (m *ProactiveManager) Start(ctx context.Context) {
 	if !m.config.Enabled {
 		slog.Debug("主动聊天功能未启用，跳过启动")
@@ -182,8 +180,6 @@ func (m *ProactiveManager) Stop() {
 //
 // 参数:
 //   - ctx: 上下文，用于取消操作
-//
-// TODO: 在任务 6-10 中实现完整的任务逻辑
 func (m *ProactiveManager) runBackgroundTasks(ctx context.Context) {
 	slog.Debug("主动聊天后台任务启动")
 
