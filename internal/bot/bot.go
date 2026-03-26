@@ -23,6 +23,7 @@ import (
 	"rua.plus/saber/internal/mcp"
 	"rua.plus/saber/internal/meme"
 	"rua.plus/saber/internal/persona"
+	"rua.plus/saber/internal/qq"
 )
 
 // services 持有所有需要管理的服务实例。
@@ -37,6 +38,7 @@ type services struct {
 	memeService      *meme.Service
 	personaService   *persona.Service
 	client           *matrix.MatrixClient
+	qqAdapter        *qq.Adapter
 }
 
 // appState 持有应用程序运行时状态。
@@ -241,6 +243,9 @@ func (s *appState) initServices() error {
 	// 初始化 Meme 服务
 	s.initMemeService()
 
+	// 初始化 QQ 适配器
+	s.initQQAdapter()
+
 	return nil
 }
 
@@ -376,6 +381,38 @@ func (s *appState) initMemeService() {
 	slog.Info("Meme 服务已启用")
 }
 
+// initQQAdapter 初始化 QQ 机器人适配器。
+//
+// 如果 QQ 配置启用，创建并启动 QQ 适配器。
+func (s *appState) initQQAdapter() {
+	if !s.cfg.QQ.Enabled {
+		return
+	}
+
+	if err := s.cfg.QQ.Validate(); err != nil {
+		slog.Warn("QQ 配置无效，跳过初始化", "error", err)
+		return
+	}
+
+	// 创建简化版 AI 服务供 QQ 使用
+	simpleService, err := ai.NewSimpleService(&s.cfg.AI)
+	if err != nil {
+		slog.Warn("创建简化版 AI 服务失败", "error", err)
+		return
+	}
+
+	adapter, err := qq.NewAdapter(&s.cfg.QQ, simpleService)
+	if err != nil {
+		slog.Warn("创建 QQ 适配器失败", "error", err)
+		return
+	}
+
+	s.services.qqAdapter = adapter
+	slog.Info("QQ 适配器初始化成功",
+		"app_id", s.cfg.QQ.AppID,
+		"sandbox", s.cfg.QQ.Sandbox)
+}
+
 // initProactiveManager 初始化主动聊天管理器。
 //
 // 返回管理器实例和错误，支持测试和优雅关闭。
@@ -489,6 +526,16 @@ func (s *appState) startSync(ctx context.Context) {
 		svc.proactiveManager.Start(ctx)
 	}
 
+	// 启动 QQ 适配器
+	if svc.qqAdapter != nil {
+		go func() {
+			slog.Info("正在启动 QQ 适配器...")
+			if err := svc.qqAdapter.Start(ctx); err != nil {
+				slog.Error("QQ 适配器启动失败", "error", err)
+			}
+		}()
+	}
+
 	slog.Info("Saber Bot is running",
 		"version", s.info.Version,
 		"git", s.info.GitCommit,
@@ -560,6 +607,16 @@ func (s *appState) shutdown(cancel context.CancelFunc) {
 			slog.Debug("正在停止主动聊天管理器...")
 			svc.proactiveManager.Stop()
 			slog.Debug("主动聊天管理器已停止")
+		}()
+	}
+
+	if svc.qqAdapter != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			slog.Debug("正在停止 QQ 适配器...")
+			svc.qqAdapter.Stop()
+			slog.Debug("QQ 适配器已停止")
 		}()
 	}
 
