@@ -53,40 +53,58 @@ func TestParseArgs(t *testing.T) {
 			wantQuery:       "",
 		},
 		{
-			name:            "普通关键词",
+			name:            "普通关键词（默认 GIF）",
 			args:            []string{"happy"},
 			wantContentType: ContentTypeGIF,
 			wantQuery:       "happy",
 		},
 		{
-			name:            "多个关键词",
+			name:            "多个关键词（默认 GIF）",
 			args:            []string{"happy", "cat"},
 			wantContentType: ContentTypeGIF,
 			wantQuery:       "happy cat",
 		},
 		{
-			name:            "--gif 标志",
-			args:            []string{"--gif", "funny"},
+			name:            "子命令 gif 正常解析",
+			args:            []string{"gif", "funny"},
 			wantContentType: ContentTypeGIF,
 			wantQuery:       "funny",
 		},
 		{
-			name:            "--sticker 标志",
-			args:            []string{"--sticker", "hello"},
+			name:            "子命令 gif 多关键词",
+			args:            []string{"gif", "funny", "cat"},
+			wantContentType: ContentTypeGIF,
+			wantQuery:       "funny cat",
+		},
+		{
+			name:            "子命令 sticker 正常解析",
+			args:            []string{"sticker", "hello"},
 			wantContentType: ContentTypeSticker,
 			wantQuery:       "hello",
 		},
 		{
-			name:            "--meme 标志",
-			args:            []string{"--meme", "tired"},
+			name:            "子命令 meme 正常解析",
+			args:            []string{"meme", "tired"},
 			wantContentType: ContentTypeMeme,
 			wantQuery:       "tired",
 		},
 		{
-			name:            "只有标志无关键词",
-			args:            []string{"--sticker"},
+			name:            "子命令 gif 无关键词",
+			args:            []string{"gif"},
+			wantContentType: ContentTypeGIF,
+			wantQuery:       "",
+		},
+		{
+			name:            "子命令 sticker 无关键词",
+			args:            []string{"sticker"},
 			wantContentType: ContentTypeSticker,
 			wantQuery:       "",
+		},
+		{
+			name:            "无子命令默认为 GIF",
+			args:            []string{"default", "search"},
+			wantContentType: ContentTypeGIF,
+			wantQuery:       "default search",
 		},
 	}
 
@@ -144,62 +162,10 @@ func TestMemeCommand_Handle_EmptyQuery(t *testing.T) {
 	}
 
 	if mockSvc.lastText == "" {
-		t.Error("expected error message to be sent")
+		t.Error("expected help message to be sent")
 	}
 
-	expected := "请提供搜索关键词"
-	if !strings.Contains(mockSvc.lastText, expected) {
-		t.Errorf("expected text containing %q, got %q", expected, mockSvc.lastText)
-	}
-}
-
-func TestTypedMemeCommand_Handle_EmptyQuery(t *testing.T) {
-	mockSvc := &mockCommandService{}
-	svc := createTestService()
-
-	cmd := &TypedMemeCommand{
-		service:     svc,
-		cmdService:  mockSvc,
-		contentType: ContentTypeGIF,
-	}
-
-	ctx := context.Background()
-	err := cmd.Handle(ctx, "@user:example.com", "!room:example.com", []string{})
-	if err != nil {
-		t.Fatalf("Handle returned error: %v", err)
-	}
-
-	if mockSvc.lastText == "" {
-		t.Error("expected error message to be sent")
-	}
-
-	expected := "请提供搜索关键词"
-	if !strings.Contains(mockSvc.lastText, expected) {
-		t.Errorf("expected text containing %q, got %q", expected, mockSvc.lastText)
-	}
-}
-
-func TestTypedMemeCommand_Handle_ServiceNotEnabled(t *testing.T) {
-	mockSvc := &mockCommandService{}
-	svc := NewService(&config.MemeConfig{Enabled: false})
-
-	cmd := &TypedMemeCommand{
-		service:     svc,
-		cmdService:  mockSvc,
-		contentType: ContentTypeGIF,
-	}
-
-	ctx := context.Background()
-	err := cmd.Handle(ctx, "@user:example.com", "!room:example.com", []string{"happy"})
-	if err != nil {
-		t.Fatalf("Handle returned error: %v", err)
-	}
-
-	if mockSvc.lastText == "" {
-		t.Error("expected error message to be sent")
-	}
-
-	expected := "Meme 服务未启用"
+	expected := "Meme 命令用法"
 	if !strings.Contains(mockSvc.lastText, expected) {
 		t.Errorf("expected text containing %q, got %q", expected, mockSvc.lastText)
 	}
@@ -210,19 +176,6 @@ func TestNewMemeCommand(t *testing.T) {
 	cmd := NewMemeCommand(nil, nil, nil)
 	if cmd == nil {
 		t.Error("NewMemeCommand returned nil")
-	}
-}
-
-func TestNewTypedMemeCommand(t *testing.T) {
-	svc := createTestService()
-
-	cmd := NewTypedMemeCommand(nil, nil, svc, ContentTypeSticker)
-	if cmd == nil {
-		t.Fatal("NewTypedMemeCommand returned nil")
-	}
-
-	if cmd.contentType != ContentTypeSticker {
-		t.Errorf("expected contentType %v, got %v", ContentTypeSticker, cmd.contentType)
 	}
 }
 
