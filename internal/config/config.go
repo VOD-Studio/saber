@@ -858,33 +858,43 @@ func LoadOrDefault(path string) (*Config, error) {
 	return Load(path)
 }
 
+// DefaultMatrixConfig 返回带有合理默认值的 Matrix 配置
+func DefaultMatrixConfig() MatrixConfig {
+	return MatrixConfig{
+		Homeserver:          "https://matrix.org",
+		UserID:              "",
+		DeviceID:            "",
+		DeviceName:          "Saber Bot",
+		Password:            "",
+		AccessToken:         "",
+		EnableE2EE:          true,
+		E2EESessionPath:     "./saber.session",
+		PickleKeyPath:       "",
+		MaxConcurrentEvents: 10,
+	}
+}
+
+// DefaultMCPConfig 返回带有合理默认值的 MCP 配置
+func DefaultMCPConfig() MCPConfig {
+	return MCPConfig{
+		Enabled: true,
+		Builtin: BuiltinConfig{
+			WebSearch: WebSearchConfig{
+				Instances:      nil,
+				MaxResults:     5,
+				TimeoutSeconds: 20,
+			},
+			JSSandbox: DefaultJSSandboxConfig(),
+		},
+	}
+}
+
 // DefaultConfig 返回带有合理默认值的配置
 func DefaultConfig() *Config {
 	return &Config{
-		Matrix: MatrixConfig{
-			Homeserver:          "https://matrix.org",
-			UserID:              "",
-			DeviceID:            "",
-			DeviceName:          "Saber Bot",
-			Password:            "",
-			AccessToken:         "",
-			EnableE2EE:          true,
-			E2EESessionPath:     "./saber.session",
-			PickleKeyPath:       "",
-			MaxConcurrentEvents: 10,
-		},
-		AI: DefaultAIConfig(),
-		MCP: MCPConfig{
-			Enabled: true,
-			Builtin: BuiltinConfig{
-				WebSearch: WebSearchConfig{
-					Instances:      nil,
-					MaxResults:     5,
-					TimeoutSeconds: 20,
-				},
-				JSSandbox: DefaultJSSandboxConfig(),
-			},
-		},
+		Matrix:   DefaultMatrixConfig(),
+		AI:       DefaultAIConfig(),
+		MCP:      DefaultMCPConfig(),
 		Meme:     DefaultMemeConfig(),
 		QQ:       DefaultQQConfig(),
 		Shutdown: DefaultShutdownConfig(),
