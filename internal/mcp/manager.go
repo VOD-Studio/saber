@@ -23,16 +23,26 @@ type ServerInfo struct {
 
 // Manager 管理所有 MCP 服务器连接和工具调用。
 type Manager struct {
-	mu             sync.RWMutex
-	config         *config.MCPConfig
-	clients        map[string]*mcp.Client
-	sessions       map[string]*mcp.ClientSession
-	rateLimiter    *RateLimiter
-	enabled        bool
-	toolCache      []*mcp.Tool
+	// mu 保护所有字段的并发访问。
+	mu sync.RWMutex
+	// config MCP 的配置信息。
+	config *config.MCPConfig
+	// clients MCP 客户端缓存，键为服务器名称。
+	clients map[string]*mcp.Client
+	// sessions MCP 会话存储，键为服务器名称。
+	sessions map[string]*mcp.ClientSession
+	// rateLimiter 工具调用的速率限制器。
+	rateLimiter *RateLimiter
+	// enabled MCP 功能是否启用。
+	enabled bool
+	// toolCache 所有可用工具的列表缓存。
+	toolCache []*mcp.Tool
+	// toolCacheValid 工具缓存是否有效。
 	toolCacheValid bool
-	toolToServer   map[string]string
-	factories      map[string]MCPServerFactory
+	// toolToServer 工具名称到服务器名称的映射。
+	toolToServer map[string]string
+	// factories 不同类型服务器的工厂，键为服务器类型。
+	factories map[string]MCPServerFactory
 }
 
 // NewManager 创建新的 MCP 管理器。
