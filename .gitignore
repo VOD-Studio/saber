@@ -45,3 +45,4 @@ config.yaml
 .sisyphus/**/*
 .qoder/
 .omc/
+.worktree
