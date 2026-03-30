@@ -41,6 +41,8 @@ config.yaml.session
 config.yaml
 *.credentials.yaml
 *.db
+*.db-wal
+*.db-shm
 
 .sisyphus/**/*
 .qoder/
