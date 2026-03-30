@@ -54,6 +54,7 @@ type Adapter struct {
 	wg        sync.WaitGroup
 	started   bool
 	startMu   sync.Mutex
+	stopChan  chan struct{} // 用于通知 session goroutine 停止
 }
 
 // NewAdapter 创建一个新的 QQ 适配器实例。
@@ -165,7 +166,8 @@ func (a *Adapter) Start(ctx context.Context) error {
 	}
 
 	// 创建会话管理器
-	session := botgo.NewSessionManager()
+	// 注意: botgo SessionManager 没有 Stop 方法，session.Start() 会阻塞直到出错
+	// 因此我们使用 stopChan 来实现非阻塞关闭
 
 	// 注册事件处理器
 	intent := dto.Intent(0)
@@ -175,15 +177,34 @@ func (a *Adapter) Start(ctx context.Context) error {
 		event.GroupATMessageEventHandler(a.handler.HandleGroupATMessage),
 	)
 
+	// 初始化 stopChan
+	a.stopChan = make(chan struct{})
+
 	// 启动 WebSocket 连接
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
 		slog.Info("QQ WebSocket连接启动", "intent", intent)
 
-		// 启动 session - 参数为: wsInfo, tokenSource, intent
-		if err := session.Start(wsInfo, a.client.GetTokenSource(), &intent); err != nil {
-			slog.Error("WebSocket会话错误", "error", err)
+		// 创建 session（局部变量，因为 SDK 不提供 Stop 方法）
+		session := botgo.NewSessionManager()
+
+		// 在另一个 goroutine 中运行 session.Start
+		// 这样我们可以通过 stopChan 控制退出
+		sessionDone := make(chan error, 1)
+		go func() {
+			sessionDone <- session.Start(wsInfo, a.client.GetTokenSource(), &intent)
+		}()
+
+		// 等待 session 完成或收到停止信号
+		select {
+		case err := <-sessionDone:
+			if err != nil {
+				slog.Error("WebSocket会话错误", "error", err)
+			}
+		case <-a.stopChan:
+			slog.Info("收到停止信号，WebSocket连接将随进程退出")
+			// session.Start() 没有停止方法，进程退出时会自然终止
 		}
 	}()
 
@@ -204,11 +225,17 @@ func (a *Adapter) Stop() {
 		return
 	}
 
-	// 停止 QQ 客户端
+	// 先通知 session goroutine 停止
+	if a.stopChan != nil {
+		close(a.stopChan)
+	}
+
+	// 停止 QQ 客户端（Token 刷新）
 	if a.client != nil {
 		a.client.Stop()
 	}
 
+	// 等待 session goroutine 完成（现在它会快速退出）
 	a.wg.Wait()
 	a.started = false
 	slog.Info("QQ适配器已停止")
