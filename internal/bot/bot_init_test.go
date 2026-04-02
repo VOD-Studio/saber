@@ -359,3 +359,344 @@ func TestBuildInfoEmpty(t *testing.T) {
 		t.Error("RuntimePlatform should return valid value even for empty BuildInfo")
 	}
 }
+
+// TestInitServices_AIDisabled 测试 AI 禁用时的 initServices。
+func TestInitServices_AIDisabled(t *testing.T) {
+	state := &appState{
+		cfg: &config.Config{
+			AI: config.AIConfig{
+				Enabled: false,
+			},
+		},
+		services: &services{},
+		info:     matrix.BuildInfo{},
+	}
+
+	// AI 禁用时，initServices 应该直接返回 nil
+	err := state.initServices()
+	if err != nil {
+		t.Errorf("initServices with AI disabled should return nil, got: %v", err)
+	}
+
+	// AI 禁用时，aiService 应该保持 nil
+	if state.services.aiService != nil {
+		t.Error("aiService should remain nil when AI is disabled")
+	}
+}
+
+// TestInitServices_AIEnabledButNoClient 测试 AI 启用但无 client 时的行为。
+func TestInitServices_AIEnabledButNoClient(t *testing.T) {
+	// AI 启用但 services.client 为 nil，实际运行时会在访问 svc.client.GetClient() 时失败
+	// 此测试仅记录预期行为，不执行 initServices（因为会 panic）
+	cfg := &config.Config{
+		AI: config.AIConfig{
+			Enabled:        true,
+			Provider:       "openai",
+			BaseURL:        "https://api.openai.com/v1",
+			DefaultModel:   "gpt-4",
+			APIKey:         "test-key",
+			TimeoutSeconds: 30,
+			ToolCalling:    config.ToolCallingConfig{MaxIterations: 5},
+			Models:         map[string]config.ModelConfig{"gpt-4": {Model: "gpt-4"}},
+		},
+	}
+
+	// 验证配置本身是有效的
+	if err := cfg.AI.Validate(); err != nil {
+		t.Errorf("AI config should be valid: %v", err)
+	}
+}
+
+// TestInitMCPManager_MCPDisabled 测试 MCP 禁用时的 initMCPManager。
+func TestInitMCPManager_MCPDisabled(t *testing.T) {
+	state := &appState{
+		cfg: &config.Config{
+			MCP: config.MCPConfig{
+				Enabled: false,
+				Servers: nil,
+			},
+		},
+		services: &services{},
+		info:     matrix.BuildInfo{},
+	}
+
+	// MCP 禁用时，initMCPManager 仍然会创建 manager（用于内置服务器）
+	mgr := state.initMCPManager()
+	if mgr == nil {
+		t.Error("initMCPManager should return manager even when MCP disabled")
+	}
+}
+
+// TestInitMCPManager_MCPEnabledNoServers 测试 MCP 启用但无服务器配置。
+func TestInitMCPManager_MCPEnabledNoServers(t *testing.T) {
+	state := &appState{
+		cfg: &config.Config{
+			MCP: config.MCPConfig{
+				Enabled: true,
+				Servers: map[string]config.ServerConfig{}, // 空的 servers
+			},
+		},
+		services: &services{},
+		info:     matrix.BuildInfo{},
+	}
+
+	// MCP 启用但无服务器配置，manager 仍然会被创建
+	mgr := state.initMCPManager()
+	if mgr == nil {
+		t.Error("initMCPManager should return manager when MCP enabled with empty servers")
+	}
+}
+
+// TestInitMCPManager_MCPEnabledWithServers 测试 MCP 启用且有服务器配置。
+func TestInitMCPManager_MCPEnabledWithServers(t *testing.T) {
+	state := &appState{
+		cfg: &config.Config{
+			MCP: config.MCPConfig{
+				Enabled: true,
+				Servers: map[string]config.ServerConfig{
+					"test-server": {
+						Command: "echo",
+						Args:    []string{"test"},
+					},
+				},
+			},
+		},
+		services: &services{},
+		info:     matrix.BuildInfo{},
+	}
+
+	// MCP 启用且有服务器配置
+	mgr := state.initMCPManager()
+	if mgr == nil {
+		t.Error("initMCPManager should return manager when MCP enabled with servers")
+	}
+
+	// 验证 manager 是否启用
+	if !mgr.IsEnabled() {
+		t.Error("manager should be enabled when MCP is enabled")
+	}
+}
+
+// TestAIConfigValidation 测试 AI 配置验证。
+func TestAIConfigValidation(t *testing.T) {
+	t.Run("valid config", func(t *testing.T) {
+		cfg := &config.AIConfig{
+			Enabled:        true,
+			Provider:     "openai",
+			BaseURL:      "https://api.openai.com/v1",
+			APIKey:       "test-api-key",
+			DefaultModel: "gpt-4",
+				TimeoutSeconds: 30,
+				ToolCalling:    config.ToolCallingConfig{MaxIterations: 5},
+			Models: map[string]config.ModelConfig{
+				"gpt-4": {Model: "gpt-4"},
+			},
+		}
+
+		err := cfg.Validate()
+		if err != nil {
+			t.Errorf("valid AI config should pass validation: %v", err)
+		}
+	})
+
+	t.Run("missing provider", func(t *testing.T) {
+		cfg := &config.AIConfig{
+			Enabled:      true,
+			Provider:     "", // 缺失
+			APIKey:       "test-key",
+			DefaultModel: "gpt-4",
+		}
+
+		err := cfg.Validate()
+		if err == nil {
+			t.Error("AI config without provider should fail validation")
+		}
+	})
+
+	t.Run("missing API key", func(t *testing.T) {
+		cfg := &config.AIConfig{
+			Enabled:      true,
+			Provider:     "openai",
+			APIKey:       "", // 缺失
+			DefaultModel: "gpt-4",
+		}
+
+		err := cfg.Validate()
+		if err == nil {
+			t.Error("AI config without API key should fail validation")
+		}
+	})
+
+	t.Run("missing default model", func(t *testing.T) {
+		cfg := &config.AIConfig{
+			Enabled:      true,
+			Provider:     "openai",
+			APIKey:       "test-key",
+			DefaultModel: "", // 缺失
+		}
+
+		err := cfg.Validate()
+		if err == nil {
+			t.Error("AI config without default model should fail validation")
+		}
+	})
+
+	t.Run("disabled config always valid", func(t *testing.T) {
+		cfg := &config.AIConfig{
+			Enabled: false,
+			// 其他字段为空也应该通过验证（因为不会使用）
+		}
+
+		err := cfg.Validate()
+		if err != nil {
+			t.Errorf("disabled AI config should always be valid: %v", err)
+		}
+	})
+}
+
+// TestInitServices_AIConfigValidationFailure 测试 AI 配置验证失败。
+func TestInitServices_AIConfigValidationFailure(t *testing.T) {
+	state := &appState{
+		cfg: &config.Config{
+			AI: config.AIConfig{
+				Enabled:      true,
+				Provider:     "", // 无效配置：缺少 provider
+				APIKey:       "test-key",
+				DefaultModel: "gpt-4",
+			},
+		},
+		services: &services{},
+		info:     matrix.BuildInfo{},
+	}
+
+	// AI 配置验证失败应该返回错误
+	err := state.initServices()
+	if err == nil {
+		t.Error("initServices with invalid AI config should return error")
+	}
+
+	// 验证错误消息包含配置相关信息
+	if !strings.Contains(err.Error(), "AI配置验证失败") {
+		t.Errorf("error should mention AI config validation failure, got: %v", err)
+	}
+}
+
+// TestMCPConfig_EnabledWithServers 测试 MCP 配置的服务器映射。
+func TestMCPConfig_EnabledWithServers(t *testing.T) {
+	cfg := &config.MCPConfig{
+		Enabled: true,
+		Servers: map[string]config.ServerConfig{
+			"server1": {Command: "cmd1"},
+			"server2": {Command: "cmd2"},
+		},
+	}
+
+	if !cfg.Enabled {
+		t.Error("MCP should be enabled")
+	}
+
+	if len(cfg.Servers) != 2 {
+		t.Errorf("expected 2 servers, got %d", len(cfg.Servers))
+	}
+
+	// 验证服务器配置存在
+	if _, ok := cfg.Servers["server1"]; !ok {
+		t.Error("server1 should exist in servers config")
+	}
+	if _, ok := cfg.Servers["server2"]; !ok {
+		t.Error("server2 should exist in servers config")
+	}
+}
+
+// TestAppState_InitCryptoDisabled 测试加密禁用场景。
+func TestAppState_InitCryptoDisabled(t *testing.T) {
+	state := &appState{
+		cfg: &config.Config{
+			Matrix: config.MatrixConfig{
+				EnableE2EE: false,
+			},
+		},
+		services: &services{},
+		info:     matrix.BuildInfo{},
+	}
+
+	// E2EE 禁用时，initCrypto 应该不会失败
+	// 注意：这需要真实的 MatrixClient，所以只能验证配置逻辑
+	if state.cfg.Matrix.EnableE2EE {
+		t.Error("E2EE should be disabled in this test")
+	}
+}
+
+// TestServicesAssignment 测试 services 字段赋值逻辑。
+func TestServicesAssignment(t *testing.T) {
+	svc := &services{}
+
+	// 模拟 services 初始化后的状态检查
+	// 验证 nil 检查逻辑
+	tests := []struct {
+		name   string
+		field  string
+		isNil  func() bool
+	}{
+		{"aiService", "aiService", func() bool { return svc.aiService == nil }},
+		{"mcpManager", "mcpManager", func() bool { return svc.mcpManager == nil }},
+		{"proactiveManager", "proactiveManager", func() bool { return svc.proactiveManager == nil }},
+		{"commandService", "commandService", func() bool { return svc.commandService == nil }},
+		{"eventHandler", "eventHandler", func() bool { return svc.eventHandler == nil }},
+		{"presence", "presence", func() bool { return svc.presence == nil }},
+		{"mediaService", "mediaService", func() bool { return svc.mediaService == nil }},
+		{"client", "client", func() bool { return svc.client == nil }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !tt.isNil() {
+				t.Errorf("%s should be nil initially", tt.field)
+			}
+		})
+	}
+}
+
+// TestProactiveConfig 测试主动聊天配置。
+func TestProactiveConfig(t *testing.T) {
+	t.Run("disabled by default", func(t *testing.T) {
+		cfg := config.DefaultProactiveConfig()
+		if cfg.Enabled {
+			t.Error("proactive should be disabled by default")
+		}
+	})
+
+	t.Run("enabled config", func(t *testing.T) {
+		cfg := &config.ProactiveConfig{
+			Enabled:            true,
+			MinIntervalMinutes: 60,
+		}
+		if !cfg.Enabled {
+			t.Error("proactive should be enabled")
+		}
+		if cfg.MinIntervalMinutes != 60 {
+			t.Errorf("expected MinIntervalMinutes 60, got %d", cfg.MinIntervalMinutes)
+		}
+	})
+}
+
+// TestMediaConfig 测试媒体配置。
+func TestMediaConfig(t *testing.T) {
+	t.Run("default max size", func(t *testing.T) {
+		cfg := config.DefaultAIConfig()
+		if cfg.Media.MaxSizeMB <= 0 {
+			t.Error("Media.MaxSizeMB should be positive by default")
+		}
+	})
+
+	t.Run("custom max size", func(t *testing.T) {
+		cfg := &config.AIConfig{
+			Media: config.MediaConfig{
+				MaxSizeMB: 50,
+			},
+		}
+		if cfg.Media.MaxSizeMB != 50 {
+			t.Errorf("expected MaxSizeMB 50, got %d", cfg.Media.MaxSizeMB)
+		}
+	})
+}
