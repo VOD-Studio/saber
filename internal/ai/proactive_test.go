@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"maunium.net/go/mautrix/id"
+
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/matrix"
 )
@@ -985,5 +987,111 @@ func TestGenerateWelcomeMessage_IsDirect(t *testing.T) {
 				t.Errorf("generateWelcomeMessage() = %q, should not contain %q", msg, tt.wantNotContains)
 			}
 		})
+	}
+}
+
+// TestRateLimiter_GetDailyLimit 测试 GetDailyLimit 方法。
+func TestRateLimiter_GetDailyLimit(t *testing.T) {
+	cfg := &config.ProactiveConfig{
+		Enabled:            true,
+		MaxMessagesPerDay:  10,
+		MinIntervalMinutes: 30,
+	}
+	stateTracker := NewStateTracker()
+	limiter, err := NewRateLimiter(cfg, stateTracker)
+	if err != nil {
+		t.Fatalf("NewRateLimiter() error = %v", err)
+	}
+
+	if limit := limiter.GetDailyLimit(); limit != 10 {
+		t.Errorf("GetDailyLimit() = %d, want 10", limit)
+	}
+}
+
+// TestRateLimiter_GetMinInterval 测试 GetMinInterval 方法。
+func TestRateLimiter_GetMinInterval(t *testing.T) {
+	cfg := &config.ProactiveConfig{
+		Enabled:            true,
+		MaxMessagesPerDay:  10,
+		MinIntervalMinutes: 45,
+	}
+	stateTracker := NewStateTracker()
+	limiter, err := NewRateLimiter(cfg, stateTracker)
+	if err != nil {
+		t.Fatalf("NewRateLimiter() error = %v", err)
+	}
+
+	interval := limiter.GetMinInterval()
+	want := 45 * time.Minute
+	if interval != want {
+		t.Errorf("GetMinInterval() = %v, want %v", interval, want)
+	}
+}
+
+// TestRateLimiter_GetRemainingMessages 测试 GetRemainingMessages 方法。
+func TestRateLimiter_GetRemainingMessages(t *testing.T) {
+	cfg := &config.ProactiveConfig{
+		Enabled:            true,
+		MaxMessagesPerDay:  5,
+		MinIntervalMinutes: 30,
+	}
+	stateTracker := NewStateTracker()
+	limiter, err := NewRateLimiter(cfg, stateTracker)
+	if err != nil {
+		t.Fatalf("NewRateLimiter() error = %v", err)
+	}
+
+	roomID := id.RoomID("!room:example.com")
+
+	// 无消息时，返回最大值
+	if remaining := limiter.GetRemainingMessages(roomID); remaining != 5 {
+		t.Errorf("GetRemainingMessages() = %d, want 5", remaining)
+	}
+
+	// 记录一些消息
+	stateTracker.RecordProactiveMessage(roomID)
+	stateTracker.RecordProactiveMessage(roomID)
+
+	if remaining := limiter.GetRemainingMessages(roomID); remaining != 3 {
+		t.Errorf("GetRemainingMessages() = %d, want 3", remaining)
+	}
+
+	// 超过限制
+	for i := 0; i < 5; i++ {
+		stateTracker.RecordProactiveMessage(roomID)
+	}
+
+	if remaining := limiter.GetRemainingMessages(roomID); remaining != 0 {
+		t.Errorf("GetRemainingMessages() = %d, want 0", remaining)
+	}
+}
+
+// TestRateLimiter_TimeUntilNextAllowed 测试 TimeUntilNextAllowed 方法。
+func TestRateLimiter_TimeUntilNextAllowed(t *testing.T) {
+	cfg := &config.ProactiveConfig{
+		Enabled:            true,
+		MaxMessagesPerDay:  5,
+		MinIntervalMinutes: 30,
+	}
+	stateTracker := NewStateTracker()
+	limiter, err := NewRateLimiter(cfg, stateTracker)
+	if err != nil {
+		t.Fatalf("NewRateLimiter() error = %v", err)
+	}
+
+	roomID := id.RoomID("!room:example.com")
+
+	// 无消息时，可以立即发送
+	if wait := limiter.TimeUntilNextAllowed(roomID); wait != 0 {
+		t.Errorf("TimeUntilNextAllowed() = %v, want 0", wait)
+	}
+
+	// 记录消息
+	stateTracker.RecordProactiveMessage(roomID)
+
+	// 应该需要等待
+	wait := limiter.TimeUntilNextAllowed(roomID)
+	if wait <= 0 || wait > 30*time.Minute {
+		t.Errorf("TimeUntilNextAllowed() = %v, want between 0 and 30m", wait)
 	}
 }
