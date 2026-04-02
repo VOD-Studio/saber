@@ -955,3 +955,129 @@ func containsHelper(s, substr string) bool {
 	}
 	return false
 }
+
+// TestAIConfig_MigrateFromOldFormat 测试旧格式配置迁移。
+func TestAIConfig_MigrateFromOldFormat(t *testing.T) {
+	// 创建旧格式配置
+	cfg := &AIConfig{
+		Enabled:      true,
+		Provider:     "openai",
+		BaseURL:      "https://api.openai.com/v1",
+		APIKey:       "test-key",
+		DefaultModel: "gpt-4",
+		Models: map[string]ModelConfig{
+			"gpt-4": {Model: "gpt-4", Temperature: 0.7},
+		},
+	}
+
+	// 触发迁移
+	cfg.migrateFromOldFormat()
+
+	// 验证迁移结果
+	if len(cfg.Providers) != 1 {
+		t.Errorf("Expected 1 provider, got %d", len(cfg.Providers))
+	}
+
+	provider, ok := cfg.Providers["openai"]
+	if !ok {
+		t.Error("Expected 'openai' provider")
+	}
+
+	if provider.BaseURL != "https://api.openai.com/v1" {
+		t.Errorf("Provider BaseURL = %s, want 'https://api.openai.com/v1'", provider.BaseURL)
+	}
+
+	// DefaultModel 应该被转换为完全限定格式
+	if cfg.DefaultModel != "openai.gpt-4" {
+		t.Errorf("DefaultModel = %s, want 'openai.gpt-4'", cfg.DefaultModel)
+	}
+}
+
+// TestAIConfig_GetModelConfig_FullyQualified 测试完全限定模型名查找。
+func TestAIConfig_GetModelConfig_FullyQualified(t *testing.T) {
+	cfg := &AIConfig{
+		Enabled:      true,
+		DefaultModel: "openai.gpt-4",
+		Providers: map[string]ProviderConfig{
+			"openai": {
+				Type:    "openai",
+				BaseURL: "https://api.openai.com/v1",
+				APIKey:  "test-key",
+				Models: map[string]ModelConfig{
+					"gpt-4": {Model: "gpt-4", Temperature: 0.7},
+				},
+			},
+		},
+	}
+
+	modelCfg, found := cfg.GetModelConfig("openai.gpt-4")
+	if !found {
+		t.Error("Expected to find model with fully qualified name")
+	}
+
+	if modelCfg.Model != "gpt-4" {
+		t.Errorf("Model = %s, want 'gpt-4'", modelCfg.Model)
+	}
+
+	if modelCfg.Provider != "openai" {
+		t.Errorf("Provider = %s, want 'openai'", modelCfg.Provider)
+	}
+}
+
+// TestAIConfig_GetModelConfig_Alias 测试别名查找。
+func TestAIConfig_GetModelConfig_Alias(t *testing.T) {
+	cfg := &AIConfig{
+		Enabled:      true,
+		Provider:     "openai",
+		DefaultModel: "gpt-4",
+		Providers: map[string]ProviderConfig{
+			"openai": {
+				Type:    "openai",
+				BaseURL: "https://api.openai.com/v1",
+				APIKey:  "test-key",
+				Models:  map[string]ModelConfig{},
+			},
+		},
+		Models: map[string]ModelConfig{
+			"assistant": {Model: "gpt-4o", Provider: "openai"},
+		},
+	}
+
+	modelCfg, found := cfg.GetModelConfig("assistant")
+	if !found {
+		t.Error("Expected to find model by alias")
+	}
+
+	if modelCfg.Model != "gpt-4o" {
+		t.Errorf("Model = %s, want 'gpt-4o'", modelCfg.Model)
+	}
+}
+
+// TestAIConfig_GetModelConfig_Fallback 测试回退到全局配置。
+func TestAIConfig_GetModelConfig_Fallback(t *testing.T) {
+	cfg := &AIConfig{
+		Enabled:      true,
+		Provider:     "openai",
+		BaseURL:      "https://api.openai.com/v1",
+		APIKey:       "test-key",
+		DefaultModel: "gpt-4",
+		MaxTokens:    1000,
+		Temperature:  0.5,
+		Providers:    map[string]ProviderConfig{},
+		Models:       map[string]ModelConfig{},
+	}
+
+	modelCfg, found := cfg.GetModelConfig("unknown-model")
+	if found {
+		t.Error("Expected not to find unknown model")
+	}
+
+	// 即使未找到，也应该返回回退配置
+	if modelCfg.Model != "unknown-model" {
+		t.Errorf("Model = %s, want 'unknown-model'", modelCfg.Model)
+	}
+
+	if modelCfg.Provider != "openai" {
+		t.Errorf("Provider = %s, want 'openai'", modelCfg.Provider)
+	}
+}
