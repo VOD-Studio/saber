@@ -75,6 +75,46 @@ func (m *mockCommandHandler) Handle(ctx context.Context, userID id.UserID, roomI
 	return nil
 }
 
+// TestSetProactiveManager 测试 SetProactiveManager 方法。
+func TestSetProactiveManager(t *testing.T) {
+	botUserID := id.UserID("@saber:example.com")
+	homeserverURL, _ := url.Parse("https://example.com")
+	client := &mautrix.Client{
+		UserID:        botUserID,
+		HomeserverURL: homeserverURL,
+	}
+
+	service := NewCommandService(client, botUserID, nil)
+	handler := NewEventHandler(service, 10)
+
+	// 测试设置 nil 不会 panic
+	handler.SetProactiveManager(nil)
+
+	// 测试设置 mock manager
+	mockManager := &mockProactiveManager{}
+	handler.SetProactiveManager(mockManager)
+
+	// 验证设置成功（通过检查 handler.proactiveManager 不为 nil）
+	if handler.proactiveManager == nil {
+		t.Error("proactiveManager should not be nil after setting")
+	}
+}
+
+// mockProactiveManager 是用于测试的主动聊天管理器 mock。
+type mockProactiveManager struct {
+	newMemberCalled    bool
+	recordMessageCalled bool
+}
+
+func (m *mockProactiveManager) OnNewMember(ctx context.Context, roomID id.RoomID, userID id.UserID) error {
+	m.newMemberCalled = true
+	return nil
+}
+
+func (m *mockProactiveManager) RecordUserMessage(roomID id.RoomID) {
+	m.recordMessageCalled = true
+}
+
 // TestOnMember 测试 OnMember 方法的各种场景。
 //
 // 该测试覆盖以下情况：
