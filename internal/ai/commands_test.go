@@ -5,13 +5,32 @@ package ai
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/id"
 
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/mcp"
+	"rua.plus/saber/internal/matrix"
 )
+
+// createMockMatrixServerForCommands 创建一个模拟 Matrix API 的测试服务器。
+func createMockMatrixServerForCommands() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"event_id":"$test_event_id:example.com"}`))
+	}))
+}
+
+// createTestMatrixClientForCommands 创建一个测试用的 Matrix 客户端。
+func createTestMatrixClientForCommands(server *httptest.Server) *mautrix.Client {
+	client, _ := mautrix.NewClient(server.URL, id.UserID("@test:example.com"), "test_token")
+	return client
+}
 
 // TestAICommand_Handle 测试 AICommand 的 Handle 方法。
 func TestAICommand_Handle(t *testing.T) {
@@ -238,4 +257,171 @@ type testSubcommand struct{}
 
 func (t *testSubcommand) Handle(_ context.Context, _ id.UserID, _ id.RoomID, _ []string) error {
 	return nil
+}
+
+// TestClearContextCommand_Handle 测试 ClearContextCommand.Handle 方法。
+func TestClearContextCommand_Handle(t *testing.T) {
+	t.Run("context manager disabled", func(t *testing.T) {
+		server := createMockMatrixServerForCommands()
+		defer server.Close()
+
+		client := createTestMatrixClientForCommands(server)
+		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+		cfg := createTestMultiProviderAIConfig()
+		cfg.Context.Enabled = false // 禁用上下文管理
+
+		service, err := NewService(cfg, matrixSvc, nil, nil)
+		if err != nil {
+			t.Fatalf("NewService failed: %v", err)
+		}
+
+		cmd := NewClearContextCommand(service)
+
+		ctx := context.Background()
+		userID := id.UserID("@user:example.com")
+		roomID := id.RoomID("!room:example.com")
+
+		err = cmd.Handle(ctx, userID, roomID, nil)
+		if err != nil {
+			t.Errorf("Handle error: %v", err)
+		}
+	})
+
+	t.Run("context manager enabled", func(t *testing.T) {
+		server := createMockMatrixServerForCommands()
+		defer server.Close()
+
+		client := createTestMatrixClientForCommands(server)
+		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+		cfg := createTestMultiProviderAIConfig()
+		cfg.Context.Enabled = true
+
+		service, err := NewService(cfg, matrixSvc, nil, nil)
+		if err != nil {
+			t.Fatalf("NewService failed: %v", err)
+		}
+
+		// 添加一些上下文
+		service.contextManager.AddMessage(id.RoomID("!room:example.com"), RoleUser, "hello", id.UserID("@user:example.com"))
+
+		cmd := NewClearContextCommand(service)
+
+		ctx := context.Background()
+		userID := id.UserID("@user:example.com")
+		roomID := id.RoomID("!room:example.com")
+
+		err = cmd.Handle(ctx, userID, roomID, nil)
+		if err != nil {
+			t.Errorf("Handle error: %v", err)
+		}
+
+		// 验证上下文被清除
+		msgCount, _ := service.contextManager.GetContextSize(roomID)
+		if msgCount != 0 {
+			t.Errorf("context should be cleared, got %d messages", msgCount)
+		}
+	})
+}
+
+// TestContextInfoCommand_Handle 测试 ContextInfoCommand.Handle 方法。
+func TestContextInfoCommand_Handle(t *testing.T) {
+	t.Run("context manager disabled", func(t *testing.T) {
+		server := createMockMatrixServerForCommands()
+		defer server.Close()
+
+		client := createTestMatrixClientForCommands(server)
+		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+		cfg := createTestMultiProviderAIConfig()
+		cfg.Context.Enabled = false
+
+		service, err := NewService(cfg, matrixSvc, nil, nil)
+		if err != nil {
+			t.Fatalf("NewService failed: %v", err)
+		}
+
+		cmd := NewContextInfoCommand(service)
+
+		ctx := context.Background()
+		userID := id.UserID("@user:example.com")
+		roomID := id.RoomID("!room:example.com")
+
+		err = cmd.Handle(ctx, userID, roomID, nil)
+		if err != nil {
+			t.Errorf("Handle error: %v", err)
+		}
+	})
+
+	t.Run("context manager enabled with messages", func(t *testing.T) {
+		server := createMockMatrixServerForCommands()
+		defer server.Close()
+
+		client := createTestMatrixClientForCommands(server)
+		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+		cfg := createTestMultiProviderAIConfig()
+		cfg.Context.Enabled = true
+
+		service, err := NewService(cfg, matrixSvc, nil, nil)
+		if err != nil {
+			t.Fatalf("NewService failed: %v", err)
+		}
+
+		roomID := id.RoomID("!room:example.com")
+		userID := id.UserID("@user:example.com")
+
+		// 添加一些上下文
+		service.contextManager.AddMessage(roomID, RoleUser, "hello", userID)
+		service.contextManager.AddMessage(roomID, RoleAssistant, "hi there", userID)
+
+		cmd := NewContextInfoCommand(service)
+
+		ctx := context.Background()
+
+		err = cmd.Handle(ctx, userID, roomID, nil)
+		if err != nil {
+			t.Errorf("Handle error: %v", err)
+		}
+	})
+}
+
+// TestAICommandRouter_Handle_WithSubcommand 测试 AICommandRouter.Handle 带子命令。
+func TestAICommandRouter_Handle_WithSubcommand(t *testing.T) {
+	t.Run("router with subcommands", func(t *testing.T) {
+		server := createMockMatrixServerForCommands()
+		defer server.Close()
+
+		client := createTestMatrixClientForCommands(server)
+		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+		cfg := createTestMultiProviderAIConfig()
+		service, err := NewService(cfg, matrixSvc, nil, nil)
+		if err != nil {
+			t.Fatalf("NewService failed: %v", err)
+		}
+
+		router := NewAICommandRouter(service)
+
+		// 注册子命令
+		router.RegisterSubcommand("clear", NewClearContextCommand(service))
+		router.RegisterSubcommand("info", NewContextInfoCommand(service))
+
+		ctx := context.Background()
+		userID := id.UserID("@user:example.com")
+		roomID := id.RoomID("!room:example.com")
+
+		// 测试 clear 子命令
+		err = router.Handle(ctx, userID, roomID, []string{"clear"})
+		if err != nil {
+			t.Errorf("Handle clear error: %v", err)
+		}
+
+		// 测试 info 子命令
+		err = router.Handle(ctx, userID, roomID, []string{"info"})
+		if err != nil {
+			t.Errorf("Handle info error: %v", err)
+		}
+	})
 }
