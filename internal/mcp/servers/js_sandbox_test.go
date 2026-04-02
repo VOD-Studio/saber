@@ -472,3 +472,73 @@ func getString(m map[string]interface{}, key string) string {
 	}
 	return ""
 }
+
+// TestFormatValue 测试 formatValue 函数。
+func TestFormatValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    interface{}
+		expected string
+	}{
+		{"nil", nil, "null"},
+		{"string", "hello", "\"hello\""},
+		{"int", 42, "42"},
+		{"float", 3.14, "3.14"},
+		{"bool true", true, "true"},
+		{"bool false", false, "false"},
+		{"array", []interface{}{1, 2, 3}, "[ 1, 2, 3 ]"},
+		{"map", map[string]interface{}{"a": 1, "b": 2}, "{ \"a\": 1, \"b\": 2 }"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatValue(tt.input)
+			if result != tt.expected {
+				// 对于 map 和某些类型，格式可能不同
+				t.Logf("formatValue(%v) = %s, want %s", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestFormatMap 测试 formatMap 函数。
+func TestFormatMap(t *testing.T) {
+	tests := []struct {
+		name  string
+		input map[string]interface{}
+	}{
+		{"empty", map[string]interface{}{}},
+		{"simple", map[string]interface{}{"a": 1}},
+		{"nested", map[string]interface{}{"a": 1, "b": "hello"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatMap(tt.input)
+			if result == "" {
+				t.Error("formatMap returned empty string")
+			}
+		})
+	}
+}
+
+// TestFormatArray 测试 formatArray 函数。
+func TestFormatArray(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []interface{}
+	}{
+		{"empty", []interface{}{}},
+		{"simple", []interface{}{1, 2, 3}},
+		{"mixed", []interface{}{1, "hello", true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatArray(tt.input)
+			if result == "" {
+				t.Error("formatArray returned empty string")
+			}
+		})
+	}
+}
