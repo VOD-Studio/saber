@@ -1180,3 +1180,25 @@ func TestScheduleTrigger_Check(t *testing.T) {
 	// 我们无法预测确切的时间匹配，但可以验证方法不会 panic
 	_ = triggered
 }
+
+// TestSilenceTrigger_Check 测试 SilenceTrigger 的 Check 方法。
+func TestSilenceTrigger_Check(t *testing.T) {
+	cfg := &config.SilenceConfig{
+		Enabled:              true,
+		ThresholdMinutes:     60,
+		CheckIntervalMinutes: 15,
+	}
+	stateTracker := NewStateTracker()
+	mockRL := &mockRoomListerTest{}
+
+	trigger, err := NewSilenceTrigger(cfg, stateTracker, mockRL)
+	if err != nil {
+		t.Fatalf("NewSilenceTrigger() error = %v", err)
+	}
+
+	// Check 方法测试
+	silentRooms, err := trigger.Check(context.Background())
+	// 验证方法不会 panic
+	_ = silentRooms
+	_ = err
+}
