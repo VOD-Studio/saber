@@ -272,3 +272,23 @@ func TestAICommand_handleChat_RequiresRealService(t *testing.T) {
 	// 这里标记为需要进一步基础设施支持
 	t.Skip("handleChat requires *ai.SimpleService concrete type - needs integration test setup")
 }
+
+// TestAICommand_handleChat_EmptyMessage 测试空消息时的处理。
+func TestAICommand_handleChat_EmptyMessage(t *testing.T) {
+	contextMgr := NewContextManager(config.ContextConfig{})
+	mockService := &mockSimpleService{}
+	cmd := &AICommand{
+		contextMgr:    contextMgr,
+		modelRegistry: mockService.GetModelRegistry(),
+	}
+
+	mock := &MockCommandSender{}
+	err := cmd.Handle(context.Background(), "user1", "", []string{}, mock)
+	if err != nil {
+		t.Errorf("Handle() error = %v", err)
+	}
+	// 空参数应该显示帮助信息
+	if mock.LastMessage == "" {
+		t.Error("Expected help message for empty args")
+	}
+}
