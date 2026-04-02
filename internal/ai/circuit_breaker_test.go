@@ -264,6 +264,52 @@ func TestCircuitBreaker_StateTransitions(t *testing.T) {
 	}
 }
 
+// TestCircuitBreaker_State_OpenToHalfOpen 测试 State 方法从 Open 到 HalfOpen 的转换。
+func TestCircuitBreaker_State_OpenToHalfOpen(t *testing.T) {
+	cb := NewCircuitBreaker(2, 50*time.Millisecond)
+
+	// 触发熔断
+	cb.RecordFailure()
+	cb.RecordFailure()
+
+	// 确认 Open 状态
+	if state := cb.State(); state != CircuitStateOpen {
+		t.Fatalf("state = %v, want %v", state, CircuitStateOpen)
+	}
+
+	// 等待恢复超时
+	time.Sleep(60 * time.Millisecond)
+
+	// State() 应该返回 HalfOpen（并执行状态转换）
+	if state := cb.State(); state != CircuitStateHalfOpen {
+		t.Errorf("state after timeout = %v, want %v", state, CircuitStateHalfOpen)
+	}
+
+	// 再次调用 State() 应该保持 HalfOpen
+	if state := cb.State(); state != CircuitStateHalfOpen {
+		t.Errorf("state should remain HalfOpen = %v, want %v", state, CircuitStateHalfOpen)
+	}
+}
+
+// TestCircuitBreaker_State_HalfOpenToOpen 测试从 HalfOpen 回到 Open。
+func TestCircuitBreaker_State_HalfOpenToOpen(t *testing.T) {
+	cb := NewCircuitBreaker(2, 50*time.Millisecond)
+
+	// 触发熔断
+	cb.RecordFailure()
+	cb.RecordFailure()
+
+	// 等待恢复超时进入 HalfOpen
+	time.Sleep(60 * time.Millisecond)
+
+	// 探测请求失败，回到 Open
+	cb.RecordFailure()
+
+	if state := cb.State(); state != CircuitStateOpen {
+		t.Errorf("state after probe failure = %v, want %v", state, CircuitStateOpen)
+	}
+}
+
 // TestCircuitBreaker_Concurrency 测试并发安全性。
 func TestCircuitBreaker_Concurrency(t *testing.T) {
 	cb := NewCircuitBreaker(100, 1*time.Second)
