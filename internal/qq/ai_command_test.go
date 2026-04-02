@@ -197,3 +197,78 @@ func TestAICommand_NewAICommand(t *testing.T) {
 		modelRegistry: (&mockSimpleService{}).GetModelRegistry(),
 	}
 }
+
+// TestNewAICommand_RealService 测试创建真实的 AICommand。
+func TestNewAICommand_RealService(t *testing.T) {
+	cfg := &config.AIConfig{
+		Enabled:        true,
+		Provider:       "openai",
+		DefaultModel:   "test.default-model",
+		TimeoutSeconds: 30,
+		ToolCalling: config.ToolCallingConfig{
+			MaxIterations: 5,
+		},
+		Providers: map[string]config.ProviderConfig{
+			"test": {
+				Type:    "openai",
+				BaseURL: "https://api.openai.com/v1",
+				Models: map[string]config.ModelConfig{
+					"default-model": {Model: "test-default-model"},
+				},
+			},
+		},
+	}
+
+	simpleService, err := ai.NewSimpleService(cfg)
+	if err != nil {
+		t.Fatalf("NewSimpleService error: %v", err)
+	}
+
+	contextMgr := NewContextManager(config.ContextConfig{})
+	cmd := NewAICommand(simpleService, contextMgr)
+
+	if cmd == nil {
+		t.Error("NewAICommand should not return nil")
+	}
+	if cmd.aiService == nil {
+		t.Error("aiService should be set")
+	}
+	if cmd.contextMgr == nil {
+		t.Error("contextMgr should be set")
+	}
+	if cmd.modelRegistry == nil {
+		t.Error("modelRegistry should be set")
+	}
+}
+
+// TestAICommand_Handle_Switch_MissingModelID 测试缺少模型 ID 的切换。
+func TestAICommand_Handle_Switch_MissingModelID(t *testing.T) {
+	contextMgr := NewContextManager(config.ContextConfig{})
+	mockService := &mockSimpleService{}
+
+	cmd := &AICommand{
+		contextMgr:    contextMgr,
+		modelRegistry: mockService.GetModelRegistry(),
+	}
+
+	mock := &MockCommandSender{}
+	err := cmd.Handle(context.Background(), "user1", "", []string{"switch"}, mock)
+	if err != nil {
+		t.Errorf("Handle() error = %v", err)
+	}
+	if mock.LastMessage != "用法: !ai switch <模型ID>" {
+		t.Errorf("LastMessage = %q, want %q", mock.LastMessage, "用法: !ai switch <模型ID>")
+	}
+}
+
+// TestAICommand_handleChat 测试 handleChat 相关逻辑。
+// 注意: handleChat 需要 *ai.SimpleService 具体类型，无法使用 mock。
+// 完整的聊天测试需要真实的 AI 服务或使用 httptest 模拟 API。
+func TestAICommand_handleChat_RequiresRealService(t *testing.T) {
+	// 由于 AICommand.aiService 是 *ai.SimpleService 具体类型而非接口，
+	// 无法直接注入 mock。handleChat 的测试需要:
+	// 1. 创建真实的 ai.SimpleService
+	// 2. 使用 httptest.Server 模拟 OpenAI API
+	// 这里标记为需要进一步基础设施支持
+	t.Skip("handleChat requires *ai.SimpleService concrete type - needs integration test setup")
+}
