@@ -457,3 +457,30 @@ func TestService_WithNilMCPManager(t *testing.T) {
 		t.Fatal("service is nil")
 	}
 }
+
+// TestService_SetPersonaService 测试设置人格服务。
+func TestService_SetPersonaService(t *testing.T) {
+	cfg := createTestAIConfig()
+	service, err := NewService(cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 创建 mock PersonaService
+	mockPersona := &testMockPersonaService{}
+
+	// 设置人格服务
+	service.SetPersonaService(mockPersona)
+
+	// 验证设置成功（通过内部字段检查）
+	if service.personaService == nil {
+		t.Error("personaService should not be nil after SetPersonaService")
+	}
+}
+
+// testMockPersonaService 是用于测试的 mock PersonaService。
+type testMockPersonaService struct{}
+
+func (m *testMockPersonaService) GetSystemPrompt(roomID id.RoomID, basePrompt string) string {
+	return "test system prompt"
+}
