@@ -1251,3 +1251,77 @@ func TestBuildDecisionPrompt_IsDirect(t *testing.T) {
 		})
 	}
 }
+
+// TestExtractJSONFromResponse 测试从 AI 响应中提取 JSON。
+func TestExtractJSONFromResponse(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		want     string
+	}{
+		{
+			name:     "纯 JSON 无代码块",
+			response: `{"should_speak": true, "reason": "测试"}`,
+			want:     `{"should_speak": true, "reason": "测试"}`,
+		},
+		{
+			name:     "markdown 代码块带 json 标记",
+			response: "```json\n{\"should_speak\": false}\n```",
+			want:     `{"should_speak": false}`,
+		},
+		{
+			name:     "markdown 代码块不带语言标记",
+			response: "```\n{\"should_speak\": true}\n```",
+			want:     `{"should_speak": true}`,
+		},
+		{
+			name:     "代码块前后有其他文本",
+			response: "这是分析结果：\n```json\n{\"should_speak\": true}\n```\n以上是结论。",
+			want:     `{"should_speak": true}`,
+		},
+		{
+			name:     "多个代码块 - 提取第一个",
+			response: "```json\n{\"first\": 1}\n```\n```json\n{\"second\": 2}\n```",
+			want:     `{"first": 1}`,
+		},
+		{
+			name:     "空响应",
+			response: "",
+			want:     "",
+		},
+		{
+			name:     "仅空格的响应",
+			response: "   ",
+			want:     "",
+		},
+		{
+			name:     "代码块无结束标记",
+			response: "```json\n{\"incomplete\": true}",
+			want:     "```json\n{\"incomplete\": true}", // 无结束标记，返回原始
+		},
+		{
+			name:     "带换行的 JSON",
+			response: "```json\n{\n  \"should_speak\": true,\n  \"reason\": \"测试\"\n}\n```",
+			want:     "{\n  \"should_speak\": true,\n  \"reason\": \"测试\"\n}",
+		},
+		{
+			name:     "纯文本无 JSON",
+			response: "这是一段纯文本说明",
+			want:     "这是一段纯文本说明",
+		},
+		{
+			name:     "JSON 前有空行",
+			response: "```json\n\n{\"should_speak\": true}\n```",
+			want:     `{"should_speak": true}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractJSONFromResponse(tt.response)
+			if got != tt.want {
+				t.Errorf("extractJSONFromResponse(%q) = %q, want %q", tt.response, got, tt.want)
+			}
+		})
+	}
+}
