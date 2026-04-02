@@ -2383,3 +2383,127 @@ func TestCommandService_RegisterCommand(t *testing.T) {
 		t.Errorf("expected empty description, got %s", info.Description)
 	}
 }
+
+// TestCommandService_StartTyping 测试 CommandService 的 StartTyping 方法。
+func TestCommandService_StartTyping(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		roomID      id.RoomID
+		timeout     int
+		responseErr error
+		expectErr   bool
+	}{
+		{
+			name:        "默认超时",
+			roomID:      id.RoomID("!room:example.com"),
+			timeout:     0, // 使用默认值 30000
+			responseErr: nil,
+			expectErr:   false,
+		},
+		{
+			name:        "自定义超时",
+			roomID:      id.RoomID("!room:example.com"),
+			timeout:     60000,
+			responseErr: nil,
+			expectErr:   false,
+		},
+		{
+			name:        "API 错误",
+			roomID:      id.RoomID("!room:example.com"),
+			timeout:     30000,
+			responseErr: errors.New("forbidden"),
+			expectErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			roundTripper := &mockRoundTripper{
+				responseErr: tt.responseErr,
+				responseBody: []byte(`{}`),
+			}
+
+			homeserverURL, _ := url.Parse("https://example.com")
+			httpClient := &http.Client{Transport: roundTripper}
+			client := &mautrix.Client{
+				UserID:        id.UserID("@saber:example.com"),
+				Client:        httpClient,
+				HomeserverURL: homeserverURL,
+			}
+
+			service := NewCommandService(client, id.UserID("@saber:example.com"), nil)
+
+			err := service.StartTyping(context.Background(), tt.roomID, tt.timeout)
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("期望返回错误，但返回 nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("StartTyping() 返回意外错误: %v", err)
+			}
+		})
+	}
+}
+
+// TestCommandService_StopTyping 测试 CommandService 的 StopTyping 方法。
+func TestCommandService_StopTyping(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		roomID      id.RoomID
+		responseErr error
+		expectErr   bool
+	}{
+		{
+			name:        "成功停止",
+			roomID:      id.RoomID("!room:example.com"),
+			responseErr: nil,
+			expectErr:   false,
+		},
+		{
+			name:        "API 错误",
+			roomID:      id.RoomID("!room:example.com"),
+			responseErr: errors.New("forbidden"),
+			expectErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			roundTripper := &mockRoundTripper{
+				responseErr: tt.responseErr,
+				responseBody: []byte(`{}`),
+			}
+
+			homeserverURL, _ := url.Parse("https://example.com")
+			httpClient := &http.Client{Transport: roundTripper}
+			client := &mautrix.Client{
+				UserID:        id.UserID("@saber:example.com"),
+				Client:        httpClient,
+				HomeserverURL: homeserverURL,
+			}
+
+			service := NewCommandService(client, id.UserID("@saber:example.com"), nil)
+
+			err := service.StopTyping(context.Background(), tt.roomID)
+
+			if tt.expectErr {
+				if err == nil {
+					t.Error("期望返回错误，但返回 nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("StopTyping() 返回意外错误: %v", err)
+			}
+		})
+	}
+}
