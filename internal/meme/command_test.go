@@ -238,3 +238,47 @@ func TestMemeCommand_Handle_NilService(t *testing.T) {
 		t.Errorf("expected text containing %q, got %q", expected, mockSvc.lastText)
 	}
 }
+
+// TestMemeCommand_Handle_StickerSubcommand 测试 sticker 子命令。
+func TestMemeCommand_Handle_StickerSubcommand(t *testing.T) {
+	mockSvc := &mockCommandService{}
+	svc := createTestService()
+
+	cmd := &MemeCommand{
+		service:    svc,
+		cmdService: mockSvc,
+	}
+
+	ctx := context.Background()
+	err := cmd.Handle(ctx, "@user:example.com", "!room:example.com", []string{"sticker"})
+	if err != nil {
+		t.Fatalf("Handle returned error: %v", err)
+	}
+
+	// sticker 子命令无关键词，应返回帮助
+	if mockSvc.lastText == "" {
+		t.Error("expected help message to be sent")
+	}
+}
+
+// TestMemeCommand_Handle_MemeSubcommand 测试 meme 子命令。
+func TestMemeCommand_Handle_MemeSubcommand(t *testing.T) {
+	mockSvc := &mockCommandService{}
+	svc := createTestService()
+
+	cmd := &MemeCommand{
+		service:    svc,
+		cmdService: mockSvc,
+	}
+
+	ctx := context.Background()
+	err := cmd.Handle(ctx, "@user:example.com", "!room:example.com", []string{"meme"})
+	if err != nil {
+		t.Fatalf("Handle returned error: %v", err)
+	}
+
+	// meme 子命令无关键词，应返回帮助
+	if mockSvc.lastText == "" {
+		t.Error("expected help message to be sent")
+	}
+}
