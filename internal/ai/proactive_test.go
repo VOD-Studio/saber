@@ -1095,3 +1095,88 @@ func TestRateLimiter_TimeUntilNextAllowed(t *testing.T) {
 		t.Errorf("TimeUntilNextAllowed() = %v, want between 0 and 30m", wait)
 	}
 }
+
+// TestSilenceTrigger_Methods 测试 SilenceTrigger 的辅助方法。
+func TestSilenceTrigger_Methods(t *testing.T) {
+	cfg := &config.SilenceConfig{
+		Enabled:              true,
+		ThresholdMinutes:     60,
+		CheckIntervalMinutes: 15,
+	}
+	stateTracker := NewStateTracker()
+
+	// 创建 mock RoomLister
+	mockRL := &mockRoomListerTest{}
+
+	trigger, err := NewSilenceTrigger(cfg, stateTracker, mockRL)
+	if err != nil {
+		t.Fatalf("NewSilenceTrigger() error = %v", err)
+	}
+
+	// 测试 IsEnabled
+	if !trigger.IsEnabled() {
+		t.Error("IsEnabled() = false, want true")
+	}
+
+	// 测试 GetThreshold
+	threshold := trigger.GetThreshold()
+	wantThreshold := 60 * time.Minute
+	if threshold != wantThreshold {
+		t.Errorf("GetThreshold() = %v, want %v", threshold, wantThreshold)
+	}
+
+	// 测试 GetCheckInterval
+	interval := trigger.GetCheckInterval()
+	wantInterval := 15 * time.Minute
+	if interval != wantInterval {
+		t.Errorf("GetCheckInterval() = %v, want %v", interval, wantInterval)
+	}
+}
+
+// TestScheduleTrigger_Methods 测试 ScheduleTrigger 的辅助方法。
+func TestScheduleTrigger_Methods(t *testing.T) {
+	cfg := &config.ScheduleConfig{
+		Enabled: true,
+		Times:   []string{"09:00", "18:30"},
+	}
+
+	trigger, err := NewScheduleTrigger(cfg)
+	if err != nil {
+		t.Fatalf("NewScheduleTrigger() error = %v", err)
+	}
+
+	// 测试 GetScheduledTimes
+	times := trigger.GetScheduledTimes()
+	if len(times) != 2 {
+		t.Errorf("GetScheduledTimes() returned %d times, want 2", len(times))
+	}
+
+	// 测试 IsTriggeredToday（初始状态）
+	if trigger.IsTriggeredToday("09:00") {
+		t.Error("IsTriggeredToday() = true initially, want false")
+	}
+
+	// 测试 Reset
+	trigger.Reset()
+	if trigger.IsTriggeredToday("09:00") {
+		t.Error("IsTriggeredToday() = true after Reset, want false")
+	}
+}
+
+// TestScheduleTrigger_Check 测试 ScheduleTrigger 的 Check 方法。
+func TestScheduleTrigger_Check(t *testing.T) {
+	cfg := &config.ScheduleConfig{
+		Enabled: true,
+		Times:   []string{"09:00"},
+	}
+
+	trigger, err := NewScheduleTrigger(cfg)
+	if err != nil {
+		t.Fatalf("NewScheduleTrigger() error = %v", err)
+	}
+
+	// Check 方法返回 false 因为当前时间不匹配
+	triggered := trigger.Check(context.Background())
+	// 我们无法预测确切的时间匹配，但可以验证方法不会 panic
+	_ = triggered
+}
