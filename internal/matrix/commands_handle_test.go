@@ -6,9 +6,11 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"maunium.net/go/mautrix"
+	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 
 	"rua.plus/saber/internal/mcp"
@@ -209,6 +211,116 @@ func TestSendFormattedText(t *testing.T) {
 	err := service.SendFormattedText(context.Background(), id.RoomID("!room:example.com"), html, plain)
 	if err != nil {
 		t.Errorf("SendFormattedText() error = %v", err)
+	}
+}
+
+// TestSendFormattedText_WithEventID 测试带 EventID 的 SendFormattedText 方法。
+func TestSendFormattedText_WithEventID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// 返回事件 JSON 用于 GetEvent
+		if strings.Contains(r.URL.Path, "event") {
+			w.Write([]byte(`{"sender":"@bot:example.com","type":"m.room.message","content":{"msgtype":"m.text","body":"original"}}`))
+		} else {
+			w.Write([]byte(`{"event_id":"$formatted_reply_event:example.com"}`))
+		}
+	}))
+	defer server.Close()
+
+	client, _ := mautrix.NewClient(server.URL, id.UserID("@bot:example.com"), "token")
+	service := NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+	// 测试带 EventID 的发送（会使用回复）
+	ctx := WithEventID(context.Background(), id.EventID("$original:example.com"))
+	html := "<strong>Bold reply</strong>"
+	plain := "Bold reply"
+	err := service.SendFormattedText(ctx, id.RoomID("!room:example.com"), html, plain)
+	if err != nil {
+		t.Errorf("SendFormattedText() with EventID error = %v", err)
+	}
+}
+
+// TestSendFormattedReply 测试 SendFormattedReply 方法。
+func TestSendFormattedReply(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if r.Method == http.MethodGet {
+			// GetEvent 请求
+			w.Write([]byte(`{"sender":"@user:example.com","type":"m.room.message","content":{"msgtype":"m.text","body":"original message"}}`))
+		} else {
+			// SendMessageEvent 请求
+			w.Write([]byte(`{"event_id":"$reply_event:example.com"}`))
+		}
+	}))
+	defer server.Close()
+
+	client, _ := mautrix.NewClient(server.URL, id.UserID("@bot:example.com"), "token")
+	service := NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+	html := "<strong>Reply content</strong>"
+	plain := "Reply content"
+	eventID, err := service.SendFormattedReply(context.Background(), id.RoomID("!room:example.com"), html, plain, id.EventID("$original:example.com"))
+	if err != nil {
+		t.Errorf("SendFormattedReply() error = %v", err)
+	}
+	if eventID == "" {
+		t.Error("SendFormattedReply() returned empty event ID")
+	}
+}
+
+// TestSendTextWithRelatesTo 测试 SendTextWithRelatesTo 方法。
+func TestSendTextWithRelatesTo(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"event_id":"$relates_event:example.com"}`))
+	}))
+	defer server.Close()
+
+	client, _ := mautrix.NewClient(server.URL, id.UserID("@bot:example.com"), "token")
+	service := NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+	// 测试无 relatesTo
+	t.Run("no relatesTo", func(t *testing.T) {
+		eventID, err := service.SendTextWithRelatesTo(context.Background(), id.RoomID("!room:example.com"), "test message", nil)
+		if err != nil {
+			t.Errorf("SendTextWithRelatesTo() error = %v", err)
+		}
+		if eventID == "" {
+			t.Error("SendTextWithRelatesTo() returned empty event ID")
+		}
+	})
+}
+
+// TestSendTextWithRelatesTo_Reply 测试带回复关系的 SendTextWithRelatesTo。
+func TestSendTextWithRelatesTo_Reply(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if r.Method == http.MethodGet {
+			w.Write([]byte(`{"sender":"@user:example.com","type":"m.room.message","content":{"msgtype":"m.text","body":"original"}}`))
+		} else {
+			w.Write([]byte(`{"event_id":"$reply_relates_event:example.com"}`))
+		}
+	}))
+	defer server.Close()
+
+	client, _ := mautrix.NewClient(server.URL, id.UserID("@bot:example.com"), "token")
+	service := NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+	relatesTo := &event.RelatesTo{
+		InReplyTo: &event.InReplyTo{
+			EventID: "$original:example.com",
+		},
+	}
+	eventID, err := service.SendTextWithRelatesTo(context.Background(), id.RoomID("!room:example.com"), "reply message", relatesTo)
+	if err != nil {
+		t.Errorf("SendTextWithRelatesTo() error = %v", err)
+	}
+	if eventID == "" {
+		t.Error("SendTextWithRelatesTo() returned empty event ID")
 	}
 }
 
