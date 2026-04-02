@@ -191,3 +191,50 @@ func TestMemeCommand_WithEventContext(t *testing.T) {
 		t.Errorf("expected eventID %v, got %v", eventID, retrievedID)
 	}
 }
+
+// mockMemeService 是用于测试的模拟 meme 服务。
+type mockMemeService struct {
+	enabled   bool
+	gifResult *GIF
+	err       error
+}
+
+func (m *mockMemeService) IsEnabled() bool {
+	return m.enabled
+}
+
+func (m *mockMemeService) GetRandom(ctx context.Context, query string, contentType ContentType) (*GIF, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.gifResult, nil
+}
+
+func (m *mockMemeService) DownloadImage(ctx context.Context, gif *GIF) ([]byte, error) {
+	return []byte("fake-image-data"), nil
+}
+
+// TestMemeCommand_Handle_NilService 测试服务为 nil 的情况。
+func TestMemeCommand_Handle_NilService(t *testing.T) {
+	mockSvc := &mockCommandService{}
+
+	cmd := &MemeCommand{
+		service:    nil,
+		cmdService: mockSvc,
+	}
+
+	ctx := context.Background()
+	err := cmd.Handle(ctx, "@user:example.com", "!room:example.com", []string{"happy"})
+	if err != nil {
+		t.Fatalf("Handle returned error: %v", err)
+	}
+
+	if mockSvc.lastText == "" {
+		t.Error("expected error message to be sent")
+	}
+
+	expected := "Meme 服务未启用"
+	if !strings.Contains(mockSvc.lastText, expected) {
+		t.Errorf("expected text containing %q, got %q", expected, mockSvc.lastText)
+	}
+}
