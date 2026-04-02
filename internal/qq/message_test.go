@@ -2,9 +2,166 @@
 package qq
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/tencent-connect/botgo/dto"
 )
+
+// mockMessageSender 实现 MessageSender 接口用于测试。
+type mockMessageSender struct {
+	c2cMessage   *dto.Message
+	c2cError     error
+	groupMessage *dto.Message
+	groupError   error
+	lastContent  string
+}
+
+func (m *mockMessageSender) SendC2CMessage(ctx context.Context, openid string, msg *dto.MessageToCreate) (*dto.Message, error) {
+	m.lastContent = msg.Content
+	if m.c2cError != nil {
+		return nil, m.c2cError
+	}
+	if m.c2cMessage != nil {
+		return m.c2cMessage, nil
+	}
+	return &dto.Message{ID: "test-c2c-id"}, nil
+}
+
+func (m *mockMessageSender) SendGroupMessage(ctx context.Context, groupOpenid string, msg *dto.MessageToCreate) (*dto.Message, error) {
+	m.lastContent = msg.Content
+	if m.groupError != nil {
+		return nil, m.groupError
+	}
+	if m.groupMessage != nil {
+		return m.groupMessage, nil
+	}
+	return &dto.Message{ID: "test-group-id"}, nil
+}
+
+// TestNewDefaultMessageSender 测试创建消息发送器。
+func TestNewDefaultMessageSender(t *testing.T) {
+	sender := NewDefaultMessageSender(nil)
+	if sender == nil {
+		t.Error("NewDefaultMessageSender returned nil")
+	}
+}
+
+// TestDefaultMessageSender_SendC2CMessage 测试私聊消息发送。
+func TestDefaultMessageSender_SendC2CMessage(t *testing.T) {
+	t.Run("成功发送", func(t *testing.T) {
+		mock := &mockMessageSender{}
+
+		// 使用 mock 直接测试接口行为
+		msg := &dto.MessageToCreate{
+			Content: "test message",
+			MsgType: 0,
+		}
+
+		result, err := mock.SendC2CMessage(context.Background(), "user123", msg)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result == nil {
+			t.Error("expected result")
+		}
+		if mock.lastContent != "test message" {
+			t.Errorf("lastContent = %q, want %q", mock.lastContent, "test message")
+		}
+	})
+
+	t.Run("发送失败", func(t *testing.T) {
+		testErr := errors.New("send failed")
+		mock := &mockMessageSender{c2cError: testErr}
+
+		msg := &dto.MessageToCreate{Content: "test"}
+		_, err := mock.SendC2CMessage(context.Background(), "user123", msg)
+		if !errors.Is(err, testErr) {
+			t.Errorf("expected testErr, got: %v", err)
+		}
+	})
+}
+
+// TestDefaultMessageSender_SendGroupMessage 测试群消息发送。
+func TestDefaultMessageSender_SendGroupMessage(t *testing.T) {
+	t.Run("成功发送", func(t *testing.T) {
+		mock := &mockMessageSender{}
+
+		msg := &dto.MessageToCreate{
+			Content: "group message",
+			MsgType: 0,
+		}
+
+		result, err := mock.SendGroupMessage(context.Background(), "group123", msg)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result == nil {
+			t.Error("expected result")
+		}
+		if mock.lastContent != "group message" {
+			t.Errorf("lastContent = %q, want %q", mock.lastContent, "group message")
+		}
+	})
+
+	t.Run("发送失败", func(t *testing.T) {
+		testErr := errors.New("group send failed")
+		mock := &mockMessageSender{groupError: testErr}
+
+		msg := &dto.MessageToCreate{Content: "test"}
+		_, err := mock.SendGroupMessage(context.Background(), "group123", msg)
+		if !errors.Is(err, testErr) {
+			t.Errorf("expected testErr, got: %v", err)
+		}
+	})
+}
+
+// TestSendMessageWithTimeout 测试带超时的消息发送。
+func TestSendMessageWithTimeout(t *testing.T) {
+	t.Run("私聊消息成功", func(t *testing.T) {
+		mock := &mockMessageSender{}
+		msg := &dto.MessageToCreate{Content: "test"}
+
+		err := SendMessageWithTimeout(context.Background(), mock, 5000, "user123", msg, false)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("群消息成功", func(t *testing.T) {
+		mock := &mockMessageSender{}
+		msg := &dto.MessageToCreate{Content: "test"}
+
+		err := SendMessageWithTimeout(context.Background(), mock, 5000, "group123", msg, true)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("私聊消息失败", func(t *testing.T) {
+		testErr := errors.New("send failed")
+		mock := &mockMessageSender{c2cError: testErr}
+		msg := &dto.MessageToCreate{Content: "test"}
+
+		err := SendMessageWithTimeout(context.Background(), mock, 5000, "user123", msg, false)
+		if !errors.Is(err, testErr) {
+			t.Errorf("expected testErr, got: %v", err)
+		}
+	})
+
+	t.Run("群消息失败", func(t *testing.T) {
+		testErr := errors.New("group send failed")
+		mock := &mockMessageSender{groupError: testErr}
+		msg := &dto.MessageToCreate{Content: "test"}
+
+		err := SendMessageWithTimeout(context.Background(), mock, 5000, "group123", msg, true)
+		if !errors.Is(err, testErr) {
+			t.Errorf("expected testErr, got: %v", err)
+		}
+	})
+}
 
 // TestTruncateMessage 测试消息截断函数。
 func TestTruncateMessage(t *testing.T) {
