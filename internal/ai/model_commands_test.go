@@ -1,10 +1,33 @@
 package ai
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"maunium.net/go/mautrix"
+	"maunium.net/go/mautrix/id"
+
 	"rua.plus/saber/internal/config"
+	"rua.plus/saber/internal/matrix"
 )
+
+// createMockMatrixServer 创建一个模拟 Matrix API 的测试服务器。
+func createMockMatrixServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 返回简单的成功响应
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"event_id":"$test_event_id:example.com"}`))
+	}))
+}
+
+// createTestMatrixClient 创建一个测试用的 Matrix 客户端。
+func createTestMatrixClient(server *httptest.Server) *mautrix.Client {
+	client, _ := mautrix.NewClient(server.URL, id.UserID("@test:example.com"), "test_token")
+	return client
+}
 
 func TestModelsCommand_Registry(t *testing.T) {
 	tests := []struct {
@@ -211,6 +234,243 @@ func TestModelCommands_NilService(t *testing.T) {
 		cmd := NewCurrentModelCommand(service)
 		if cmd == nil {
 			t.Error("NewCurrentModelCommand should not return nil")
+		}
+	})
+}
+
+// TestModelsCommand_Handle 测试 ModelsCommand.Handle 方法。
+func TestModelsCommand_Handle(t *testing.T) {
+	t.Run("with mock matrix service", func(t *testing.T) {
+		server := createMockMatrixServer()
+		defer server.Close()
+
+		client := createTestMatrixClient(server)
+		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+		cfg := createTestMultiProviderAIConfig()
+		cfg.DefaultModel = "openai.gpt-4"
+
+		service, err := NewService(cfg, matrixSvc, nil, nil)
+		if err != nil {
+			t.Fatalf("NewService error: %v", err)
+		}
+
+		cmd := NewModelsCommand(service)
+
+		ctx := context.Background()
+		userID := id.UserID("@user:example.com")
+		roomID := id.RoomID("!room:example.com")
+
+		err = cmd.Handle(ctx, userID, roomID, nil)
+		if err != nil {
+			t.Errorf("Handle error: %v", err)
+		}
+	})
+
+	t.Run("empty models list", func(t *testing.T) {
+		server := createMockMatrixServer()
+		defer server.Close()
+
+		client := createTestMatrixClient(server)
+		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+		cfg := createTestMultiProviderAIConfig()
+		cfg.DefaultModel = "openai.gpt-4"
+		cfg.Models = map[string]config.ModelConfig{} // 空模型列表
+
+		service, err := NewService(cfg, matrixSvc, nil, nil)
+		if err != nil {
+			t.Fatalf("NewService error: %v", err)
+		}
+
+		cmd := NewModelsCommand(service)
+
+		ctx := context.Background()
+		userID := id.UserID("@user:example.com")
+		roomID := id.RoomID("!room:example.com")
+
+		err = cmd.Handle(ctx, userID, roomID, nil)
+		if err != nil {
+			t.Errorf("Handle error: %v", err)
+		}
+	})
+}
+
+// TestSwitchModelCommand_Handle 测试 SwitchModelCommand.Handle 方法。
+func TestSwitchModelCommand_Handle(t *testing.T) {
+	t.Run("no args", func(t *testing.T) {
+		server := createMockMatrixServer()
+		defer server.Close()
+
+		client := createTestMatrixClient(server)
+		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+		cfg := createTestMultiProviderAIConfig()
+		cfg.DefaultModel = "openai.gpt-4"
+
+		service, err := NewService(cfg, matrixSvc, nil, nil)
+		if err != nil {
+			t.Fatalf("NewService error: %v", err)
+		}
+
+		cmd := NewSwitchModelCommand(service)
+
+		ctx := context.Background()
+		userID := id.UserID("@user:example.com")
+		roomID := id.RoomID("!room:example.com")
+
+		err = cmd.Handle(ctx, userID, roomID, []string{})
+		if err != nil {
+			t.Errorf("Handle error: %v", err)
+		}
+	})
+
+	t.Run("empty model id", func(t *testing.T) {
+		server := createMockMatrixServer()
+		defer server.Close()
+
+		client := createTestMatrixClient(server)
+		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+		cfg := createTestMultiProviderAIConfig()
+		cfg.DefaultModel = "openai.gpt-4"
+
+		service, err := NewService(cfg, matrixSvc, nil, nil)
+		if err != nil {
+			t.Fatalf("NewService error: %v", err)
+		}
+
+		cmd := NewSwitchModelCommand(service)
+
+		ctx := context.Background()
+		userID := id.UserID("@user:example.com")
+		roomID := id.RoomID("!room:example.com")
+
+		err = cmd.Handle(ctx, userID, roomID, []string{""})
+		if err != nil {
+			t.Errorf("Handle error: %v", err)
+		}
+	})
+
+	t.Run("valid model switch", func(t *testing.T) {
+		server := createMockMatrixServer()
+		defer server.Close()
+
+		client := createTestMatrixClient(server)
+		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+		cfg := createTestMultiProviderAIConfig()
+		cfg.DefaultModel = "openai.gpt-4"
+
+		service, err := NewService(cfg, matrixSvc, nil, nil)
+		if err != nil {
+			t.Fatalf("NewService error: %v", err)
+		}
+
+		cmd := NewSwitchModelCommand(service)
+
+		ctx := context.Background()
+		userID := id.UserID("@user:example.com")
+		roomID := id.RoomID("!room:example.com")
+
+		err = cmd.Handle(ctx, userID, roomID, []string{"openai.gpt-4o-mini"})
+		if err != nil {
+			t.Errorf("Handle error: %v", err)
+		}
+
+		// 验证模型已切换
+		registry := service.GetModelRegistry()
+		if registry.GetDefault() != "openai.gpt-4o-mini" {
+			t.Errorf("default model = %q, want %q", registry.GetDefault(), "openai.gpt-4o-mini")
+		}
+	})
+
+	t.Run("invalid model switch", func(t *testing.T) {
+		server := createMockMatrixServer()
+		defer server.Close()
+
+		client := createTestMatrixClient(server)
+		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+		cfg := createTestMultiProviderAIConfig()
+		cfg.DefaultModel = "openai.gpt-4"
+
+		service, err := NewService(cfg, matrixSvc, nil, nil)
+		if err != nil {
+			t.Fatalf("NewService error: %v", err)
+		}
+
+		cmd := NewSwitchModelCommand(service)
+
+		ctx := context.Background()
+		userID := id.UserID("@user:example.com")
+		roomID := id.RoomID("!room:example.com")
+
+		// 切换到不存在的模型，Handle 会返回错误信息但不应该 panic
+		err = cmd.Handle(ctx, userID, roomID, []string{"invalid-model"})
+		if err != nil {
+			t.Errorf("Handle error: %v", err)
+		}
+	})
+}
+
+// TestCurrentModelCommand_Handle 测试 CurrentModelCommand.Handle 方法。
+func TestCurrentModelCommand_Handle(t *testing.T) {
+	t.Run("initial state", func(t *testing.T) {
+		server := createMockMatrixServer()
+		defer server.Close()
+
+		client := createTestMatrixClient(server)
+		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+		cfg := createTestMultiProviderAIConfig()
+		cfg.DefaultModel = "openai.gpt-4"
+
+		service, err := NewService(cfg, matrixSvc, nil, nil)
+		if err != nil {
+			t.Fatalf("NewService error: %v", err)
+		}
+
+		cmd := NewCurrentModelCommand(service)
+
+		ctx := context.Background()
+		userID := id.UserID("@user:example.com")
+		roomID := id.RoomID("!room:example.com")
+
+		err = cmd.Handle(ctx, userID, roomID, nil)
+		if err != nil {
+			t.Errorf("Handle error: %v", err)
+		}
+	})
+
+	t.Run("after model switch", func(t *testing.T) {
+		server := createMockMatrixServer()
+		defer server.Close()
+
+		client := createTestMatrixClient(server)
+		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+		cfg := createTestMultiProviderAIConfig()
+		cfg.DefaultModel = "openai.gpt-4"
+
+		service, err := NewService(cfg, matrixSvc, nil, nil)
+		if err != nil {
+			t.Fatalf("NewService error: %v", err)
+		}
+
+		// 先切换模型
+		registry := service.GetModelRegistry()
+		registry.SetDefault("openai.gpt-4o")
+
+		cmd := NewCurrentModelCommand(service)
+
+		ctx := context.Background()
+		userID := id.UserID("@user:example.com")
+		roomID := id.RoomID("!room:example.com")
+
+		err = cmd.Handle(ctx, userID, roomID, nil)
+		if err != nil {
+			t.Errorf("Handle error: %v", err)
 		}
 	})
 }
