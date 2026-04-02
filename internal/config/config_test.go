@@ -1081,3 +1081,34 @@ func TestAIConfig_GetModelConfig_Fallback(t *testing.T) {
 		t.Errorf("Provider = %s, want 'openai'", modelCfg.Provider)
 	}
 }
+
+// TestMemeConfigValidate 测试 MemeConfig 验证。
+func TestMemeConfigValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  MemeConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{"禁用时不验证", MemeConfig{Enabled: false}, false, ""},
+		{"有效配置", MemeConfig{Enabled: true, APIKey: "test-key", MaxResults: 5, TimeoutSeconds: 10}, false, ""},
+		{"缺少 api_key", MemeConfig{Enabled: true, MaxResults: 5, TimeoutSeconds: 10}, true, "api_key is required"},
+		{"max_results 为 0", MemeConfig{Enabled: true, APIKey: "key", MaxResults: 0, TimeoutSeconds: 10}, true, "max_results must be positive"},
+		{"max_results 为负数", MemeConfig{Enabled: true, APIKey: "key", MaxResults: -1, TimeoutSeconds: 10}, true, "max_results must be positive"},
+		{"timeout_seconds 为 0", MemeConfig{Enabled: true, APIKey: "key", MaxResults: 5, TimeoutSeconds: 0}, true, "timeout_seconds must be positive"},
+		{"timeout_seconds 为负数", MemeConfig{Enabled: true, APIKey: "key", MaxResults: 5, TimeoutSeconds: -1}, true, "timeout_seconds must be positive"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil && tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				t.Errorf("Validate() error = %v, want error containing %q", err, tt.errMsg)
+			}
+		})
+	}
+}
