@@ -223,6 +223,17 @@ func (m *MockManager) ListTools() []*mcp.Tool {
 	return m.server.ListToolsAsMCP()
 }
 
+// ListServers 返回模拟的服务器信息列表。
+func (m *MockManager) ListServers() []ServerInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// 返回一个模拟服务器
+	return []ServerInfo{
+		{Name: "mock-server", Type: "mock", Enabled: m.enabled},
+	}
+}
+
 // CallTool 使用用户上下文调用指定的 MCP 工具。
 //
 // 它模拟 Manager.CallTool 的行为，包括用户上下文验证。

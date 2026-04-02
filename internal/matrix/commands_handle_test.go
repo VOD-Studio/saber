@@ -390,3 +390,74 @@ func TestMCPCommandRouter_Handle_UnknownSubcommand(t *testing.T) {
 		t.Errorf("MCPCommandRouter.Handle() error = %v", err)
 	}
 }
+
+// TestMCPListCommand_Handle_Enabled 测试 MCP 启用时的列表命令。
+func TestMCPListCommand_Handle_Enabled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"event_id":"$mcp_list_event:example.com"}`))
+	}))
+	defer server.Close()
+
+	client, _ := mautrix.NewClient(server.URL, id.UserID("@bot:example.com"), "token")
+	service := NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+	// 使用 NewManagerWithBuiltin 创建启用的 MCP Manager
+	mcpMgr := mcp.NewManagerWithBuiltin(nil)
+
+	cmd := NewMCPListCommand(service, mcpMgr)
+	err := cmd.Handle(context.Background(), id.UserID("@user:example.com"), id.RoomID("!room:example.com"), nil)
+	if err != nil {
+		t.Errorf("MCPListCommand.Handle() with enabled MCP error = %v", err)
+	}
+}
+
+// TestCommandService_List 测试 CommandService.List 方法。
+func TestCommandService_List(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"event_id":"$event:example.com"}`))
+	}))
+	defer server.Close()
+
+	client, _ := mautrix.NewClient(server.URL, id.UserID("@bot:example.com"), "token")
+	botUserID := id.UserID("@bot:example.com")
+
+	service := NewCommandService(client, botUserID, nil)
+	mockHandler := &mockCommandHandler{}
+
+	// 注册命令
+	service.RegisterCommandWithDesc("ping", "检查机器人是否在线", mockHandler)
+	service.RegisterCommandWithDesc("help", "列出可用命令", mockHandler)
+
+	// 获取命令列表
+	list := service.List()
+
+	if len(list) != 2 {
+		t.Errorf("List() returned %d commands, want 2", len(list))
+	}
+
+	// 检查命令名称存在
+	foundPing := false
+	foundHelp := false
+	for _, cmd := range list {
+		if cmd.Name == "ping" {
+			foundPing = true
+			if cmd.Description != "检查机器人是否在线" {
+				t.Errorf("ping description = %s, want '检查机器人是否在线'", cmd.Description)
+			}
+		}
+		if cmd.Name == "help" {
+			foundHelp = true
+		}
+	}
+
+	if !foundPing {
+		t.Error("List() missing ping command")
+	}
+	if !foundHelp {
+		t.Error("List() missing help command")
+	}
+}
