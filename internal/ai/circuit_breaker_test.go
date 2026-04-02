@@ -9,6 +9,28 @@ import (
 	"time"
 )
 
+// TestCircuitState_String 测试 CircuitState 的 String 方法。
+func TestCircuitState_String(t *testing.T) {
+	tests := []struct {
+		state    CircuitState
+		expected string
+	}{
+		{CircuitStateClosed, "closed"},
+		{CircuitStateOpen, "open"},
+		{CircuitStateHalfOpen, "half-open"},
+		{CircuitState(99), "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			got := tt.state.String()
+			if got != tt.expected {
+				t.Errorf("CircuitState(%d).String() = %q, want %q", tt.state, got, tt.expected)
+			}
+		})
+	}
+}
+
 // TestCircuitBreaker_New 测试熔断器初始化。
 func TestCircuitBreaker_New(t *testing.T) {
 	tests := []struct {
