@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/id"
 
@@ -19,7 +20,7 @@ func createMockMatrixServer() *httptest.Server {
 		// 返回简单的成功响应
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$test_event_id:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$test_event_id:example.com"}`))
 	}))
 }
 
@@ -460,7 +461,7 @@ func TestCurrentModelCommand_Handle(t *testing.T) {
 
 		// 先切换模型
 		registry := service.GetModelRegistry()
-		registry.SetDefault("openai.gpt-4o")
+		require.NoError(t, registry.SetDefault("openai.gpt-4o"))
 
 		cmd := NewCurrentModelCommand(service)
 

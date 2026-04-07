@@ -228,7 +228,7 @@ func TestNewAICommand_RealService(t *testing.T) {
 	cmd := NewAICommand(simpleService, contextMgr)
 
 	if cmd == nil {
-		t.Error("NewAICommand should not return nil")
+		t.Fatal("NewAICommand should not return nil")
 	}
 	if cmd.aiService == nil {
 		t.Error("aiService should be set")

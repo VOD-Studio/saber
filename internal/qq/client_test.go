@@ -141,10 +141,10 @@ func TestClient_Stop(t *testing.T) {
 // TestClient_Start_Stop 测试启动和停止。
 func TestClient_Start_Stop(t *testing.T) {
 	cfg := &config.QQConfig{
-		AppID:           "test-app-id",
-		AppSecret:       "test-secret",
-		TimeoutSeconds:  5,
-		Sandbox:         true, // 使用沙盒模式
+		AppID:          "test-app-id",
+		AppSecret:      "test-secret",
+		TimeoutSeconds: 5,
+		Sandbox:        true, // 使用沙盒模式
 	}
 
 	client, err := NewClient(cfg)

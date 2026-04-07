@@ -19,7 +19,7 @@ func TestMentionService_Init(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			// 返回 Profile 响应
-			w.Write([]byte(`{"displayname":"TestBot","avatar_url":"mxc://example.com/avatar"}`))
+			_, _ = w.Write([]byte(`{"displayname":"TestBot","avatar_url":"mxc://example.com/avatar"}`))
 		}))
 		defer server.Close()
 

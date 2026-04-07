@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestPragmaDriver_Open 测试 pragma 驱动的 Open 方法。
@@ -18,7 +20,9 @@ func TestPragmaDriver_Open(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		require.NoError(t, db.Close())
+	})
 
 	// 验证连接有效
 	if err := db.Ping(); err != nil {
@@ -35,7 +39,9 @@ func TestPragmaDriver_ForeignKeysEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		require.NoError(t, db.Close())
+	})
 
 	var fkEnabled int
 	err = db.QueryRow("PRAGMA foreign_keys").Scan(&fkEnabled)
@@ -57,7 +63,9 @@ func TestPragmaDriver_JournalMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		require.NoError(t, db.Close())
+	})
 
 	var journalMode string
 	err = db.QueryRow("PRAGMA journal_mode").Scan(&journalMode)
@@ -80,7 +88,9 @@ func TestPragmaDriver_Synchronous(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		require.NoError(t, db.Close())
+	})
 
 	var synchronous int
 	err = db.QueryRow("PRAGMA synchronous").Scan(&synchronous)
@@ -103,7 +113,9 @@ func TestPragmaDriver_BusyTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		require.NoError(t, db.Close())
+	})
 
 	var busyTimeout int
 	err = db.QueryRow("PRAGMA busy_timeout").Scan(&busyTimeout)
@@ -165,7 +177,9 @@ func TestPragmaDriver_InMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open in-memory database: %v", err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		require.NoError(t, db.Close())
+	})
 
 	// 创建测试表
 	_, err = db.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)")
@@ -197,7 +211,9 @@ func TestPragmaDriver_ForeignKeyConstraint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		require.NoError(t, db.Close())
+	})
 
 	// 创建父表
 	_, err = db.Exec("CREATE TABLE parent (id INTEGER PRIMARY KEY)")
@@ -245,7 +261,6 @@ func TestPragmaDriver_FileBased(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
 
 	// 创建表
 	_, err = db.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY)")
@@ -277,13 +292,17 @@ func TestPragmaDriver_ConcurrentAccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open database 1: %v", err)
 	}
-	defer db1.Close()
+	t.Cleanup(func() {
+		require.NoError(t, db1.Close())
+	})
 
 	db2, err := sql.Open("sqlite3-fk-wal", dbPath)
 	if err != nil {
 		t.Fatalf("failed to open database 2: %v", err)
 	}
-	defer db2.Close()
+	t.Cleanup(func() {
+		require.NoError(t, db2.Close())
+	})
 
 	// 在第一个连接创建表
 	_, err = db1.Exec("CREATE TABLE concurrent_test (id INTEGER PRIMARY KEY, value TEXT)")

@@ -482,12 +482,12 @@ func TestAIConfigValidation(t *testing.T) {
 	t.Run("valid config", func(t *testing.T) {
 		cfg := &config.AIConfig{
 			Enabled:        true,
-			Provider:     "openai",
-			BaseURL:      "https://api.openai.com/v1",
-			APIKey:       "test-api-key",
-			DefaultModel: "gpt-4",
-				TimeoutSeconds: 30,
-				ToolCalling:    config.ToolCallingConfig{MaxIterations: 5},
+			Provider:       "openai",
+			BaseURL:        "https://api.openai.com/v1",
+			APIKey:         "test-api-key",
+			DefaultModel:   "gpt-4",
+			TimeoutSeconds: 30,
+			ToolCalling:    config.ToolCallingConfig{MaxIterations: 5},
 			Models: map[string]config.ModelConfig{
 				"gpt-4": {Model: "gpt-4"},
 			},
@@ -634,9 +634,9 @@ func TestServicesAssignment(t *testing.T) {
 	// 模拟 services 初始化后的状态检查
 	// 验证 nil 检查逻辑
 	tests := []struct {
-		name   string
-		field  string
-		isNil  func() bool
+		name  string
+		field string
+		isNil func() bool
 	}{
 		{"aiService", "aiService", func() bool { return svc.aiService == nil }},
 		{"mcpManager", "mcpManager", func() bool { return svc.mcpManager == nil }},

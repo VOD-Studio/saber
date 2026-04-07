@@ -58,4 +58,3 @@ func (c *MemeCommand) Handle(ctx context.Context, userID id.UserID, roomID id.Ro
 	// 这里仅作为接口占位符
 	return c.text.SendText(ctx, roomID, fmt.Sprintf("搜索关键词：%v", args))
 }
-

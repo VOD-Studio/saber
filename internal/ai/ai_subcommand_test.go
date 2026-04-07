@@ -82,13 +82,13 @@ func TestAICommandRouter_Handle_SubcommandRouting(t *testing.T) {
 	router.RegisterSubcommand("models", modelsHandler)
 
 	// 测试 clear 子命令
-	router.subcommands["clear"].Handle(context.Background(), id.UserID("@test:example.com"), id.RoomID("!room:example.com"), []string{})
+	_ = router.subcommands["clear"].Handle(context.Background(), id.UserID("@test:example.com"), id.RoomID("!room:example.com"), []string{})
 	if !clearHandler.called {
 		t.Error("clear 处理器应该被调用")
 	}
 
 	// 测试 models 子命令
-	router.subcommands["models"].Handle(context.Background(), id.UserID("@test:example.com"), id.RoomID("!room:example.com"), []string{})
+	_ = router.subcommands["models"].Handle(context.Background(), id.UserID("@test:example.com"), id.RoomID("!room:example.com"), []string{})
 	if !modelsHandler.called {
 		t.Error("models 处理器应该被调用")
 	}
@@ -103,7 +103,7 @@ func TestAICommandRouter_Handle_ArgsPassing(t *testing.T) {
 
 	// 模拟调用 switch gpt-4
 	args := []string{"gpt-4"}
-	router.subcommands["switch"].Handle(context.Background(), id.UserID("@test:example.com"), id.RoomID("!room:example.com"), args)
+	_ = router.subcommands["switch"].Handle(context.Background(), id.UserID("@test:example.com"), id.RoomID("!room:example.com"), args)
 
 	if !handler.called {
 		t.Error("处理器应该被调用")

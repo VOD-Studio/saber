@@ -32,7 +32,7 @@ func registerDriverOnce(name string, driver driver.Driver) {
 	// 如果驱动已存在，sql.Open 会成功（不会真正连接）
 	db, err := sql.Open(name, ":memory:")
 	if err == nil {
-		db.Close()
+		_ = db.Close()
 		return // 驱动已注册
 	}
 
@@ -69,7 +69,9 @@ func getModerncDriver() (driver.Driver, error) {
 			slog.Error("SQLite 驱动初始化失败", "error", err)
 			return
 		}
-		defer db.Close()
+		defer func() {
+			_ = db.Close()
+		}()
 
 		moderncDriver = db.Driver()
 		slog.Debug("SQLite 驱动初始化成功")

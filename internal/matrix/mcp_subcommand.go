@@ -21,9 +21,9 @@ import (
 //
 //	!mcp list    # 列出 MCP 服务器
 type MCPCommandRouter struct {
-	service     *CommandService            // 命令服务实例
-	mcpMgr      *mcp.Manager               // MCP 管理器实例
-	subcommands map[string]CommandHandler  // 子命令映射表
+	service     *CommandService           // 命令服务实例
+	mcpMgr      *mcp.Manager              // MCP 管理器实例
+	subcommands map[string]CommandHandler // 子命令映射表
 }
 
 // NewMCPCommandRouter 创建一个新的 MCP 命令路由器。

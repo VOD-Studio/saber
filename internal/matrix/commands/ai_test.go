@@ -11,15 +11,15 @@ import (
 
 // mockAIService 是测试用的 Mock AIService。
 type mockAIService struct {
-	chatResponse    string
-	chatError       error
-	contextInfo     string
-	models          []string
-	currentModel    string
-	setModelError   error
-	clearedContext  bool
-	clearedRoomID   id.RoomID
-	clearedUserID   id.UserID
+	chatResponse   string
+	chatError      error
+	contextInfo    string
+	models         []string
+	currentModel   string
+	setModelError  error
+	clearedContext bool
+	clearedRoomID  id.RoomID
+	clearedUserID  id.UserID
 }
 
 func (m *mockAIService) Chat(_ context.Context, _ id.RoomID, _ id.UserID, _ string) (string, error) {

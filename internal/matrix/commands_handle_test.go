@@ -21,7 +21,7 @@ func TestPingCommand_Handle(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$ping_event:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$ping_event:example.com"}`))
 	}))
 	defer server.Close()
 
@@ -40,7 +40,7 @@ func TestHelpCommand_Handle(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$help_event:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$help_event:example.com"}`))
 	}))
 	defer server.Close()
 
@@ -63,7 +63,7 @@ func TestHelpCommand_Handle_NoCommands(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$help_event:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$help_event:example.com"}`))
 	}))
 	defer server.Close()
 
@@ -82,7 +82,7 @@ func TestVersionCommand_Handle(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$version_event:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$version_event:example.com"}`))
 	}))
 	defer server.Close()
 
@@ -109,7 +109,7 @@ func TestVersionCommand_Handle_NoBuildInfo(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$version_event:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$version_event:example.com"}`))
 	}))
 	defer server.Close()
 
@@ -128,7 +128,7 @@ func TestMCPListCommand_Handle(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$mcp_event:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$mcp_event:example.com"}`))
 	}))
 	defer server.Close()
 
@@ -160,7 +160,7 @@ func TestSendText(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$send_event:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$send_event:example.com"}`))
 	}))
 	defer server.Close()
 
@@ -179,7 +179,7 @@ func TestSendText_WithEventID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$reply_event:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$reply_event:example.com"}`))
 	}))
 	defer server.Close()
 
@@ -199,7 +199,7 @@ func TestSendFormattedText(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$formatted_event:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$formatted_event:example.com"}`))
 	}))
 	defer server.Close()
 
@@ -221,9 +221,9 @@ func TestSendFormattedText_WithEventID(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		// 返回事件 JSON 用于 GetEvent
 		if strings.Contains(r.URL.Path, "event") {
-			w.Write([]byte(`{"sender":"@bot:example.com","type":"m.room.message","content":{"msgtype":"m.text","body":"original"}}`))
+			_, _ = w.Write([]byte(`{"sender":"@bot:example.com","type":"m.room.message","content":{"msgtype":"m.text","body":"original"}}`))
 		} else {
-			w.Write([]byte(`{"event_id":"$formatted_reply_event:example.com"}`))
+			_, _ = w.Write([]byte(`{"event_id":"$formatted_reply_event:example.com"}`))
 		}
 	}))
 	defer server.Close()
@@ -248,10 +248,10 @@ func TestSendFormattedReply(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		if r.Method == http.MethodGet {
 			// GetEvent 请求
-			w.Write([]byte(`{"sender":"@user:example.com","type":"m.room.message","content":{"msgtype":"m.text","body":"original message"}}`))
+			_, _ = w.Write([]byte(`{"sender":"@user:example.com","type":"m.room.message","content":{"msgtype":"m.text","body":"original message"}}`))
 		} else {
 			// SendMessageEvent 请求
-			w.Write([]byte(`{"event_id":"$reply_event:example.com"}`))
+			_, _ = w.Write([]byte(`{"event_id":"$reply_event:example.com"}`))
 		}
 	}))
 	defer server.Close()
@@ -275,7 +275,7 @@ func TestSendTextWithRelatesTo(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$relates_event:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$relates_event:example.com"}`))
 	}))
 	defer server.Close()
 
@@ -300,9 +300,9 @@ func TestSendTextWithRelatesTo_Reply(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		if r.Method == http.MethodGet {
-			w.Write([]byte(`{"sender":"@user:example.com","type":"m.room.message","content":{"msgtype":"m.text","body":"original"}}`))
+			_, _ = w.Write([]byte(`{"sender":"@user:example.com","type":"m.room.message","content":{"msgtype":"m.text","body":"original"}}`))
 		} else {
-			w.Write([]byte(`{"event_id":"$reply_relates_event:example.com"}`))
+			_, _ = w.Write([]byte(`{"event_id":"$reply_relates_event:example.com"}`))
 		}
 	}))
 	defer server.Close()
@@ -329,7 +329,7 @@ func TestMCPCommandRouter_Handle(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$mcp_router_event:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$mcp_router_event:example.com"}`))
 	}))
 	defer server.Close()
 
@@ -352,7 +352,7 @@ func TestMCPCommandRouter_Handle_NoSubcommand(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$mcp_router_event:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$mcp_router_event:example.com"}`))
 	}))
 	defer server.Close()
 
@@ -374,7 +374,7 @@ func TestMCPCommandRouter_Handle_UnknownSubcommand(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$mcp_router_event:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$mcp_router_event:example.com"}`))
 	}))
 	defer server.Close()
 
@@ -396,7 +396,7 @@ func TestMCPListCommand_Handle_Enabled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$mcp_list_event:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$mcp_list_event:example.com"}`))
 	}))
 	defer server.Close()
 
@@ -418,7 +418,7 @@ func TestCommandService_List(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$event:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$event:example.com"}`))
 	}))
 	defer server.Close()
 

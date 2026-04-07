@@ -10,30 +10,30 @@ import (
 // TestNewAdapter 测试创建适配器。
 func TestNewAdapter(t *testing.T) {
 	tests := []struct {
-		name      string
-		cfg       *config.QQConfig
-		aiCfg     *config.AIConfig
-		wantErr   bool
+		name        string
+		cfg         *config.QQConfig
+		aiCfg       *config.AIConfig
+		wantErr     bool
 		errContains string
 	}{
 		{
-			name: "QQ配置为空",
-			cfg:  nil,
-			aiCfg: &config.AIConfig{},
-			wantErr: true,
+			name:        "QQ配置为空",
+			cfg:         nil,
+			aiCfg:       &config.AIConfig{},
+			wantErr:     true,
 			errContains: "QQ配置不能为空",
 		},
 		{
-			name: "AI配置为空",
-			cfg:  &config.QQConfig{AppID: "test", AppSecret: "secret"},
-			aiCfg: nil,
-			wantErr: true,
+			name:        "AI配置为空",
+			cfg:         &config.QQConfig{AppID: "test", AppSecret: "secret"},
+			aiCfg:       nil,
+			wantErr:     true,
 			errContains: "AI配置不能为空",
 		},
 		{
-			name: "有效配置",
-			cfg:  &config.QQConfig{AppID: "test-app-id", AppSecret: "test-secret"},
-			aiCfg: &config.AIConfig{},
+			name:    "有效配置",
+			cfg:     &config.QQConfig{AppID: "test-app-id", AppSecret: "test-secret"},
+			aiCfg:   &config.AIConfig{},
 			wantErr: false,
 		},
 	}
@@ -154,7 +154,9 @@ func TestAIServiceAdapter(t *testing.T) {
 		// 应该 panic 或返回 false，这里测试不会崩溃
 		defer func() {
 			if r := recover(); r != nil {
-				// 预期的 panic
+				// 预期的 panic，测试通过
+			} else {
+				t.Error("expected panic, but did not panic")
 			}
 		}()
 		_ = adapter.IsEnabled()

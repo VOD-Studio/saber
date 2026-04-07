@@ -193,7 +193,7 @@ func TestCore_WaitForRateLimit_ContextCancel(t *testing.T) {
 	core, _ := NewCore(cfg)
 
 	// 用完 burst 配额
-	core.WaitForRateLimit(context.Background())
+	_ = core.WaitForRateLimit(context.Background())
 
 	// 创建一个已取消的上下文
 	ctx, cancel := context.WithCancel(context.Background())

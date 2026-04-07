@@ -17,8 +17,8 @@ type CommandLister interface {
 
 // HelpCommand 列出可用命令。
 type HelpCommand struct {
-	sender  Sender
-	lister  CommandLister
+	sender Sender
+	lister CommandLister
 }
 
 // NewHelpCommand 创建一个新的帮助命令处理器。

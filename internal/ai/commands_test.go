@@ -13,8 +13,8 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"rua.plus/saber/internal/config"
-	"rua.plus/saber/internal/mcp"
 	"rua.plus/saber/internal/matrix"
+	"rua.plus/saber/internal/mcp"
 )
 
 // createMockMatrixServerForCommands 创建一个模拟 Matrix API 的测试服务器。
@@ -22,7 +22,7 @@ func createMockMatrixServerForCommands() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"event_id":"$test_event_id:example.com"}`))
+		_, _ = w.Write([]byte(`{"event_id":"$test_event_id:example.com"}`))
 	}))
 }
 
@@ -74,7 +74,7 @@ func TestMultiModelAICommand_Handle(t *testing.T) {
 		cfg.APIKey = "test-key"
 		cfg.DefaultModel = "gpt-4"
 		cfg.Models = map[string]config.ModelConfig{
-			"gpt-4":        {Model: "gpt-4"},
+			"gpt-4":         {Model: "gpt-4"},
 			"gpt-3.5-turbo": {Model: "gpt-3.5-turbo"},
 		}
 
@@ -85,11 +85,12 @@ func TestMultiModelAICommand_Handle(t *testing.T) {
 		}
 
 		cmd := NewMultiModelAICommand(service, "gpt-3.5-turbo")
-		if cmd == nil {
+		if cmd != nil {
+			if cmd.modelName != "gpt-3.5-turbo" {
+				t.Errorf("modelName = %q, want %q", cmd.modelName, "gpt-3.5-turbo")
+			}
+		} else {
 			t.Error("NewMultiModelAICommand should not return nil")
-		}
-		if cmd.modelName != "gpt-3.5-turbo" {
-			t.Errorf("modelName = %q, want %q", cmd.modelName, "gpt-3.5-turbo")
 		}
 	})
 }
@@ -244,19 +245,12 @@ func TestNewAICommandRouter(t *testing.T) {
 	service := &Service{}
 	router := NewAICommandRouter(service)
 
+	if router != nil && router.service != service {
+		t.Error("router.service should be set")
+	}
 	if router == nil {
 		t.Error("NewAICommandRouter should not return nil")
 	}
-	if router.service != service {
-		t.Error("router.service should be set")
-	}
-}
-
-// testSubcommand 用于测试的子命令。
-type testSubcommand struct{}
-
-func (t *testSubcommand) Handle(_ context.Context, _ id.UserID, _ id.RoomID, _ []string) error {
-	return nil
 }
 
 // TestClearContextCommand_Handle 测试 ClearContextCommand.Handle 方法。

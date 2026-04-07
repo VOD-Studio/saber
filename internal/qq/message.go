@@ -9,8 +9,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/tencent-connect/botgo/openapi"
 	"github.com/tencent-connect/botgo/dto"
+	"github.com/tencent-connect/botgo/openapi"
 )
 
 // SendMessage 发送文本消息到私聊。

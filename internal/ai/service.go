@@ -100,7 +100,7 @@ func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpM
 		mediaService:   mediaService,
 		msgBuilder:     NewMessageBuilder(),
 		respHandler:    NewResponseHandler(nil), // 将在下面重新初始化
-		toolExecutor:   NewToolExecutor(nil),      // 将在下面重新初始化
+		toolExecutor:   NewToolExecutor(nil),    // 将在下面重新初始化
 	}
 
 	// 重新初始化处理器（需要 Service 实例）

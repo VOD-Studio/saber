@@ -102,7 +102,7 @@ func TestSetProactiveManager(t *testing.T) {
 
 // mockProactiveManager 是用于测试的主动聊天管理器 mock。
 type mockProactiveManager struct {
-	newMemberCalled    bool
+	newMemberCalled     bool
 	recordMessageCalled bool
 }
 
@@ -2421,7 +2421,7 @@ func TestCommandService_StartTyping(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			roundTripper := &mockRoundTripper{
-				responseErr: tt.responseErr,
+				responseErr:  tt.responseErr,
 				responseBody: []byte(`{}`),
 			}
 
@@ -2478,7 +2478,7 @@ func TestCommandService_StopTyping(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			roundTripper := &mockRoundTripper{
-				responseErr: tt.responseErr,
+				responseErr:  tt.responseErr,
 				responseBody: []byte(`{}`),
 			}
 

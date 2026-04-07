@@ -165,11 +165,11 @@ func TestRegistry_Parse(t *testing.T) {
 	registry := NewRegistry(nil, botID)
 
 	tests := []struct {
-		name       string
-		input      string
-		wantNil    bool
-		wantCmd    string
-		wantArgs   []string
+		name     string
+		input    string
+		wantNil  bool
+		wantCmd  string
+		wantArgs []string
 	}{
 		{
 			name:     "简单命令",
@@ -206,26 +206,26 @@ func TestRegistry_Parse(t *testing.T) {
 			wantNil: true,
 		},
 		{
-			name:     "前导空格",
+			name:    "前导空格",
 			input:   "  !ping",
 			wantNil: false,
 			wantCmd: "ping",
 		},
 		{
-			name:     "尾部空格",
+			name:    "尾部空格",
 			input:   "!ping  ",
 			wantNil: false,
 			wantCmd: "ping",
 		},
 		{
 			name:     "多参数",
-			input:   "!test arg1 arg2 arg3",
-			wantNil: false,
-			wantCmd: "test",
+			input:    "!test arg1 arg2 arg3",
+			wantNil:  false,
+			wantCmd:  "test",
 			wantArgs: []string{"arg1", "arg2", "arg3"},
 		},
 		{
-			name:     "大写命令转小写",
+			name:    "大写命令转小写",
 			input:   "!PING",
 			wantNil: false,
 			wantCmd: "ping",

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	_ "rua.plus/saber/internal/db" // 注册 SQLite 驱动
 	"maunium.net/go/mautrix/id"
+	_ "rua.plus/saber/internal/db" // 注册 SQLite 驱动
 )
 
 // newTestService 创建一个使用临时数据库的测试服务。
@@ -26,7 +26,7 @@ func newTestService(t *testing.T) *Service {
 	}
 
 	t.Cleanup(func() {
-		svc.Close()
+		_ = svc.Close()
 	})
 
 	return svc
@@ -40,7 +40,7 @@ func TestNewService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	// 验证数据库文件已创建
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
@@ -271,7 +271,7 @@ func TestServiceGetSystemPrompt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// 清除之前的人格设置
-			svc.ClearRoomPersona(ctx, roomID)
+			_ = svc.ClearRoomPersona(ctx, roomID)
 
 			if tt.personaID != "" {
 				err := svc.SetRoomPersona(ctx, roomID, tt.personaID)
@@ -324,14 +324,14 @@ func TestServicePersistence(t *testing.T) {
 	}
 
 	// 关闭服务
-	svc1.Close()
+	_ = svc1.Close()
 
 	// 创建第二个服务实例（从同一数据库加载）
 	svc2, err := NewService(dbPath)
 	if err != nil {
 		t.Fatalf("NewService() second instance error = %v", err)
 	}
-	defer svc2.Close()
+	defer func() { _ = svc2.Close() }()
 
 	// 验证自定义人格被保留
 	p := svc2.Get("persist-test")
@@ -404,9 +404,9 @@ func TestServiceConcurrentAccess(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		go func(i int) {
 			roomID := id.RoomID(fmt.Sprintf("!room%d:example.com", i))
-			svc.SetRoomPersona(ctx, roomID, "catgirl")
+			_ = svc.SetRoomPersona(ctx, roomID, "catgirl")
 			svc.GetRoomPersona(roomID)
-			svc.ClearRoomPersona(ctx, roomID)
+			_ = svc.ClearRoomPersona(ctx, roomID)
 			done <- true
 		}(i)
 	}

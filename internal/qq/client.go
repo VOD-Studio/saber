@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/tencent-connect/botgo"
@@ -50,7 +49,6 @@ type SimpleAIService interface {
 //   - api: botgo API 实例
 //   - tokenSource: Token 来源
 //   - credentials: QQ 机器人凭证
-//   - tokenMu: Token 读写锁
 //   - cancelFunc: 取消函数，用于停止 Token 刷新
 //
 // 线程安全：该结构体是并发安全的。
@@ -59,7 +57,6 @@ type Client struct {
 	api         openapi.OpenAPI
 	tokenSource oauth2.TokenSource
 	credentials *token.QQBotCredentials
-	tokenMu     sync.RWMutex
 	cancelFunc  context.CancelFunc
 }
 
@@ -116,7 +113,11 @@ func (c *Client) Start(ctx context.Context) error {
 	c.tokenSource = token.NewQQBotTokenSource(c.credentials)
 
 	// 启动后台 Token 刷新
-	go token.StartRefreshAccessToken(ctx, c.tokenSource)
+	go func() {
+		if err := token.StartRefreshAccessToken(ctx, c.tokenSource); err != nil {
+			slog.Error("Token 刷新失败", "error", err)
+		}
+	}()
 
 	// 创建 API 实例
 	if c.config.Sandbox {

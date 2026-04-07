@@ -212,7 +212,7 @@ func TestPersonaCommand_Handle_Clear(t *testing.T) {
 	roomID := id.RoomID("!test:example.com")
 
 	// 先设置
-	service.SetRoomPersona(context.Background(), roomID, "catgirl")
+	_ = service.SetRoomPersona(context.Background(), roomID, "catgirl")
 
 	// 再清除
 	err := cmd.Handle(context.Background(), "user", roomID, []string{"clear"})
@@ -245,7 +245,7 @@ func TestPersonaCommand_Handle_Status(t *testing.T) {
 	}
 
 	// 设置人格后
-	service.SetRoomPersona(context.Background(), roomID, "catgirl")
+	_ = service.SetRoomPersona(context.Background(), roomID, "catgirl")
 	err = cmd.Handle(context.Background(), "user", roomID, []string{"status"})
 	if err != nil {
 		t.Fatalf("Handle() error = %v", err)
@@ -387,7 +387,7 @@ func TestPersonaCommand_ListWithActivePersona(t *testing.T) {
 	roomID := id.RoomID("!test:example.com")
 
 	// 设置房间人格
-	service.SetRoomPersona(context.Background(), roomID, "catgirl")
+	_ = service.SetRoomPersona(context.Background(), roomID, "catgirl")
 
 	err := cmd.Handle(context.Background(), "user", roomID, []string{"list"})
 	if err != nil {

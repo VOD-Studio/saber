@@ -72,8 +72,8 @@ func TestInitMemeService_ValidConfig(t *testing.T) {
 	state := &appState{
 		cfg: &config.Config{
 			Meme: config.MemeConfig{
-				Enabled:   true,
-				APIKey:    "test-api-key",
+				Enabled:    true,
+				APIKey:     "test-api-key",
 				MaxResults: 5,
 			},
 		},
@@ -97,8 +97,8 @@ func TestInitMemeService_InvalidConfig(t *testing.T) {
 	state := &appState{
 		cfg: &config.Config{
 			Meme: config.MemeConfig{
-				Enabled:    true,
-				APIKey:     "", // 空 APIKey 无效
+				Enabled: true,
+				APIKey:  "", // 空 APIKey 无效
 			},
 		},
 		services: &services{},
@@ -135,9 +135,9 @@ func TestInitQQAdapter_InvalidConfig(t *testing.T) {
 	state := &appState{
 		cfg: &config.Config{
 			QQ: config.QQConfig{
-				Enabled:    true,
-				AppID:      "", // 无效：空 AppID
-				AppSecret:  "",
+				Enabled:   true,
+				AppID:     "", // 无效：空 AppID
+				AppSecret: "",
 			},
 			AI: config.AIConfig{
 				Enabled: false,
