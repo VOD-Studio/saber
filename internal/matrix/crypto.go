@@ -126,8 +126,14 @@ func (o *OlmCryptoService) Init(ctx context.Context) error {
 //
 // 此方法使用 CryptoHelper 解密加密事件。
 // 对于非加密事件，此方法的行为未定义，调用者应先检查事件类型。
-// 注意：当 CryptoHelper 已通过 client.Crypto 设置时，
-// 加密事件通常会自动解密，此方法主要用于手动解密场景。
+//
+// TODO: 集成到 EventHandler.OnMessage 流程
+// 当收到 m.room.encrypted 事件时，应调用此方法解密。
+// 集成步骤：
+// 1. 在 OnMessage 中检测 evt.Type == event.EventEncrypted
+// 2. 调用 client.GetCryptoService().Decrypt(evt)
+// 3. 将解密后的事件传递给后续处理逻辑
+// 注意：mautrix 在启用 E2EE 时会自动解密，此方法用于特殊场景。
 func (o *OlmCryptoService) Decrypt(ctx context.Context, evt *event.Event) (*event.Event, error) {
 	if o.cryptoHelper == nil {
 		return nil, fmt.Errorf("crypto helper not initialized")

@@ -197,6 +197,15 @@ func (h *EventHandler) OnMember(ctx context.Context, evt *event.Event) {
 }
 
 // OnEvent 是通用事件处理器，分发到适当的处理器。
+//
+// TODO: 添加 E2EE 加密事件处理
+// 当 evt.Type == event.EventEncrypted 时，需要先解密：
+//
+//	decryptedEvt, err := h.service.client.GetCryptoService().Decrypt(ctx, evt)
+//	if err != nil { log error and return }
+//	evt = decryptedEvt
+//
+// 然后再分发到 OnMessage 处理
 func (h *EventHandler) OnEvent(ctx context.Context, evt *event.Event) {
 	switch evt.Type {
 	case event.EventMessage:
