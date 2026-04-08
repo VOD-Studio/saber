@@ -26,12 +26,8 @@ const (
 	TriggerInactivity TriggerType = "inactivity"
 	// TriggerNewUser 表示因新用户加入而触发。
 	TriggerNewUser TriggerType = "new_user"
-	// TriggerTopicChange 表示因话题变更而触发。
-	TriggerTopicChange TriggerType = "topic_change"
 	// TriggerScheduled 表示因定时任务而触发。
 	TriggerScheduled TriggerType = "scheduled"
-	// TriggerManual 表示因手动触发而触发。
-	TriggerManual TriggerType = "manual"
 )
 
 // ActivityLevel 表示房间活动水平。

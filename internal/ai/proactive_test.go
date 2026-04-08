@@ -881,7 +881,7 @@ func TestGenerateDefaultProactiveMessage_IsDirect(t *testing.T) {
 		},
 		{
 			name:             "私聊 - 默认触发",
-			triggerType:      TriggerManual,
+			triggerType:      TriggerScheduled,
 			isDirect:         true,
 			minutesSinceLast: 60,
 			wantContains:     "你好",
@@ -889,7 +889,7 @@ func TestGenerateDefaultProactiveMessage_IsDirect(t *testing.T) {
 		},
 		{
 			name:             "群聊 - 默认触发",
-			triggerType:      TriggerManual,
+			triggerType:      TriggerScheduled,
 			isDirect:         false,
 			minutesSinceLast: 60,
 			wantContains:     "大家好",

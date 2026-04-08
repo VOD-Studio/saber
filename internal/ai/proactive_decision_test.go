@@ -327,11 +327,9 @@ func TestDecisionContext_GetActivityLevel(t *testing.T) {
 func TestTriggerTypeConstants(t *testing.T) {
 	// 验证 TriggerType 常量定义
 	expectedTriggers := map[TriggerType]bool{
-		TriggerInactivity:  true,
-		TriggerNewUser:     true,
-		TriggerTopicChange: true,
-		TriggerScheduled:   true,
-		TriggerManual:      true,
+		TriggerInactivity: true,
+		TriggerNewUser:    true,
+		TriggerScheduled:  true,
 	}
 
 	for trigger := range expectedTriggers {
@@ -737,10 +735,10 @@ func TestDecisionCache_ComputeContextHash(t *testing.T) {
 				ActivityLevel:    ActivityHigh,
 				MinutesSinceLast: 30,
 				MessagesToday:    10,
-				TriggerType:      TriggerManual,
+				TriggerType:      TriggerScheduled,
 				MemberCount:      15,
 			},
-			wantHash:   "high|30|10|manual|6-20",
+			wantHash:   "high|30|10|scheduled|6-20",
 			wantEquals: true,
 		},
 		{
