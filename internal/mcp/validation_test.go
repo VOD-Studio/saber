@@ -3,7 +3,6 @@
 package mcp
 
 import (
-	"errors"
 	"testing"
 )
 
@@ -38,126 +37,6 @@ func TestValidationError(t *testing.T) {
 				t.Errorf("Error() = %q, want %q", err.Error(), tt.expected)
 			}
 		})
-	}
-}
-
-func TestSystemError(t *testing.T) {
-	tests := []struct {
-		name     string
-		op       string
-		err      error
-		message  string
-		expected string
-	}{
-		{
-			name:     "with wrapped error",
-			op:       "CallTool",
-			err:      errors.New("connection failed"),
-			message:  "failed to call tool",
-			expected: "CallTool: failed to call tool: connection failed",
-		},
-		{
-			name:     "with nil error",
-			op:       "Init",
-			err:      nil,
-			message:  "initialization failed",
-			expected: "Init: initialization failed: <nil>",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := &SystemError{
-				Op:      tt.op,
-				Err:     tt.err,
-				Message: tt.message,
-			}
-			if err.Error() != tt.expected {
-				t.Errorf("Error() = %q, want %q", err.Error(), tt.expected)
-			}
-		})
-	}
-}
-
-func TestSystemError_Unwrap(t *testing.T) {
-	innerErr := errors.New("inner error")
-	sysErr := &SystemError{
-		Op:      "Test",
-		Err:     innerErr,
-		Message: "test message",
-	}
-
-	unwrapped := sysErr.Unwrap()
-	if unwrapped != innerErr {
-		t.Errorf("Unwrap() = %v, want %v", unwrapped, innerErr)
-	}
-
-	// 测试 nil 错误
-	sysErrNil := &SystemError{
-		Op:      "Test",
-		Err:     nil,
-		Message: "test message",
-	}
-	if sysErrNil.Unwrap() != nil {
-		t.Errorf("Unwrap() for nil error should return nil")
-	}
-}
-
-func TestIsValidationError(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      error
-		expected bool
-	}{
-		{
-			name:     "validation error",
-			err:      &ValidationError{Field: "test", Message: "invalid"},
-			expected: true,
-		},
-		{
-			name:     "system error",
-			err:      &SystemError{Op: "test", Message: "failed"},
-			expected: false,
-		},
-		{
-			name:     "standard error",
-			err:      errors.New("standard error"),
-			expected: false,
-		},
-		{
-			name:     "nil error",
-			err:      nil,
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := IsValidationError(tt.err)
-			if result != tt.expected {
-				t.Errorf("IsValidationError() = %v, want %v", result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestWrapSystemError(t *testing.T) {
-	innerErr := errors.New("inner error")
-	wrapped := WrapSystemError(innerErr, "CallTool", "failed to call tool")
-
-	sysErr, ok := wrapped.(*SystemError)
-	if !ok {
-		t.Fatal("WrapSystemError should return *SystemError")
-	}
-
-	if sysErr.Op != "CallTool" {
-		t.Errorf("Op = %q, want %q", sysErr.Op, "CallTool")
-	}
-	if sysErr.Message != "failed to call tool" {
-		t.Errorf("Message = %q, want %q", sysErr.Message, "failed to call tool")
-	}
-	if sysErr.Err != innerErr {
-		t.Errorf("Err = %v, want %v", sysErr.Err, innerErr)
 	}
 }
 
@@ -242,7 +121,7 @@ func TestValidateToolInput(t *testing.T) {
 
 			if tt.wantErr && err != nil {
 				// 验证返回的是 ValidationError
-				if !IsValidationError(err) {
+				if _, ok := err.(*ValidationError); !ok {
 					t.Errorf("Expected ValidationError, got %T", err)
 				}
 			}

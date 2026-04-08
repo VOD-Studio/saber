@@ -2,7 +2,6 @@
 package mcp
 
 import (
-	"context"
 	"fmt"
 	"regexp"
 	"sync"
@@ -134,57 +133,4 @@ func ValidateUserID(userID id.UserID) error {
 		return fmt.Errorf("invalid user ID format: %s (expected: @localpart:server.com)", userID)
 	}
 	return nil
-}
-
-// Middleware 定义 MCP 工具调用中间件函数类型。
-type Middleware func(ctx context.Context, userID id.UserID, roomID id.RoomID, toolName string, next ToolHandler) (any, error)
-
-// ToolHandler 定义 MCP 工具处理函数类型。
-type ToolHandler func(ctx context.Context) (any, error)
-
-// RateLimitMiddleware 创建速率限制中间件。
-//
-// 在调用工具前检查用户和房间的速率限制。
-// 如果超过限制，返回错误而不调用实际工具。
-func RateLimitMiddleware(limiter *RateLimiter) Middleware {
-	return func(ctx context.Context, userID id.UserID, roomID id.RoomID, toolName string, next ToolHandler) (any, error) {
-		if !limiter.Allow(userID, roomID) {
-			return nil, fmt.Errorf("rate limit exceeded for user %s in room %s", userID, roomID)
-		}
-		return next(ctx)
-	}
-}
-
-// ValidationMiddleware 创建输入验证中间件。
-//
-// 在调用工具前验证用户 ID 和房间 ID 的格式。
-func ValidationMiddleware() Middleware {
-	return func(ctx context.Context, userID id.UserID, roomID id.RoomID, toolName string, next ToolHandler) (any, error) {
-		if err := ValidateUserID(userID); err != nil {
-			return nil, fmt.Errorf("validation failed: %w", err)
-		}
-		if err := ValidateRoomID(roomID); err != nil {
-			return nil, fmt.Errorf("validation failed: %w", err)
-		}
-		return next(ctx)
-	}
-}
-
-// ChainMiddleware 将多个中间件链接成一个。
-//
-// 中间件按传入顺序执行，最先传入的中间件最先执行。
-// 例如：ChainMiddleware(m1, m2, m3) 会按 m1 -> m2 -> m3 的顺序执行。
-func ChainMiddleware(middlewares ...Middleware) Middleware {
-	return func(ctx context.Context, userID id.UserID, roomID id.RoomID, toolName string, next ToolHandler) (any, error) {
-		// 从后向前构建中间件链
-		for i := len(middlewares) - 1; i >= 0; i-- {
-			// 捕获当前的 next 和 middleware
-			currentNext := next
-			middleware := middlewares[i]
-			next = func(ctx context.Context) (any, error) {
-				return middleware(ctx, userID, roomID, toolName, currentNext)
-			}
-		}
-		return next(ctx)
-	}
 }

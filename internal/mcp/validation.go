@@ -15,36 +15,6 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Field, e.Message)
 }
 
-// SystemError 表示内部系统错误。
-type SystemError struct {
-	Op      string
-	Err     error
-	Message string
-}
-
-func (e *SystemError) Error() string {
-	return fmt.Sprintf("%s: %s: %v", e.Op, e.Message, e.Err)
-}
-
-func (e *SystemError) Unwrap() error {
-	return e.Err
-}
-
-// IsValidationError 检查一个错误是否为验证错误。
-func IsValidationError(err error) bool {
-	_, ok := err.(*ValidationError)
-	return ok
-}
-
-// WrapSystemError 使用上下文包装内部错误。
-func WrapSystemError(err error, op, message string) error {
-	return &SystemError{
-		Op:      op,
-		Err:     err,
-		Message: message,
-	}
-}
-
 // ValidateToolInput 根据 JSON schema 验证工具输入。
 func ValidateToolInput(params map[string]any, schema map[string]any) error {
 	if schema == nil {
