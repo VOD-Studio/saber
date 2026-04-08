@@ -50,3 +50,4 @@ config.yaml
 .worktree
 .claude/worktrees/
 data/
+coverage.html
