@@ -156,11 +156,11 @@ func (b *MessageBuilder) BuildMultiImageMessages(service *Service, _ context.Con
 }
 
 // getSystemPrompt 获取系统提示词。
-// 如果设置了人格服务，会合并基础提示词和人格提示词。
+// 如果设置了提示词提供者，会合并基础提示词和人格提示词。
 func (b *MessageBuilder) getSystemPrompt(service *Service, roomID id.RoomID) string {
 	basePrompt := service.core.GetConfig().SystemPrompt
-	if service.personaService != nil {
-		return service.personaService.GetSystemPrompt(roomID, basePrompt)
+	if service.promptProvider != nil {
+		return service.promptProvider.GetSystemPrompt(roomID, basePrompt)
 	}
 	return basePrompt
 }

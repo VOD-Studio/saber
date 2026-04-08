@@ -33,9 +33,9 @@ import (
 	"rua.plus/saber/internal/mcp"
 )
 
-// PersonaService 定义人格服务接口。
+// PromptProvider 定义提示词提供者接口。
 // 用于获取房间的系统提示词（合并基础提示词和人格提示词）。
-type PersonaService interface {
+type PromptProvider interface {
 	GetSystemPrompt(roomID id.RoomID, basePrompt string) string
 }
 
@@ -51,8 +51,8 @@ type Service struct {
 	mcpManager *mcp.Manager
 	// mediaService 是媒体服务。
 	mediaService *matrix.MediaService
-	// personaService 是人格服务（可选字段）。
-	personaService PersonaService
+	// promptProvider 是提示词提供者（可选字段）。
+	promptProvider PromptProvider
 	// msgBuilder 是消息构建器。
 	msgBuilder *MessageBuilder
 	// respHandler 是响应处理器。
@@ -137,10 +137,10 @@ func (s *Service) IsEnabled() bool {
 	return s.core.IsEnabled()
 }
 
-// SetPersonaService 设置人格服务。
-// 人格服务用于获取房间的系统提示词（合并基础提示词和人格提示词）。
-func (s *Service) SetPersonaService(ps PersonaService) {
-	s.personaService = ps
+// SetPromptProvider 设置提示词提供者。
+// 提示词提供者用于获取房间的系统提示词（合并基础提示词和人格提示词）。
+func (s *Service) SetPromptProvider(pp PromptProvider) {
+	s.promptProvider = pp
 }
 
 // GetModelRegistry 获取模型注册表。

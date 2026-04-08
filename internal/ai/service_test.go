@@ -458,29 +458,29 @@ func TestService_WithNilMCPManager(t *testing.T) {
 	}
 }
 
-// TestService_SetPersonaService 测试设置人格服务。
-func TestService_SetPersonaService(t *testing.T) {
+// TestService_SetPromptProvider 测试设置提示词提供者。
+func TestService_SetPromptProvider(t *testing.T) {
 	cfg := createTestAIConfig()
 	service, err := NewService(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// 创建 mock PersonaService
-	mockPersona := &testMockPersonaService{}
+	// 创建 mock PromptProvider
+	mockPersona := &testMockPromptProvider{}
 
-	// 设置人格服务
-	service.SetPersonaService(mockPersona)
+	// 设置提示词提供者
+	service.SetPromptProvider(mockPersona)
 
 	// 验证设置成功（通过内部字段检查）
-	if service.personaService == nil {
-		t.Error("personaService should not be nil after SetPersonaService")
+	if service.promptProvider == nil {
+		t.Error("promptProvider should not be nil after SetPromptProvider")
 	}
 }
 
-// testMockPersonaService 是用于测试的 mock PersonaService。
-type testMockPersonaService struct{}
+// testMockPromptProvider 是用于测试的 mock PromptProvider。
+type testMockPromptProvider struct{}
 
-func (m *testMockPersonaService) GetSystemPrompt(roomID id.RoomID, basePrompt string) string {
+func (m *testMockPromptProvider) GetSystemPrompt(roomID id.RoomID, basePrompt string) string {
 	return "test system prompt"
 }

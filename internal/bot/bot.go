@@ -340,7 +340,7 @@ func (s *appState) initPersonaService() {
 	svc.personaService = personaSvc
 
 	// 设置 AI 服务的人格服务
-	svc.aiService.SetPersonaService(personaSvc)
+	svc.aiService.SetPromptProvider(personaSvc)
 
 	// 注册 persona 命令
 	cs := svc.commandService
