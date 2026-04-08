@@ -4,6 +4,7 @@ package servers
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -77,6 +78,7 @@ func (s *JSSandbox) handleRunJS(ctx context.Context, _ *mcp.CallToolRequest, inp
 	vm.SetMaxCallStackSize(100)
 	vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 
+	// 忽略错误，vm.Set 在设置简单 map 时不会失败
 	_ = vm.Set("console", map[string]interface{}{
 		"log": func(call goja.FunctionCall) goja.Value {
 			s.mu.Lock()
@@ -152,23 +154,46 @@ func (s *JSSandbox) handleRunJS(ctx context.Context, _ *mcp.CallToolRequest, inp
 }
 
 func (s *JSSandbox) disableDangerousAPIs(vm *goja.Runtime) error {
-	var err error
+	globalObj := vm.GlobalObject()
 
-	_, err = vm.RunString(`
-		delete this.eval;
-		delete this.Function;
-		delete this.GeneratorFunction;
-		delete this.AsyncFunction;
-		delete this.WebAssembly;
-	`)
-	if err != nil {
-		return err
+	// Log all discovered global variables
+	keys := globalObj.Keys()
+	slog.Debug("js_sandbox: discovered global variables", "keys", keys)
+
+	// List of dangerous global variables to disable
+	dangerousGlobals := []string{
+		"eval",
+		"Function",
+		"GeneratorFunction",
+		"AsyncFunction",
+		"WebAssembly",
+		"globalThis",
+		"global",
+		"process",
+		"fetch",
+		"XMLHttpRequest",
+		"setTimeout",
+		"setInterval",
+		"setImmediate",
 	}
 
+	// Delete dangerous global variables
+	for _, name := range dangerousGlobals {
+		val := globalObj.Get(name)
+		if val != nil && !goja.IsUndefined(val) {
+			slog.Debug("js_sandbox: disabling dangerous global", "name", name)
+			if err := globalObj.Delete(name); err != nil {
+				slog.Warn("js_sandbox: failed to delete global", "name", name, "error", err)
+			}
+		}
+	}
+
+	// 忽略错误，vm.Set 在设置 panic 函数时不会失败
 	_ = vm.Set("require", func() {
 		panic(newError("require is disabled in sandbox"))
 	})
 
+	// 忽略错误，vm.Set 在设置 panic 函数时不会失败
 	_ = vm.Set("import", func() {
 		panic(newError("import is disabled in sandbox"))
 	})
