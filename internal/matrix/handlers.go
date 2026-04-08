@@ -516,7 +516,14 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 
 // reportError 报告命令执行错误。
 func (s *CommandService) reportError(ctx context.Context, roomID id.RoomID, cmd string, err error) error {
-	msg := fmt.Sprintf("Error executing command '%s': %v", cmd, err)
+	// 记录完整的内部错误到日志
+	slog.Error("Error executing command",
+		"command", cmd,
+		"error", err,
+		"room", roomID.String())
+
+	// 用户看到的通用错误消息，不暴露内部细节
+	msg := "An internal error occurred. Please try again later."
 
 	// 如果上下文中有 EventID，则作为回复发送
 	if eventID := GetEventID(ctx); eventID != "" {
