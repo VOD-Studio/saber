@@ -1236,3 +1236,43 @@ var _ = func() {
 	_ = client.DeviceID
 	_ = client.AccessToken
 }
+
+// TestSaveSession_FilePermissions 测试 SaveSession 方法保存的文件权限是否为 0600。
+func TestSaveSession_FilePermissions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	// 1. 创建临时目录
+	tmpDir := t.TempDir()
+	sessionPath := filepath.Join(tmpDir, "session.yaml")
+
+	// 2. 调用 SaveSession
+	cfg := &config.MatrixConfig{
+		Homeserver:  server.URL,
+		UserID:      "@test:example.com",
+		DeviceID:    "TESTDEVICE",
+		AccessToken: "test-token",
+	}
+	client, err := NewMatrixClient(cfg)
+	if err != nil {
+		t.Fatalf("NewMatrixClient() error = %v", err)
+	}
+
+	err = client.SaveSession(sessionPath)
+	if err != nil {
+		t.Fatalf("SaveSession() error = %v", err)
+	}
+
+	// 3. 使用 os.Stat 检查文件权限是否为 0600
+	info, err := os.Stat(sessionPath)
+	if err != nil {
+		t.Fatalf("无法获取文件信息：%v", err)
+	}
+
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("文件权限 = %v, want 0600", info.Mode().Perm())
+	}
+}

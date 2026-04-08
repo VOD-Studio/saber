@@ -171,6 +171,7 @@ func (m *MatrixClient) SaveSession(path string) error {
 
 // LoadSession 从 YAML 文件恢复会话凭据。
 // 这允许重用现有的已认证会话而无需重新登录。
+// 如果配置了 StrictSessionPermCheck，当会话文件权限不为 0600 时会返回错误。
 func (m *MatrixClient) LoadSession(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -178,6 +179,21 @@ func (m *MatrixClient) LoadSession(path string) error {
 			return fmt.Errorf("session file not found: %s", path)
 		}
 		return fmt.Errorf("failed to read session file: %w", err)
+	}
+
+	// 检查会话文件权限
+	info, err := os.Stat(path)
+	if err == nil {
+		perm := info.Mode().Perm()
+		if perm != 0o600 {
+			if m.config != nil && m.config.StrictSessionPermCheck {
+				return fmt.Errorf("session file has insecure permissions %04o, expected 0600", perm)
+			}
+			slog.Warn("Session file has insecure permissions",
+				"path", path,
+				"permissions", fmt.Sprintf("%04o", perm),
+				"expected", "0600")
+		}
 	}
 
 	var session Session

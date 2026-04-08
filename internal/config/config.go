@@ -28,17 +28,18 @@ type ShutdownConfig struct {
 
 // MatrixConfig 存储 Matrix 连接配置
 type MatrixConfig struct {
-	Homeserver          string   `yaml:"homeserver"`
-	UserID              string   `yaml:"user_id"`               // 完整的 Matrix ID，如 @user:matrix.org
-	DeviceID            string   `yaml:"device_id"`             // 设备标识符
-	DeviceName          string   `yaml:"device_name"`           // 设备显示名称
-	Password            string   `yaml:"password"`              // 密码登录（可选）
-	AccessToken         string   `yaml:"access_token"`          // Token 登录（可选，优先级高于密码）
-	AutoJoinRooms       []string `yaml:"auto_join_rooms"`       // 启动时自动加入的房间列表
-	EnableE2EE          bool     `yaml:"enable_e2ee"`           // 启用端到端加密（可选）
-	E2EESessionPath     string   `yaml:"e2ee_session_path"`     // 端到端加密会话文件路径（可选）
-	PickleKeyPath       string   `yaml:"pickle_key_path"`       // E2EE pickle 密钥文件路径（可选，默认为 e2ee_session_path + ".key")
-	MaxConcurrentEvents int      `yaml:"max_concurrent_events"` // 最大并发事件处理数（默认 10）
+	Homeserver             string   `yaml:"homeserver"`
+	UserID                 string   `yaml:"user_id"`                   // 完整的 Matrix ID，如 @user:matrix.org
+	DeviceID               string   `yaml:"device_id"`                 // 设备标识符
+	DeviceName             string   `yaml:"device_name"`               // 设备显示名称
+	Password               string   `yaml:"password"`                  // 密码登录（可选）
+	AccessToken            string   `yaml:"access_token"`              // Token 登录（可选，优先级高于密码）
+	AutoJoinRooms          []string `yaml:"auto_join_rooms"`           // 启动时自动加入的房间列表
+	EnableE2EE             bool     `yaml:"enable_e2ee"`               // 启用端到端加密（可选）
+	E2EESessionPath        string   `yaml:"e2ee_session_path"`         // 端到端加密会话文件路径（可选）
+	PickleKeyPath          string   `yaml:"pickle_key_path"`           // E2EE pickle 密钥文件路径（可选，默认为 e2ee_session_path + ".key")
+	MaxConcurrentEvents    int      `yaml:"max_concurrent_events"`     // 最大并发事件处理数（默认 10）
+	StrictSessionPermCheck bool     `yaml:"strict_session_perm_check"` // 严格会话文件权限检查（默认 false，仅警告）
 }
 
 // AIConfig 存储 AI 服务配置
@@ -861,16 +862,17 @@ func LoadOrDefault(path string) (*Config, error) {
 // DefaultMatrixConfig 返回带有合理默认值的 Matrix 配置
 func DefaultMatrixConfig() MatrixConfig {
 	return MatrixConfig{
-		Homeserver:          "https://matrix.org",
-		UserID:              "",
-		DeviceID:            "",
-		DeviceName:          "Saber Bot",
-		Password:            "",
-		AccessToken:         "",
-		EnableE2EE:          true,
-		E2EESessionPath:     "./saber.session",
-		PickleKeyPath:       "",
-		MaxConcurrentEvents: 10,
+		Homeserver:             "https://matrix.org",
+		UserID:                 "",
+		DeviceID:               "",
+		DeviceName:             "Saber Bot",
+		Password:               "",
+		AccessToken:            "",
+		EnableE2EE:             true,
+		E2EESessionPath:        "./saber.session",
+		PickleKeyPath:          "",
+		MaxConcurrentEvents:    10,
+		StrictSessionPermCheck: false,
 	}
 }
 
