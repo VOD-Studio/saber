@@ -194,3 +194,69 @@ func (s *SimpleService) ChatWithModel(ctx context.Context, userID, modelName str
 
 	return resp.Content, nil
 }
+
+// ChatWithContext 发送带有完整消息上下文的 AI 请求并获取响应。
+//
+// 参数:
+//   - ctx: 上下文，用于取消操作
+//   - userID: 用户标识符（用于日志）
+//   - systemPrompt: 系统提示词（为空则使用配置中的默认值）
+//   - messages: 完整的消息列表（包括历史和当前消息）
+//
+// 返回值:
+//   - string: AI 生成的响应内容
+//   - error: 生成过程中发生的错误
+func (s *SimpleService) ChatWithContext(
+	ctx context.Context,
+	userID string,
+	systemPrompt string,
+	messages []openai.ChatCompletionMessage,
+) (string, error) {
+	if !s.core.IsEnabled() {
+		return "", fmt.Errorf("AI功能未启用")
+	}
+
+	// 速率限制
+	if err := s.core.WaitForRateLimit(ctx); err != nil {
+		return "", fmt.Errorf("AI请求速率限制: %w", err)
+	}
+
+	// 使用配置中的默认系统提示词
+	if systemPrompt == "" {
+		systemPrompt = s.core.GetConfig().SystemPrompt
+	}
+
+	modelName := s.core.GetModelRegistry().GetDefault()
+	cfg := s.core.GetConfig()
+
+	// 构建完整消息列表：系统提示词 + 上下文消息
+	fullMessages := make([]openai.ChatCompletionMessage, 0, len(messages)+1)
+	fullMessages = append(fullMessages, openai.ChatCompletionMessage{
+		Role:    string(RoleSystem),
+		Content: systemPrompt,
+	})
+	fullMessages = append(fullMessages, messages...)
+
+	slog.Debug("SimpleService: 发送AI请求（带上下文）",
+		"user_id", userID,
+		"model", modelName,
+		"message_count", len(fullMessages))
+
+	resp, err := s.core.CreateChatCompletion(
+		ctx,
+		modelName,
+		fullMessages,
+		cfg.MaxTokens,
+		cfg.Temperature,
+	)
+	if err != nil {
+		return "", fmt.Errorf("AI请求失败: %w", err)
+	}
+
+	slog.Debug("SimpleService: AI响应成功（带上下文）",
+		"user_id", userID,
+		"model", resp.Model,
+		"content_length", len(resp.Content))
+
+	return resp.Content, nil
+}

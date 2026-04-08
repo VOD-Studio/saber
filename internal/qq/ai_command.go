@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sashabaranov/go-openai"
+
 	"rua.plus/saber/internal/ai"
 )
 
@@ -40,6 +42,49 @@ func NewAICommand(aiService *ai.SimpleService, contextMgr *ContextManager) *AICo
 		contextMgr:    contextMgr,
 		modelRegistry: aiService.GetModelRegistry(),
 	}
+}
+
+// convertToOpenAIMessages 将 ChatMessage 切片转换为 openai.ChatCompletionMessage 切片。
+//
+// 参数:
+//   - messages: ChatMessage 消息列表
+//
+// 返回值:
+//   - []openai.ChatCompletionMessage: 转换后的 OpenAI 格式消息列表
+func convertToOpenAIMessages(messages []ChatMessage) []openai.ChatCompletionMessage {
+	result := make([]openai.ChatCompletionMessage, 0, len(messages))
+	for _, msg := range messages {
+		result = append(result, openai.ChatCompletionMessage{
+			Role:    msg.Role,
+			Content: msg.Content,
+		})
+	}
+	return result
+}
+
+// buildMessagesWithContext 构建带有上下文历史的完整消息列表。
+//
+// 参数:
+//   - userID: 用户 ID
+//   - currentMessage: 当前用户消息
+//   - contextMgr: 上下文管理器
+//
+// 返回值:
+//   - []openai.ChatCompletionMessage: 包含历史上下文和当前消息的完整消息列表
+func buildMessagesWithContext(userID, currentMessage string, contextMgr *ContextManager) []openai.ChatCompletionMessage {
+	// 获取历史上下文
+	history := contextMgr.GetContext(userID)
+
+	// 构建完整消息列表
+	messages := convertToOpenAIMessages(history)
+
+	// 添加当前用户消息
+	messages = append(messages, openai.ChatCompletionMessage{
+		Role:    "user",
+		Content: currentMessage,
+	})
+
+	return messages
 }
 
 // Handle 实现 CommandHandler 接口。
@@ -146,12 +191,11 @@ func (c *AICommand) handleChat(ctx context.Context, userID, groupID string, args
 	// 添加用户消息到上下文
 	c.contextMgr.AddMessage(userID, "user", message)
 
-	// 获取上下文构建对话
-	// TODO: 支持带上下文的对话
-	_ = c.contextMgr.GetContext(userID) // 忽略错误，上下文功能暂未实现
+	// 构建带上下文的完整消息列表（包含当前消息）
+	messages := buildMessagesWithContext(userID, message, c.contextMgr)
 
-	// 调用 AI 服务
-	response, err := c.aiService.Chat(ctx, userID, message)
+	// 调用 AI 服务（带上下文）
+	response, err := c.aiService.ChatWithContext(ctx, userID, "", messages)
 	if err != nil {
 		return sender.Send(ctx, userID, groupID, fmt.Sprintf("AI 请求失败: %v", err))
 	}
