@@ -166,6 +166,8 @@ func (s *appState) initMatrixClient() (*services, error) {
 
 	mautrixClient := client.GetClient()
 	commandService := matrix.NewCommandService(mautrixClient, client.GetUserID(), &s.info)
+	// 注入加密服务到 CommandService
+	commandService.SetCryptoService(client.GetCryptoService())
 	matrix.RegisterBuiltinCommands(commandService)
 
 	return &services{

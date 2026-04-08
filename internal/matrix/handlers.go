@@ -59,6 +59,8 @@ type CommandService struct {
 	mentionService *MentionService
 	// buildInfo 构建版本信息。
 	buildInfo *BuildInfo
+	// cryptoService 端到端加密服务，为 nil 时禁用 E2EE。
+	cryptoService CryptoService
 }
 
 // NewCommandService 创建一个新的命令服务。
@@ -138,6 +140,21 @@ func (s *CommandService) SetReplyAIHandler(handler CommandHandler) {
 func (s *CommandService) SetMentionService(service *MentionService) {
 	s.mentionService = service
 	slog.Debug("Set mention service")
+}
+
+// SetCryptoService 设置端到端加密服务。
+func (s *CommandService) SetCryptoService(svc CryptoService) {
+	s.mu.Lock()
+	s.cryptoService = svc
+	s.mu.Unlock()
+	slog.Debug("Set crypto service", "enabled", svc != nil && svc.IsEnabled())
+}
+
+// GetCryptoService 获取端到端加密服务。
+func (s *CommandService) GetCryptoService() CryptoService {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cryptoService
 }
 
 // isDirectChat 检查房间是否为私聊（只有2个成员）。

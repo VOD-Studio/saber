@@ -197,19 +197,13 @@ func (h *EventHandler) OnMember(ctx context.Context, evt *event.Event) {
 }
 
 // OnEvent 是通用事件处理器，分发到适当的处理器。
-//
-// TODO: 添加 E2EE 加密事件处理
-// 当 evt.Type == event.EventEncrypted 时，需要先解密：
-//
-//	decryptedEvt, err := h.service.client.GetCryptoService().Decrypt(ctx, evt)
-//	if err != nil { log error and return }
-//	evt = decryptedEvt
-//
-// 然后再分发到 OnMessage 处理
+// 支持处理加密事件 (m.room.encrypted)，当启用 E2EE 时会自动解密后处理。
 func (h *EventHandler) OnEvent(ctx context.Context, evt *event.Event) {
 	switch evt.Type {
 	case event.EventMessage:
 		h.OnMessage(ctx, evt)
+	case event.EventEncrypted:
+		h.handleEncryptedEvent(ctx, evt)
 	case event.StateMember:
 		h.OnMember(ctx, evt)
 	default:
@@ -220,4 +214,38 @@ func (h *EventHandler) OnEvent(ctx context.Context, evt *event.Event) {
 // Service 返回底层的 CommandService。
 func (h *EventHandler) Service() *CommandService {
 	return h.service
+}
+
+// handleEncryptedEvent 处理加密事件 (m.room.encrypted)。
+// 如果启用了加密服务，先解密事件，然后将解密后的事件传递给 OnMessage 处理。
+func (h *EventHandler) handleEncryptedEvent(ctx context.Context, evt *event.Event) {
+	logger := h.logger.With(
+		"event_id", evt.ID.String(),
+		"type", evt.Type.String(),
+		"sender", evt.Sender.String())
+
+	// 获取加密服务
+	cryptoService := h.service.GetCryptoService()
+	if cryptoService == nil || !cryptoService.IsEnabled() {
+		logger.Debug("加密事件被忽略：加密服务未启用")
+		return
+	}
+
+	// 解密事件
+	logger.Debug("解密加密事件")
+	decryptedEvt, err := cryptoService.Decrypt(ctx, evt)
+	if err != nil {
+		logger.Error("解密事件失败", "error", err)
+		return
+	}
+
+	// 确保解密后的事件是消息类型
+	if decryptedEvt.Type != event.EventMessage {
+		logger.Debug("解密后的事件不是消息类型",
+			"decrypted_type", decryptedEvt.Type.String())
+		return
+	}
+
+	logger.Debug("事件解密成功，转发到消息处理器")
+	h.OnMessage(ctx, decryptedEvt)
 }
