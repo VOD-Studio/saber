@@ -243,8 +243,28 @@ func (p *PresenceService) SendReceiptWithContext(ctx context.Context, roomID str
 
 // calculateBackoff 计算给定重试尝试的退避延迟。
 func (p *PresenceService) calculateBackoff(attempt int) time.Duration {
+	// 处理负数尝试次数
+	if attempt < 0 {
+		attempt = 0
+	}
+
+	// 先检查是否已经超过最大延迟，避免大指数计算导致 float64 溢出
+	// 当 attempt 很大时，math.Pow 会返回 +Inf，导致后续转换溢出为负数
 	delay := float64(p.reconnectCfg.InitialDelay)
+	maxDelayFloat := float64(p.reconnectCfg.MaxDelay)
+
+	// 如果初始延迟已经是 0，直接返回 0
+	if delay == 0 {
+		return 0
+	}
+
+	// 计算指数增长后的延迟
 	delay = delay * math.Pow(p.reconnectCfg.Multiplier, float64(attempt))
+
+	// 检查是否溢出或超过最大延迟
+	if math.IsInf(delay, 0) || math.IsNaN(delay) || delay >= maxDelayFloat {
+		return p.reconnectCfg.MaxDelay
+	}
 
 	result := min(time.Duration(delay), p.reconnectCfg.MaxDelay)
 
