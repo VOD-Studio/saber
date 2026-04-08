@@ -68,6 +68,7 @@ type AIConfig struct {
 	ReplyToBotReply       bool                   `yaml:"reply_to_bot_reply"`       // 回复机器人自己的回复（用于连续对话）
 	Proactive             ProactiveConfig        `yaml:"proactive"`                // 主动聊天配置
 	Media                 MediaConfig            `yaml:"media"`                    // 媒体文件处理配置
+	CircuitBreaker        CircuitBreakerConfig   `yaml:"circuit_breaker"`          // 熔断器配置
 }
 
 // ContextConfig 存储上下文管理配置
@@ -86,6 +87,13 @@ type StreamEditConfig struct {
 	TimeThresholdMs int  `yaml:"time_threshold_ms"` // 触发编辑的时间阈值（毫秒）
 	EditIntervalMs  int  `yaml:"edit_interval_ms"`  // 编辑间隔（毫秒）
 	MaxEdits        int  `yaml:"max_edits"`         // 最大编辑次数
+}
+
+// CircuitBreakerConfig 存储熔断器配置
+type CircuitBreakerConfig struct {
+	Enabled          bool `yaml:"enabled"`           // 是否启用熔断器
+	FailureThreshold int  `yaml:"failure_threshold"` // 触发熔断的失败次数阈值
+	ResetTimeout     int  `yaml:"reset_timeout"`     // 熔断后重置时间（秒）
 }
 
 // RetryConfig 存储重试配置
@@ -164,6 +172,8 @@ type ProactiveConfig struct {
 	Schedule           ScheduleConfig  `yaml:"schedule"`             // 定时聊天配置
 	NewMember          NewMemberConfig `yaml:"new_member"`           // 新成员欢迎配置
 	Decision           DecisionConfig  `yaml:"decision"`             // 决策模型配置
+	PersistState       bool            `yaml:"persist_state"`        // 是否持久化状态
+	StatePath          string          `yaml:"state_path"`           // 状态文件路径
 }
 
 // SilenceConfig 存储静默检测配置
@@ -265,6 +275,7 @@ func DefaultAIConfig() AIConfig {
 		ReplyToBotReply:       true,
 		Proactive:             DefaultProactiveConfig(),
 		Media:                 DefaultMediaConfig(),
+		CircuitBreaker:        DefaultCircuitBreakerConfig(),
 	}
 }
 
@@ -287,6 +298,15 @@ func DefaultStreamEditConfig() StreamEditConfig {
 		TimeThresholdMs: 3000,
 		EditIntervalMs:  500,
 		MaxEdits:        5,
+	}
+}
+
+// DefaultCircuitBreakerConfig 返回带有合理默认值的熔断器配置
+func DefaultCircuitBreakerConfig() CircuitBreakerConfig {
+	return CircuitBreakerConfig{
+		Enabled:          false, // 默认禁用，保持向后兼容
+		FailureThreshold: 5,
+		ResetTimeout:     30,
 	}
 }
 
@@ -508,6 +528,15 @@ func (a *AIConfig) Validate() error {
 	for name, modelCfg := range a.Models {
 		if err := modelCfg.Validate(); err != nil {
 			return fmt.Errorf("models[%s]: %w", name, err)
+		}
+	}
+	// 验证熔断器配置
+	if a.CircuitBreaker.Enabled {
+		if a.CircuitBreaker.FailureThreshold <= 0 {
+			return fmt.Errorf("circuit_breaker.failure_threshold must be positive")
+		}
+		if a.CircuitBreaker.ResetTimeout <= 0 {
+			return fmt.Errorf("circuit_breaker.reset_timeout must be positive")
 		}
 	}
 	return nil
@@ -1010,6 +1039,11 @@ ai:
     backoff_factor: 2.0
     fallback_enabled: true
     fallback_models: []
+  # 熔断器配置
+  circuit_breaker:
+    enabled: false
+    failure_threshold: 5
+    reset_timeout: 30
   # 工具调用配置
   tool_calling:
     # 最大工具调用迭代次数（默认 5）
