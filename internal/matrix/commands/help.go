@@ -9,6 +9,12 @@ import (
 	"maunium.net/go/mautrix/id"
 )
 
+// CommandInfo 包含已注册命令的元数据。
+type CommandInfo struct {
+	Name        string
+	Description string
+}
+
 // CommandLister 定义列出命令的接口。
 type CommandLister interface {
 	// List 返回所有已注册的命令。
