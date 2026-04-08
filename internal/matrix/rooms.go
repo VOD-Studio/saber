@@ -39,6 +39,11 @@ func NewRoomService(client *MatrixClient) *RoomService {
 // JoinRoom 加入指定的房间。
 // roomIDOrAlias 可以是房间 ID（!xxx:server.org）或房间别名（#room:server.org）。
 func (rs *RoomService) JoinRoom(ctx context.Context, roomIDOrAlias string) (*RoomInfo, error) {
+	if rs.client == nil {
+		rs.logger.Warn("RoomService client is nil, skipping join")
+		return nil, errors.New("matrix client is not initialized")
+	}
+
 	if roomIDOrAlias == "" {
 		return nil, errors.New("room ID or alias cannot be empty")
 	}

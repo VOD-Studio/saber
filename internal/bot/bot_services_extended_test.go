@@ -226,18 +226,9 @@ func TestAutoJoinRooms_NilClient(t *testing.T) {
 		},
 	}
 
-	// 这会 panic，因为代码尝试使用 nil client
-	// 使用 defer/recover 捕获 panic
-	defer func() {
-		if r := recover(); r != nil {
-			// 预期的 panic，测试通过
-			t.Logf("Expected panic occurred: %v", r)
-		}
-	}()
-
+	// nil client 现在会优雅处理，不会 panic
 	state.autoJoinRooms()
-	// 如果没有 panic，测试失败
-	t.Error("Expected panic did not occur")
+	// 测试通过，因为没有 panic 且错误被正确处理
 }
 
 // TestInitCrypto_E2EEEnabled 测试 E2EE 启用。
@@ -541,6 +532,9 @@ func TestInitServices_WithAIEnabled(t *testing.T) {
 				TimeoutSeconds: 30,
 				Models: map[string]config.ModelConfig{
 					"gpt-4": {Model: "gpt-4"},
+				},
+				ToolCalling: config.ToolCallingConfig{
+					MaxIterations: 5,
 				},
 			},
 		},
