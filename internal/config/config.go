@@ -935,6 +935,10 @@ ai:
   # 支持同时配置多个 AI 提供商，使用完全限定名称：提供商.模型名
   providers:
     openai:
+      # type: 提供商类型
+      # 可选值:
+      #   - openai: OpenAI 及兼容 API（Ollama、vLLM、LocalAI 等）
+      #   - azure: Azure OpenAI（需配合 extra.api_version）
       type: "openai"
       base_url: "https://api.openai.com/v1"
       api_key: ""
@@ -945,7 +949,7 @@ ai:
           model: "gpt-4o"
     # Ollama 本地模型示例
     # ollama:
-    #   type: "openai"
+    #   type: "openai"  # Ollama 兼容 OpenAI API
     #   base_url: "http://localhost:11434/v1"
     #   models:
     #     llama3:
@@ -1069,22 +1073,28 @@ mcp:
   enabled: true
   # 外部 MCP 服务器配置（可选）
   # servers:
+  #   # MCP 服务器类型说明:
+  #   # - builtin: 内置工具（web_search, js_sandbox），通过 mcp.builtin 配置
+  #   # - stdio: 进程通信型服务器，需配置 command/args/env/allowed_commands
+  #   # - http: HTTP 远程服务器，需配置 url/token
+  #
   #   # stdio 类型服务器示例
   #   filesystem:
   #     type: stdio
   #     enabled: true
-  #     command: "/path/to/mcp-server-filesystem"
-  #     args: ["--root", "/home/user/documents"]
-  #     timeout_seconds: 30
-  #     # env:
+  #     command: "/path/to/mcp-server-filesystem"  # 必需：可执行文件路径
+  #     args: ["--root", "/home/user/documents"]   # 可选：命令参数
+  #     timeout_seconds: 30                        # 可选：超时时间
+  #     # allowed_commands: []                     # 安全：命令白名单（默认禁止所有）
+  #     # env:                                     # 可选：环境变量
   #     #   DEBUG: "1"
   #   # http 类型服务器示例
   #   remote-server:
   #     type: http
   #     enabled: false
-  #     url: "https://mcp.example.com/api"
-  #     token: "your-bearer-token"
-  #     timeout_seconds: 30
+  #     url: "https://mcp.example.com/api"  # 必需：服务器地址
+  #     token: "your-bearer-token"          # 可选：Bearer 认证令牌
+  #     timeout_seconds: 30                 # 可选：超时时间
   # 内置工具配置
   builtin:
     # web_search 搜索工具配置
