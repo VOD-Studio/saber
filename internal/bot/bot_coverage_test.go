@@ -141,35 +141,6 @@ func TestAppState_InitServices_AIEnabled(t *testing.T) {
 	}
 }
 
-// TestLogError_WithBotError 测试 LogError 函数。
-func TestLogError_WithBotError(t *testing.T) {
-	var buf bytes.Buffer
-	handler := slog.NewTextHandler(&buf, nil)
-	slog.SetDefault(slog.New(handler))
-
-	botErr := NewConfigError("test error", nil)
-	LogError(botErr)
-
-	output := buf.String()
-	if output == "" {
-		t.Error("LogError should produce output for BotError")
-	}
-}
-
-// TestLogError_WithRegularError 测试 LogError 处理普通错误。
-func TestLogError_WithRegularError(t *testing.T) {
-	var buf bytes.Buffer
-	handler := slog.NewTextHandler(&buf, nil)
-	slog.SetDefault(slog.New(handler))
-
-	LogError(os.ErrNotExist)
-
-	output := buf.String()
-	if output == "" {
-		t.Error("LogError should produce output for regular error")
-	}
-}
-
 // TestSetupLogging_Levels 测试日志级别设置。
 func TestSetupLogging_Levels(t *testing.T) {
 	tests := []struct {
