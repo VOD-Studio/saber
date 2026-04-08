@@ -149,6 +149,16 @@ func (m *ProactiveManager) Start(ctx context.Context) {
 
 	slog.Info("启动主动聊天管理器")
 
+	// 如果启用了状态持久化，尝试加载状态
+	if m.config.PersistState && m.config.StatePath != "" {
+		if err := m.stateTracker.Load(m.config.StatePath); err != nil {
+			// 加载失败不阻止启动，仅记录错误
+			slog.Warn("加载主动聊天状态失败，使用新状态", "path", m.config.StatePath, "error", err)
+		} else {
+			slog.Info("已加载主动聊天状态", "path", m.config.StatePath)
+		}
+	}
+
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
@@ -161,6 +171,7 @@ func (m *ProactiveManager) Start(ctx context.Context) {
 // 它会：
 // 1. 发送停止信号到所有后台 goroutine
 // 2. 等待所有 goroutine 完成清理
+// 3. 如果启用了状态持久化，保存状态到文件
 //
 // 该方法会阻塞直到所有后台任务完全停止。
 func (m *ProactiveManager) Stop() {
@@ -168,6 +179,16 @@ func (m *ProactiveManager) Stop() {
 
 	close(m.stopChan)
 	m.wg.Wait()
+
+	// 如果启用了状态持久化，保存状态
+	if m.config.PersistState && m.config.StatePath != "" {
+		if err := m.stateTracker.Save(m.config.StatePath); err != nil {
+			// 保存失败不影响关闭流程，仅记录错误
+			slog.Error("保存主动聊天状态失败", "path", m.config.StatePath, "error", err)
+		} else {
+			slog.Info("已保存主动聊天状态", "path", m.config.StatePath)
+		}
+	}
 
 	slog.Debug("主动聊天管理器已停止")
 }

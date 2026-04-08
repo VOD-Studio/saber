@@ -448,6 +448,17 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 		FallbackModels: cfg.Retry.FallbackModels,
 	}
 
+	// 如果启用了熔断器，创建熔断器实例
+	if cfg.CircuitBreaker.Enabled {
+		retryConfig.CircuitBreaker = NewCircuitBreaker(
+			cfg.CircuitBreaker.FailureThreshold,
+			time.Duration(cfg.CircuitBreaker.ResetTimeout)*time.Second,
+		)
+		slog.Debug("熔断器已启用",
+			"failure_threshold", cfg.CircuitBreaker.FailureThreshold,
+			"reset_timeout", cfg.CircuitBreaker.ResetTimeout)
+	}
+
 	fallbackHandler := &FallbackModelHandler{
 		MainModel:   actualModel,
 		RetryConfig: retryConfig,
