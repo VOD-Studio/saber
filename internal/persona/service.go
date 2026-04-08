@@ -39,7 +39,7 @@ func NewService(dbPath string) (*Service, error) {
 
 	// 创建表结构
 	if err := initSchema(db); err != nil {
-		_ = db.Close()
+		_ = db.Close() // 忽略关闭错误，返回主要错误
 		return nil, fmt.Errorf("初始化数据库表失败: %w", err)
 	}
 
@@ -51,13 +51,13 @@ func NewService(dbPath string) (*Service, error) {
 
 	// 加载内置人格
 	if err := svc.loadBuiltinPersonas(); err != nil {
-		_ = db.Close()
+		_ = db.Close() // 忽略关闭错误，返回主要错误
 		return nil, fmt.Errorf("加载内置人格失败: %w", err)
 	}
 
 	// 加载现有数据到缓存
 	if err := svc.loadFromDB(); err != nil {
-		_ = db.Close()
+		_ = db.Close() // 忽略关闭错误，返回主要错误
 		return nil, fmt.Errorf("加载数据失败: %w", err)
 	}
 
@@ -133,7 +133,7 @@ func (s *Service) loadFromDB() error {
 	if err != nil {
 		return fmt.Errorf("查询人格失败: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() { _ = rows.Close() }() // 忽略关闭错误，主要错误已处理
 
 	for rows.Next() {
 		p := &Persona{}
@@ -154,7 +154,7 @@ func (s *Service) loadFromDB() error {
 	if err != nil {
 		return fmt.Errorf("查询房间人格映射失败: %w", err)
 	}
-	defer func() { _ = roomRows.Close() }()
+	defer func() { _ = roomRows.Close() }() // 忽略关闭错误，主要错误已处理
 
 	for roomRows.Next() {
 		var roomID, personaID string

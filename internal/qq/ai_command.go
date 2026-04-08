@@ -148,7 +148,7 @@ func (c *AICommand) handleChat(ctx context.Context, userID, groupID string, args
 
 	// 获取上下文构建对话
 	// TODO: 支持带上下文的对话
-	_ = c.contextMgr.GetContext(userID)
+	_ = c.contextMgr.GetContext(userID) // 忽略错误，上下文功能暂未实现
 
 	// 调用 AI 服务
 	response, err := c.aiService.Chat(ctx, userID, message)

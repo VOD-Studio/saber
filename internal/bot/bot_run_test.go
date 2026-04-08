@@ -222,7 +222,7 @@ func TestRun_GenerateConfigFlag(t *testing.T) {
 			workDir:        t.TempDir(),
 			expectedExit:   0,
 			outputContains: "matrix:", // 输出配置内容
-			expectFile:     "",         // 不生成文件
+			expectFile:     "",        // 不生成文件
 		},
 		{
 			name:           "generate-config 输出到指定文件",

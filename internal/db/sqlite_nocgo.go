@@ -32,8 +32,8 @@ func registerDriverOnce(name string, driver driver.Driver) {
 	// 如果驱动已存在，sql.Open 会成功（不会真正连接）
 	db, err := sql.Open(name, ":memory:")
 	if err == nil {
-		_ = db.Close()
-		return // 驱动已注册
+		_ = db.Close() // 忽略关闭错误，驱动已注册
+		return         // 驱动已注册
 	}
 
 	// 如果错误是"驱动不存在"，则注册驱动
@@ -70,7 +70,7 @@ func getModerncDriver() (driver.Driver, error) {
 			return
 		}
 		defer func() {
-			_ = db.Close()
+			_ = db.Close() // 忽略关闭错误，驱动已获取
 		}()
 
 		moderncDriver = db.Driver()
