@@ -1107,8 +1107,68 @@ func TestDecisionCache_ContextHashIsolation(t *testing.T) {
 	}
 }
 
-// TestGatherDecisionContext_IsDirect 测试 IsDirect 字段的正确设置。
-//
+// mockAIService 是 AIService 接口的模拟实现。
+type mockAIService struct {
+	enabled           bool
+	simpleResponse    string
+	simpleErr         error
+	streamingResponse string
+	streamingErr      error
+}
+
+func (m *mockAIService) IsEnabled() bool {
+	return m.enabled
+}
+
+func (m *mockAIService) GenerateSimpleResponse(ctx context.Context, systemPrompt, userMessage string) (string, error) {
+	return m.simpleResponse, m.simpleErr
+}
+
+func (m *mockAIService) GenerateSimpleResponseWithModel(ctx context.Context, modelName string, temperature float64, systemPrompt, userMessage string) (string, error) {
+	return m.simpleResponse, m.simpleErr
+}
+
+func (m *mockAIService) GenerateStreamingSimpleResponse(ctx context.Context, modelName string, temperature float64, systemPrompt, userMessage string) (string, error) {
+	return m.streamingResponse, m.streamingErr
+}
+
+// TestNewDecisionEngine 测试创建 DecisionEngine。
+func TestNewDecisionEngine(t *testing.T) {
+	t.Run("nil aiService", func(t *testing.T) {
+		_, err := NewDecisionEngine(nil, &config.DecisionConfig{}, &config.AIConfig{})
+		if err == nil {
+			t.Error("expected error for nil aiService")
+		}
+	})
+
+	t.Run("nil cfg", func(t *testing.T) {
+		mockSvc := &mockAIService{}
+		_, err := NewDecisionEngine(mockSvc, nil, &config.AIConfig{})
+		if err == nil {
+			t.Error("expected error for nil cfg")
+		}
+	})
+
+	t.Run("nil globalCfg", func(t *testing.T) {
+		mockSvc := &mockAIService{}
+		_, err := NewDecisionEngine(mockSvc, &config.DecisionConfig{}, nil)
+		if err == nil {
+			t.Error("expected error for nil globalCfg")
+		}
+	})
+
+	t.Run("valid parameters", func(t *testing.T) {
+		mockSvc := &mockAIService{enabled: true}
+		engine, err := NewDecisionEngine(mockSvc, &config.DecisionConfig{}, &config.AIConfig{})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if engine == nil {
+			t.Error("engine should not be nil")
+		}
+	})
+}
+
 // 验证 GatherDecisionContext 根据成员数量正确判断房间类型：
 // - 成员数为 2 时，IsDirect 应为 true（私聊）
 // - 成员数不为 2 时，IsDirect 应为 false（群聊）

@@ -253,6 +253,124 @@ func TestNewAICommandRouter(t *testing.T) {
 	}
 }
 
+// TestAICommand_Handle_Disabled 测试 AICommand.Handle 当 AI 禁用时的行为。
+func TestAICommand_Handle_Disabled(t *testing.T) {
+	server := createMockMatrixServerForCommands()
+	defer server.Close()
+
+	client := createTestMatrixClientForCommands(server)
+	matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+	cfg := createTestMultiProviderAIConfig()
+	cfg.Enabled = false // AI 禁用
+
+	service, err := NewService(cfg, matrixSvc, nil, nil)
+	if err != nil {
+		t.Fatalf("NewService failed: %v", err)
+	}
+
+	cmd := NewAICommand(service)
+
+	ctx := context.Background()
+	userID := id.UserID("@user:example.com")
+	roomID := id.RoomID("!room:example.com")
+	args := []string{"hello", "AI"}
+
+	// 当 AI 禁用时应该返回错误
+	err = cmd.Handle(ctx, userID, roomID, args)
+	if err == nil {
+		t.Error("Handle should return error when AI is disabled")
+	}
+}
+
+// TestAICommand_Handle_EmptyInput 测试 AICommand.Handle 当输入为空时的行为。
+func TestAICommand_Handle_EmptyInput(t *testing.T) {
+	server := createMockMatrixServerForCommands()
+	defer server.Close()
+
+	client := createTestMatrixClientForCommands(server)
+	matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+	cfg := createTestMultiProviderAIConfig()
+
+	service, err := NewService(cfg, matrixSvc, nil, nil)
+	if err != nil {
+		t.Fatalf("NewService failed: %v", err)
+	}
+
+	cmd := NewAICommand(service)
+
+	ctx := context.Background()
+	userID := id.UserID("@user:example.com")
+	roomID := id.RoomID("!room:example.com")
+	args := []string{} // 空输入
+
+	// 当输入为空时应该返回错误
+	err = cmd.Handle(ctx, userID, roomID, args)
+	if err == nil {
+		t.Error("Handle should return error when input is empty")
+	}
+}
+
+// TestMultiModelAICommand_Handle_Disabled 测试 MultiModelAICommand.Handle 当 AI 禁用时的行为。
+func TestMultiModelAICommand_Handle_Disabled(t *testing.T) {
+	server := createMockMatrixServerForCommands()
+	defer server.Close()
+
+	client := createTestMatrixClientForCommands(server)
+	matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+	cfg := createTestMultiProviderAIConfig()
+	cfg.Enabled = false // AI 禁用
+
+	service, err := NewService(cfg, matrixSvc, nil, nil)
+	if err != nil {
+		t.Fatalf("NewService failed: %v", err)
+	}
+
+	cmd := NewMultiModelAICommand(service, "gpt-4o")
+
+	ctx := context.Background()
+	userID := id.UserID("@user:example.com")
+	roomID := id.RoomID("!room:example.com")
+	args := []string{"hello"}
+
+	// 当 AI 禁用时应该返回错误
+	err = cmd.Handle(ctx, userID, roomID, args)
+	if err == nil {
+		t.Error("Handle should return error when AI is disabled")
+	}
+}
+
+// TestMultiModelAICommand_Handle_EmptyInput 测试 MultiModelAICommand.Handle 当输入为空时的行为。
+func TestMultiModelAICommand_Handle_EmptyInput(t *testing.T) {
+	server := createMockMatrixServerForCommands()
+	defer server.Close()
+
+	client := createTestMatrixClientForCommands(server)
+	matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
+
+	cfg := createTestMultiProviderAIConfig()
+
+	service, err := NewService(cfg, matrixSvc, nil, nil)
+	if err != nil {
+		t.Fatalf("NewService failed: %v", err)
+	}
+
+	cmd := NewMultiModelAICommand(service, "gpt-4o")
+
+	ctx := context.Background()
+	userID := id.UserID("@user:example.com")
+	roomID := id.RoomID("!room:example.com")
+	args := []string{} // 空输入
+
+	// 当输入为空时应该返回错误
+	err = cmd.Handle(ctx, userID, roomID, args)
+	if err == nil {
+		t.Error("Handle should return error when input is empty")
+	}
+}
+
 // TestClearContextCommand_Handle 测试 ClearContextCommand.Handle 方法。
 func TestClearContextCommand_Handle(t *testing.T) {
 	t.Run("context manager disabled", func(t *testing.T) {
