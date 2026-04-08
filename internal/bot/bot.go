@@ -96,10 +96,16 @@ func (s *appState) initConfig() error {
 	}
 
 	if s.flags.GenerateConfig {
-		if err := config.GenerateExample("config.example.yaml"); err != nil {
-			return ExitError(1, fmt.Errorf("生成配置文件失败: %w", err))
+		if s.flags.OutputPath != "" {
+			// 输出到指定文件
+			if err := config.GenerateExample(s.flags.OutputPath); err != nil {
+				return ExitError(1, fmt.Errorf("生成配置文件失败: %w", err))
+			}
+			fmt.Printf("Example configuration generated: %s\n", s.flags.OutputPath)
+		} else {
+			// 输出到 stdout
+			fmt.Print(config.ExampleConfig())
 		}
-		fmt.Println("Example configuration generated: config.example.yaml")
 		return ExitSuccess()
 	}
 

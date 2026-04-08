@@ -214,13 +214,23 @@ func TestRun_GenerateConfigFlag(t *testing.T) {
 		workDir        string
 		expectedExit   int
 		outputContains string
+		expectFile     string // 期望生成的文件路径（可选）
 	}{
 		{
-			name:           "generate-config 标志",
+			name:           "generate-config 默认输出到 stdout",
 			args:           []string{"-generate-config"},
 			workDir:        t.TempDir(),
 			expectedExit:   0,
+			outputContains: "matrix:", // 输出配置内容
+			expectFile:     "",         // 不生成文件
+		},
+		{
+			name:           "generate-config 输出到指定文件",
+			args:           []string{"-generate-config", "-o", "config.example.yaml"},
+			workDir:        t.TempDir(),
+			expectedExit:   0,
 			outputContains: "Example configuration generated",
+			expectFile:     "config.example.yaml",
 		},
 	}
 
@@ -250,10 +260,12 @@ func TestRun_GenerateConfigFlag(t *testing.T) {
 				t.Errorf("输出应包含 %q，实际输出:\n%s", tt.outputContains, outputStr)
 			}
 
-			// 验证配置文件已生成
-			configPath := filepath.Join(tt.workDir, "config.example.yaml")
-			if _, err := os.Stat(configPath); os.IsNotExist(err) {
-				t.Error("期望生成配置文件 config.example.yaml，但文件不存在")
+			// 验证文件生成（如果期望）
+			if tt.expectFile != "" {
+				configPath := filepath.Join(tt.workDir, tt.expectFile)
+				if _, err := os.Stat(configPath); os.IsNotExist(err) {
+					t.Errorf("期望生成配置文件 %s，但文件不存在", tt.expectFile)
+				}
 			}
 		})
 	}
