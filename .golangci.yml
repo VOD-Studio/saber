@@ -1,0 +1,19 @@
+# 精简配置，减少内存占用
+run:
+  timeout: 5m
+
+# 只启用必要的 linters
+linters:
+  disable-all: true
+  enable:
+    - errcheck # 错误检查
+    - gofmt # 格式检查
+    - goimports # 导入检查
+    - govet # vet 检查
+    - ineffassign # 无效赋值
+    - staticcheck # 静态分析
+    - unused # 未使用代码
+
+linters-settings:
+  staticcheck:
+    checks: ["-ST1000", "-ST1003"] # 排除部分检查
