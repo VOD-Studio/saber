@@ -484,3 +484,28 @@ type testMockPromptProvider struct{}
 func (m *testMockPromptProvider) GetSystemPrompt(roomID id.RoomID, basePrompt string) string {
 	return "test system prompt"
 }
+
+func TestOllamaIntegration(t *testing.T) {
+	cfg, err := config.Load("../../config.yaml")
+	if err != nil {
+		t.Skipf("Config load skipped: %v", err)
+	}
+
+	modelCfg, ok := cfg.AI.GetModelConfig(cfg.AI.DefaultModel)
+	if !ok {
+		t.Skipf("Default model %s not found", cfg.AI.DefaultModel)
+	}
+	t.Logf("Testing with model %s (%s, %s)", cfg.AI.DefaultModel, modelCfg.Provider, modelCfg.BaseURL)
+
+	svc, err := NewService(&cfg.AI, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewService failed: %v", err)
+	}
+	defer svc.Stop()
+
+	resp, err := svc.GenerateSimpleResponse(context.Background(), "You are a helpful assistant", "1+1等于几？只需回答数字")
+	if err != nil {
+		t.Skipf("GenerateSimpleResponse skipped due to network/service error: %v", err)
+	}
+	t.Logf("Ollama Response: %s", resp)
+}

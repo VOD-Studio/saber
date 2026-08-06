@@ -176,7 +176,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 		resp, err := c.openaiClient.CreateChatCompletion(
 			ctx,
 			openai.ChatCompletionRequest{
-				Model:       req.Model,
+				Model:       c.getModelName(req.Model),
 				Messages:    req.Messages,
 				MaxTokens:   req.MaxTokens,
 				Temperature: float32(req.Temperature),
@@ -213,7 +213,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 	stream, err := c.openaiClient.CreateChatCompletionStream(
 		ctx,
 		openai.ChatCompletionRequest{
-			Model:       req.Model,
+			Model:       c.getModelName(req.Model),
 			Messages:    req.Messages,
 			MaxTokens:   req.MaxTokens,
 			Temperature: float32(req.Temperature),
@@ -303,7 +303,7 @@ func (c *Client) CreateStreamingChatCompletion(
 	stream, err := c.openaiClient.CreateChatCompletionStream(
 		ctx,
 		openai.ChatCompletionRequest{
-			Model:       req.Model,
+			Model:       c.getModelName(req.Model),
 			Messages:    req.Messages,
 			MaxTokens:   req.MaxTokens,
 			Temperature: float32(req.Temperature),
@@ -390,7 +390,7 @@ func (c *Client) CreateStreamingChatCompletionWithTools(
 	stream, err := c.openaiClient.CreateChatCompletionStream(
 		ctx,
 		openai.ChatCompletionRequest{
-			Model:       req.Model,
+			Model:       c.getModelName(req.Model),
 			Messages:    req.Messages,
 			MaxTokens:   req.MaxTokens,
 			Temperature: float32(req.Temperature),
@@ -480,4 +480,13 @@ func (c *Client) CreateStreamingChatCompletionWithTools(
 			model = response.Model
 		}
 	}
+}
+
+// getModelName 返回用于 API 请求的实际模型标识符。
+// 如果 ModelConfig 中指定了 Model，则优先使用该 Model。
+func (c *Client) getModelName(reqModel string) string {
+	if c.config != nil && c.config.Model != "" {
+		return c.config.Model
+	}
+	return reqModel
 }
