@@ -666,10 +666,9 @@ func setupLogging(verbose bool) {
 		level = slog.LevelDebug
 	}
 
-	handler := tint.NewHandler(os.Stdout, &tint.Options{
+	logger := slog.New(tint.NewTextHandler(os.Stdout, &tint.Options{
 		Level: level,
-	})
-	logger := slog.New(handler)
+	}))
 	slog.SetDefault(logger)
 
 	if verbose {

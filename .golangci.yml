@@ -1,14 +1,16 @@
+version: "2"
+
 # 精简配置，减少内存占用
 run:
   timeout: 5m
+  build-tags:
+    - goolm
 
 # 只启用必要的 linters
 linters:
   disable-all: true
   enable:
     - errcheck # 错误检查
-    - gofmt # 格式检查
-    - goimports # 导入检查
     - govet # vet 检查
     - ineffassign # 无效赋值
     - staticcheck # 静态分析

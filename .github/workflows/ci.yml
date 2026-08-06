@@ -1,0 +1,109 @@
+name: CI / CD
+
+on:
+  push:
+    branches: [ "master", "main", "develop" ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ "master", "main" ]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Check code formatting
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "The following files are not formatted properly:"
+            gofmt -l .
+            exit 1
+          fi
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      - name: Run tests
+        run: make test
+
+      - name: Run coverage check
+        run: make test-cover-check
+
+      - name: Build binary
+        run: make build
+
+  release:
+    name: Build & Publish Release
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Extract Release Notes from CHANGELOG.md
+        id: extract_changelog
+        run: |
+          python3 -c '
+          import re, os
+          tag = os.environ.get("GITHUB_REF_NAME", "")
+          version = tag.lstrip("v")
+          changelog = "CHANGELOG.md"
+          notes = ""
+
+          if os.path.exists(changelog):
+              with open(changelog, "r", encoding="utf-8") as f:
+                  content = f.read()
+              pattern = re.compile(rf"^##\s+\[?v?{re.escape(version)}\]?.*$", re.MULTILINE | re.IGNORECASE)
+              match = pattern.search(content)
+              if match:
+                  start = match.end()
+                  next_match = re.search(r"^##\s+", content[start:], re.MULTILINE)
+                  notes = content[start:start + next_match.start()].strip() if next_match else content[start:].strip()
+                  notes = re.sub(r"\n\[[0-9a-zA-Zv\.\-]+\]:\s*https?://.*", "", notes).strip()
+
+          if notes:
+              with open("RELEASE_NOTES.md", "w", encoding="utf-8") as f:
+                  f.write(notes + "\n")
+              print("Successfully extracted changelog for version", version)
+          else:
+              print("No matching changelog section found for version", version)
+          '
+
+      - name: Build all platform release binaries
+        run: |
+          make build-all VERSION=${{ github.ref_name }}
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: bin/release/*
+          body_path: RELEASE_NOTES.md
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
