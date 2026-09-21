@@ -12,6 +12,7 @@ ai:
     podlink-responses:
       type: openai
       api: openai-responses
+      reasoning_effort: medium
       base_url: http://127.0.0.1:8317/v1
       api_key: "YOUR_PODLINK_KEY"
       models:
@@ -42,7 +43,7 @@ ai:
 
 - `api` 可配置在 provider 或模型上，模型级覆盖 provider；省略时沿用原有 Chat Completions。未知协议（含 `anthropic-messages`）明确报配置错误。本次只实现 Responses，Claude 等仅声明 Messages 的模型不能由此配置启用。
 - 支持系统/开发者/用户消息、文本和用户图片、函数工具定义、工具结果回传，以及流式/非流式 Agent 执行。图片是否可用取决于模型。
-- `max_tokens` 映射为 `max_output_tokens`。可在模型上添加 `reasoning_effort: medium` 等上游支持的值；省略时使用上游默认。Responses 默认不发送 `temperature`，避免推理模型拒绝请求；仅 `reasoning_effort: none` 时发送现有温度设置。
+- `max_tokens` 映射为 `max_output_tokens`。可在 AI 全局、提供商或模型上设置 `reasoning_effort`，按模型 > 提供商 > 全局继承；所有层级均为空时使用上游默认。显式 `none` 请求关闭思考，仍需上游支持。Responses 默认不发送 `temperature`，避免推理模型拒绝请求；仅 `reasoning_effort: none` 时发送现有温度设置。
 - 工具 schema 显式保留原有 `strict` 设置。流式文字复用现有编辑逻辑，工具参数从终态完整输出读取，确认成功后才执行工具。断流、失败、截断和非法工具身份均报错，不当作完成。
 - 每轮发送完整历史并设置 `store: false`，不依赖中继保存 `previous_response_id`。工具续轮回传原始 Responses 输出（包括加密推理及消息 `phase`），任务续接和重启恢复也保留这些字段。
 - 上游内置工具、自定义工具、音频等未接入 Saber 的工具执行器；遇到不支持的内容明确报错。Chat Completions 备用模型仍使用其原协议；已生成的 Responses 工具历史由普通消息/工具记录转换供其使用。

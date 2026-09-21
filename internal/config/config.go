@@ -45,9 +45,10 @@ type MatrixConfig struct {
 
 // AIConfig 存储 AI 服务配置
 type AIConfig struct {
-	Enabled      bool                      `yaml:"enabled"`       // 是否启用 AI 功能
-	Providers    map[string]ProviderConfig `yaml:"providers"`     // 多提供商配置
-	DefaultModel string                    `yaml:"default_model"` // 默认使用的模型（完全限定名称，如 openai.gpt-4o-mini）
+	ReasoningEffort string                    `yaml:"reasoning_effort,omitempty"` // 全局思考等级，空值使用上游默认。
+	Enabled         bool                      `yaml:"enabled"`                    // 是否启用 AI 功能
+	Providers       map[string]ProviderConfig `yaml:"providers"`                  // 多提供商配置
+	DefaultModel    string                    `yaml:"default_model"`              // 默认使用的模型（完全限定名称，如 openai.gpt-4o-mini）
 
 	// 旧字段保留向后兼容（已弃用，推荐使用 Providers）
 	Provider              string                 `yaml:"provider"`                 // AI 提供商名称（已弃用）
@@ -162,7 +163,7 @@ type ServerConfig struct {
 // ModelConfig 存储特定模型配置
 type ModelConfig struct {
 	API             string `yaml:"api,omitempty"`              // 协议（覆盖提供商）；空值沿用原有 Chat Completions。
-	ReasoningEffort string `yaml:"reasoning_effort,omitempty"` // Responses 推理强度；空值使用上游默认。
+	ReasoningEffort string `yaml:"reasoning_effort,omitempty"` // 思考等级；空值继承提供商或全局设置。
 
 	Model       string  `yaml:"model"`       // 模型标识符
 	Provider    string  `yaml:"provider"`    // 提供商（覆盖全局）
@@ -731,12 +732,13 @@ func (a *AIConfig) GetModelConfig(modelID string) (ModelConfig, bool) {
 
 	// 3. 向后兼容：使用旧的全局配置
 	return ModelConfig{
-		Model:       modelID,
-		Provider:    a.Provider,
-		BaseURL:     a.BaseURL,
-		APIKey:      a.APIKey,
-		MaxTokens:   a.MaxTokens,
-		Temperature: a.Temperature,
+		ReasoningEffort: a.ReasoningEffort,
+		Model:           modelID,
+		Provider:        a.Provider,
+		BaseURL:         a.BaseURL,
+		APIKey:          a.APIKey,
+		MaxTokens:       a.MaxTokens,
+		Temperature:     a.Temperature,
 	}, false
 }
 
@@ -755,6 +757,12 @@ func (a *AIConfig) mergeProviderConfig(cfg ModelConfig, providerCfg ProviderConf
 	if cfg.Provider == "" {
 		cfg.Provider = providerCfg.Type
 	}
+	if cfg.ReasoningEffort == "" {
+		cfg.ReasoningEffort = providerCfg.ReasoningEffort
+	}
+	if cfg.ReasoningEffort == "" {
+		cfg.ReasoningEffort = a.ReasoningEffort
+	}
 	// 继承全局默认值
 	if cfg.MaxTokens == 0 {
 		cfg.MaxTokens = a.MaxTokens
@@ -767,6 +775,9 @@ func (a *AIConfig) mergeProviderConfig(cfg ModelConfig, providerCfg ProviderConf
 
 // mergeGlobalConfig 使用旧的全局配置合并模型配置（向后兼容）。
 func (a *AIConfig) mergeGlobalConfig(cfg ModelConfig) ModelConfig {
+	if cfg.ReasoningEffort == "" {
+		cfg.ReasoningEffort = a.ReasoningEffort
+	}
 	if cfg.Provider == "" {
 		cfg.Provider = a.Provider
 	}
@@ -919,11 +930,13 @@ ai:
     # podlink-responses:
     #   type: "openai"
     #   api: "openai-responses"
+    #   reasoning_effort: "medium"  # 提供商默认，可在 models 下为单个模型覆盖
     #   base_url: "http://127.0.0.1:8317/v1"
     #   api_key: ""
     #   models:
     #     gpt-5.6-sol:
     #       model: "gpt-5.6-sol"
+    #       reasoning_effort: "high"
     # Ollama 本地模型示例
     # ollama:
     #   type: "openai"  # Ollama 兼容 OpenAI API
@@ -951,6 +964,9 @@ ai:
   # base_url: "https://api.openai.com/v1"
   # API 密钥
   # api_key: ""
+  # 思考等级：模型 > 提供商 > 此全局值；留空使用上游默认，不发送参数。
+  # 常见值 low / medium / high；none / minimal / xhigh / max 需模型支持。
+  reasoning_effort: ""
   # 最大生成 token 数
   max_tokens: 8192
   # 生成温度（0-2）

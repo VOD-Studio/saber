@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 思考等级 `reasoning_effort` 支持 AI 全局、提供商、模型/别名逐级覆盖；同时传递到 Responses 和 Chat Completions 的全部流式及非流式入口，空值保留上游默认
+
 - 默认提供终端 AI 对话，复用共享会话历史与工具权限；支持逐行输入、EOF、`/exit` 和 Ctrl+C 退出，Matrix 通过默认关闭的 `matrix.enabled` 显式启用
 
 - 新增 `openai-responses` 协议：支持 go-openai 非流式/流式请求、文本与图片、现有 Agent 工具循环和流式编辑；保留工具续轮及任务恢复所需的加密推理输出，明确拒绝断流和截断响应，并提供 Podlink Responses 模型配置示例

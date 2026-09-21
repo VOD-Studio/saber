@@ -172,8 +172,9 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 		resp, err := c.openaiClient.CreateChatCompletion(
 			ctx,
 			openai.ChatCompletionRequest{
-				Model:    c.getModelName(req.Model),
-				Messages: req.Messages,
+				Model:           c.getModelName(req.Model),
+				ReasoningEffort: c.config.ReasoningEffort,
+				Messages:        req.Messages,
 				//nolint:staticcheck // 有意保留 max_tokens：Ollama 等 OpenAI 兼容端点不支持 max_completion_tokens
 				MaxTokens:   req.MaxTokens,
 				Temperature: float32(req.Temperature),
@@ -211,8 +212,9 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 	stream, err := c.openaiClient.CreateChatCompletionStream(
 		ctx,
 		openai.ChatCompletionRequest{
-			Model:    c.getModelName(req.Model),
-			Messages: req.Messages,
+			Model:           c.getModelName(req.Model),
+			ReasoningEffort: c.config.ReasoningEffort,
+			Messages:        req.Messages,
 			//nolint:staticcheck // 有意保留 max_tokens：Ollama 等 OpenAI 兼容端点不支持 max_completion_tokens
 			MaxTokens:   req.MaxTokens,
 			Temperature: float32(req.Temperature),
@@ -308,8 +310,9 @@ func (c *Client) CreateStreamingChatCompletion(
 	stream, err := c.openaiClient.CreateChatCompletionStream(
 		ctx,
 		openai.ChatCompletionRequest{
-			Model:    c.getModelName(req.Model),
-			Messages: req.Messages,
+			Model:           c.getModelName(req.Model),
+			ReasoningEffort: c.config.ReasoningEffort,
+			Messages:        req.Messages,
 			//nolint:staticcheck // 有意保留 max_tokens：Ollama 等 OpenAI 兼容端点不支持 max_completion_tokens
 			MaxTokens:   req.MaxTokens,
 			Temperature: float32(req.Temperature),
@@ -402,8 +405,9 @@ func (c *Client) CreateStreamingChatCompletionWithTools(
 	stream, err := c.openaiClient.CreateChatCompletionStream(
 		ctx,
 		openai.ChatCompletionRequest{
-			Model:    c.getModelName(req.Model),
-			Messages: req.Messages,
+			Model:           c.getModelName(req.Model),
+			ReasoningEffort: c.config.ReasoningEffort,
+			Messages:        req.Messages,
 			//nolint:staticcheck // 有意保留 max_tokens：Ollama 等 OpenAI 兼容端点不支持 max_completion_tokens
 			MaxTokens:   req.MaxTokens,
 			Temperature: float32(req.Temperature),

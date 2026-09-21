@@ -644,6 +644,7 @@ meme:
 | `api_key`                  | 否       | API 密钥（全局默认）                             |
 | `max_tokens`               | 否       | 每次响应的最大 token 数                          |
 | `temperature`              | 否       | 响应随机性（0-2）                                |
+| `reasoning_effort`         | 否       | 全局思考等级，空值使用上游默认 |
 | `system_prompt`            | 否       | 自定义系统提示词                                 |
 | `timeout_seconds`          | 否       | 请求超时时间（秒）                               |
 | `rate_limit_per_minute`    | 否       | 每分钟请求限制（0 表示无限制）                   |
@@ -664,6 +665,7 @@ meme:
 | `base_url` | 是   | API 基础 URL                         |
 | `api_key`  | 是   | API 密钥                             |
 | `models`   | 否   | 模型配置 map（键为模型名，值为配置） |
+| `reasoning_effort` | 否 | 提供商默认思考等级，覆盖 AI 全局设置 |
 
 Responses / Podlink 配置与完整模型清单见 [接入说明](docs/responses.md)。
 
@@ -673,9 +675,25 @@ Responses / Podlink 配置与完整模型清单见 [接入说明](docs/responses
 |---------------|------|-------------------------------|
 | `model`       | 是   | 实际使用的模型名称            |
 | `api`         | 否   | 协议（覆盖提供商）             |
-| `reasoning_effort` | 否 | Responses 推理强度，省略使用上游默认 |
+| `reasoning_effort` | 否 | 模型思考等级，覆盖提供商及 AI 全局设置 |
 | `temperature` | 否   | 响应随机性（覆盖全局设置）    |
 | `max_tokens`  | 否   | 最大 token 数（覆盖全局设置） |
+
+`reasoning_effort` 的优先级为模型（含别名）> 提供商 > AI 全局。空字符串或省略字段表示继承；所有层级均为空时不发送参数，使用上游默认值。显式 `none` 表示请求关闭思考，不等于省略。
+
+```yaml
+ai:
+  reasoning_effort: ""  # 混用非推理模型时建议保持为空
+  providers:
+    podlink-responses:
+      reasoning_effort: medium
+      models:
+        gpt-5.6-sol:
+          model: gpt-5.6-sol
+          reasoning_effort: high  # 仅覆盖这个模型
+```
+
+以上是合并到已有配置的片段，仍需保留 `api`、`base_url` 等字段。Responses 映射为 `reasoning.effort`，Chat Completions 映射为 `reasoning_effort`；两者均覆盖流式和非流式入口。等级原样传给上游，不自动降级。常见值包括 `low`、`medium`、`high`，其他值及关闭思考能力取决于模型，详见 [OpenAI 思考等级说明](https://developers.openai.com/api/docs/guides/reasoning)。修改后重启 Saber 生效。
 
 ### 流式编辑设置
 
