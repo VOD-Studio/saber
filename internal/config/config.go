@@ -13,11 +13,12 @@ import (
 
 // Config 存储从 YAML 配置文件加载的应用程序配置
 type Config struct {
-	Matrix   MatrixConfig   `yaml:"matrix"`
-	AI       AIConfig       `yaml:"ai"`
-	MCP      MCPConfig      `yaml:"mcp"`
-	Meme     MemeConfig     `yaml:"meme"`
-	Shutdown ShutdownConfig `yaml:"shutdown"`
+	Execution ExecutionConfig `yaml:"execution"`
+	Matrix    MatrixConfig    `yaml:"matrix"`
+	AI        AIConfig        `yaml:"ai"`
+	MCP       MCPConfig       `yaml:"mcp"`
+	Meme      MemeConfig      `yaml:"meme"`
+	Shutdown  ShutdownConfig  `yaml:"shutdown"`
 }
 
 // ShutdownConfig 存储关闭配置

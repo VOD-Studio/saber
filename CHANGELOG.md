@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Docker 容器执行模块与服务端成员/群/工作区权限：提供命令、读写文件、目录检查和精确补丁工具；默认断网、唯一工作区挂载、无宿主凭据继承，支持输出归档、文件快照及超时/取消清理
 - SQLite 持久化任务队列：消息去重、独立请求与执行记录、工作目录串行执行、取消与重启中断恢复；结果投递独立重试，不重放已执行任务
 - Matrix 聊天任务立即回复编号，支持 `!task run/list/status/cancel`、常用中文任务操作和 `saber_task` 模型工具；结果引用原消息与话题，固定发送事务 ID 防止投递重试产生重复消息
 - 通用 `chat` 消息、会话、回复和能力契约，以及内存聊天 adapter；会话键包含平台、账号和线程
