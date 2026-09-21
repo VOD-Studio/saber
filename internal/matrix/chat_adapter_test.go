@@ -122,11 +122,21 @@ func TestChatAdapter_RelationsAndAccountGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter := matrix.NewChatAdapter(matrix.NewCommandService(client, "@bot:local", &matrix.BuildInfo{}), nil, config.MediaConfig{}, false, nil)
+	body := "> <@bot:local> 已接收，任务 #1\n\n取消任务 #1"
+	adapter := matrix.NewChatAdapter(matrix.NewCommandService(client, "@bot:local", &matrix.BuildInfo{}), nil, config.MediaConfig{}, false, func(ctx context.Context, msg chat.Message, _ chat.Adapter) (agent.Result, error) {
+		text, ok := matrix.GetReplyBody(ctx)
+		if !ok || text != "取消任务 #1" || msg.Text != body {
+			t.Fatalf("reply/control text lost: body=%q control=%q", msg.Text, text)
+		}
+		return agent.Result{}, nil
+	})
 	ctx := matrix.WithMessageRelations(matrix.WithEventID(context.Background(), "$current"), "$parent", "$thread")
-	message := adapter.Message(ctx, "@user:local", "!room:local", "> <@bot:local> 已接收，任务 #1\n\n取消任务 #1")
-	if message.Text != "取消任务 #1" {
-		t.Fatalf("reply fallback polluted control text: %q", message.Text)
+	message := adapter.Message(ctx, "@user:local", "!room:local", body)
+	if message.Text != body {
+		t.Fatalf("quoted reply text lost: %q", message.Text)
+	}
+	if _, err := adapter.Receive(ctx, "@user:local", "!room:local", body); err != nil {
+		t.Fatal(err)
 	}
 	if message.ID != "$current" || message.ReplyTo != "$parent" || message.Session.Thread != "$thread" {
 		t.Fatalf("relations lost: %+v", message)
