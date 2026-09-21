@@ -823,6 +823,9 @@ saber/
   docker-bake.hcl                  # Docker 多架构构建配置
   config.example.yaml              # 示例配置文件
   internal/
+    chat/                          # 通用消息、会话、回复与展示能力契约
+      memory/                      # 无网络聊天 adapter
+    conversation/                  # 平台无关的历史、串行调度与回复交付
     agent/
       runtime.go                   # 独立执行循环、预算、取消和工具错误回传
       types.go                     # 模型与工具接口、运行事件和每轮记录

@@ -1,0 +1,292 @@
+// Package conversation 管理平台无关的会话历史与 Agent 调度。
+package conversation
+
+import (
+	"sync"
+	"time"
+
+	"github.com/sashabaranov/go-openai"
+	"rua.plus/saber/internal/chat"
+
+	"rua.plus/saber/internal/config"
+)
+
+// MessageRole 表示聊天消息的角色类型。
+type MessageRole string
+
+const (
+	RoleUser      MessageRole = "user"
+	RoleAssistant MessageRole = "assistant"
+	RoleSystem    MessageRole = "system"
+)
+
+// ChatMessage 表示存储在上下文中的单个聊天消息。
+type ChatMessage struct {
+	// Role 表示消息角色（user、assistant 或 system）。
+	Role MessageRole
+	// Content 表示消息文本内容。
+	Content string
+	// UserID 表示发送消息的 接入账号内的用户 ID。
+	UserID string
+	// RoomID 表示消息所在的 带平台和账号作用域的会话键。
+	RoomID chat.SessionID
+	// Timestamp 表示消息发送时间。
+	Timestamp time.Time
+}
+
+// ContextManager 管理多个房间的对话上下文。
+type ContextManager struct {
+	// mu 保护所有字段的并发访问。
+	mu sync.RWMutex
+	// contexts 存储每个房间的对话消息列表。
+	contexts map[chat.SessionID][]ChatMessage
+	// tokenCount 缓存每个房间的估算 token 数量。
+	tokenCount map[chat.SessionID]int
+	// lastActivity 记录每个房间的最后活动时间。
+	lastActivity map[chat.SessionID]time.Time
+	// config 表示上下文管理器的配置参数。
+	config config.ContextConfig
+	// stopCleanup 用于通知后台清理 goroutine 停止。
+	stopCleanup chan struct{}
+	// cleanupStopped 用于等待后台清理 goroutine 完全停止。
+	cleanupStopped sync.WaitGroup
+	// stopOnce 确保 Stop 方法只执行一次。
+	stopOnce sync.Once
+}
+
+// NewContextManager 创建并返回一个新的上下文管理器实例。
+func NewContextManager(config config.ContextConfig) *ContextManager {
+	cm := &ContextManager{
+		contexts:     make(map[chat.SessionID][]ChatMessage),
+		tokenCount:   make(map[chat.SessionID]int),
+		lastActivity: make(map[chat.SessionID]time.Time),
+		config:       config,
+		stopCleanup:  make(chan struct{}),
+	}
+	cm.startBackgroundCleanup()
+	return cm
+}
+
+// estimateTokens 估算文本的 token 数量。
+func estimateTokens(text string) int {
+	return int(float64(len(text)) / 0.75)
+}
+
+// startBackgroundCleanup 启动后台清理 goroutine。
+func (cm *ContextManager) startBackgroundCleanup() {
+	if cm.config.ExpiryMinutes <= 0 && cm.config.InactiveRoomHours <= 0 {
+		return
+	}
+
+	cm.cleanupStopped.Add(1)
+	go func() {
+		defer cm.cleanupStopped.Done()
+
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-cm.stopCleanup:
+				return
+			case <-ticker.C:
+				cm.cleanupAllExpired()
+				cm.cleanupInactiveRooms()
+			}
+		}
+	}()
+}
+
+// Stop 停止后台清理 goroutine。
+// 此方法可以安全地多次调用，后续调用不会产生任何效果。
+func (cm *ContextManager) Stop() {
+	cm.stopOnce.Do(func() {
+		close(cm.stopCleanup)
+		cm.cleanupStopped.Wait()
+	})
+}
+
+// AddMessage 向指定房间的上下文中添加新消息。
+func (cm *ContextManager) AddMessage(roomID chat.SessionID, role MessageRole, content string, userID string) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	// 更新最后活动时间
+	cm.lastActivity[roomID] = time.Now()
+
+	cm.cleanupRoomContext(roomID)
+
+	messages := cm.contexts[roomID]
+	if messages == nil {
+		messages = make([]ChatMessage, 0)
+		cm.tokenCount[roomID] = 0
+	}
+
+	newMessage := ChatMessage{
+		Role:      role,
+		Content:   content,
+		UserID:    userID,
+		RoomID:    roomID,
+		Timestamp: time.Now(),
+	}
+	messages = append(messages, newMessage)
+	newTokens := estimateTokens(content)
+	cm.tokenCount[roomID] += newTokens
+
+	if cm.config.MaxMessages > 0 && len(messages) > cm.config.MaxMessages {
+		removed := messages[:len(messages)-cm.config.MaxMessages]
+		for _, m := range removed {
+			cm.tokenCount[roomID] -= estimateTokens(m.Content)
+		}
+		messages = messages[len(messages)-cm.config.MaxMessages:]
+	}
+
+	messages, cm.tokenCount[roomID] = cm.truncateByTokensWithCount(messages, cm.tokenCount[roomID])
+
+	cm.contexts[roomID] = messages
+}
+
+// GetContext 返回指定房间的上下文，格式化为OpenAI API所需的格式。
+func (cm *ContextManager) GetContext(roomID chat.SessionID) []openai.ChatCompletionMessage {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	cm.cleanupRoomContext(roomID)
+	messages, exists := cm.contexts[roomID]
+	if !exists {
+		return []openai.ChatCompletionMessage{}
+	}
+
+	openaiMessages := make([]openai.ChatCompletionMessage, len(messages))
+	for i, msg := range messages {
+		openaiMessages[i] = openai.ChatCompletionMessage{
+			Role:    string(msg.Role),
+			Content: msg.Content,
+		}
+	}
+
+	return openaiMessages
+}
+
+// ClearContext 清除指定房间的上下文。
+func (cm *ContextManager) ClearContext(roomID chat.SessionID) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	delete(cm.contexts, roomID)
+	delete(cm.tokenCount, roomID)
+	delete(cm.lastActivity, roomID)
+}
+
+// cleanupRoomContext 清理指定房间的过期消息。
+func (cm *ContextManager) cleanupRoomContext(roomID chat.SessionID) {
+	if cm.config.ExpiryMinutes <= 0 {
+		return
+	}
+
+	messages, exists := cm.contexts[roomID]
+	if !exists || len(messages) == 0 {
+		return
+	}
+
+	expiryDuration := time.Duration(cm.config.ExpiryMinutes) * time.Minute
+	now := time.Now()
+
+	if now.Sub(messages[0].Timestamp) <= expiryDuration {
+		return
+	}
+
+	cutoffIndex := 0
+	for i, msg := range messages {
+		if now.Sub(msg.Timestamp) <= expiryDuration {
+			cutoffIndex = i
+			break
+		}
+	}
+
+	if cutoffIndex == 0 {
+		delete(cm.contexts, roomID)
+		delete(cm.tokenCount, roomID)
+	} else {
+		removed := messages[:cutoffIndex]
+		for _, m := range removed {
+			cm.tokenCount[roomID] -= estimateTokens(m.Content)
+		}
+		cm.contexts[roomID] = messages[cutoffIndex:]
+	}
+}
+
+// cleanupAllExpired 清理所有房间的过期消息。
+func (cm *ContextManager) cleanupAllExpired() {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	for roomID := range cm.contexts {
+		cm.cleanupRoomContext(roomID)
+	}
+}
+
+// cleanupInactiveRooms 清理长时间无活动的房间上下文。
+//
+// 这防止了内存泄漏：当机器人加入大量房间但大部分房间长期不活跃时，
+// 上下文数据会持续占用内存。此方法会定期清理超过阈值未活动的房间。
+func (cm *ContextManager) cleanupInactiveRooms() {
+	if cm.config.InactiveRoomHours <= 0 {
+		return
+	}
+
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	now := time.Now()
+	inactiveThreshold := time.Duration(cm.config.InactiveRoomHours) * time.Hour
+
+	for roomID, lastTime := range cm.lastActivity {
+		if now.Sub(lastTime) > inactiveThreshold {
+			delete(cm.contexts, roomID)
+			delete(cm.tokenCount, roomID)
+			delete(cm.lastActivity, roomID)
+		}
+	}
+}
+
+// truncateByTokensWithCount 根据令牌限制截断消息列表，返回截断后的消息和新的 token 计数。
+func (cm *ContextManager) truncateByTokensWithCount(messages []ChatMessage, currentTokens int) ([]ChatMessage, int) {
+	if cm.config.MaxTokens <= 0 || currentTokens <= cm.config.MaxTokens {
+		return messages, currentTokens
+	}
+
+	for len(messages) > 0 && currentTokens > cm.config.MaxTokens {
+		firstTokens := estimateTokens(messages[0].Content)
+		currentTokens -= firstTokens
+		messages = messages[1:]
+	}
+
+	return messages, currentTokens
+}
+
+// GetContextSize 返回指定房间上下文的大小信息。
+func (cm *ContextManager) GetContextSize(roomID chat.SessionID) (int, int) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	messages, exists := cm.contexts[roomID]
+	if !exists {
+		return 0, 0
+	}
+
+	return len(messages), cm.tokenCount[roomID]
+}
+
+// ListActiveRooms 返回所有有活动上下文的房间ID列表。
+func (cm *ContextManager) ListActiveRooms() []chat.SessionID {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	rooms := make([]chat.SessionID, 0, len(cm.contexts))
+	for roomID := range cm.contexts {
+		rooms = append(rooms, roomID)
+	}
+
+	return rooms
+}
