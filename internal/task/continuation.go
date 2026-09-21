@@ -63,7 +63,13 @@ func (m *Manager) continuationRequest(ctx context.Context, t Task) (agent.Reques
 		return t.Request, err
 	}
 	if ready {
-		return t.Request, nil
+		messages, changed := sanitizeToolHistory(t.Request.Messages)
+		if !changed {
+			return t.Request, nil
+		}
+		req := t.Request
+		req.Messages = messages
+		return req, m.saveContinuationRequest(ctx, t.ID, req)
 	}
 	var parentID int64
 	err := m.store.db.QueryRowContext(ctx, `SELECT parent_id FROM task_links WHERE task_id=?`, t.ID).Scan(&parentID)
@@ -108,6 +114,10 @@ func (m *Manager) continuationRequest(ctx context.Context, t Task) (agent.Reques
 	}
 	for _, round := range rounds {
 		resp := round.Response
+		if err := agent.ValidateResponse(resp); err != nil {
+			messages = append(messages, historyDiagnostic(err, resp))
+			continue
+		}
 		if resp.Content == "" && len(resp.ToolCalls) == 0 {
 			continue
 		}
@@ -134,21 +144,77 @@ func (m *Manager) continuationRequest(ctx context.Context, t Task) (agent.Reques
 		}
 	}
 	req := t.Request
-	req.Messages = messages
+	req.Messages, _ = sanitizeToolHistory(messages)
+	return req, m.saveContinuationRequest(ctx, t.ID, req)
+}
+
+func (m *Manager) saveContinuationRequest(ctx context.Context, taskID int64, req agent.Request) error {
 	data, err := json.Marshal(req)
 	if err != nil {
-		return req, err
+		return err
 	}
 	tx, err := m.store.db.BeginTx(ctx, nil)
 	if err != nil {
-		return req, err
+		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err = tx.ExecContext(ctx, `UPDATE tasks SET request=? WHERE id=?`, data, t.ID); err != nil {
-		return req, err
+	if _, err = tx.ExecContext(ctx, `UPDATE tasks SET request=? WHERE id=?`, data, taskID); err != nil {
+		return err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO task_contexts(task_id) VALUES(?) ON CONFLICT DO NOTHING`, t.ID); err != nil {
-		return req, err
+	if _, err = tx.ExecContext(ctx, `INSERT INTO task_contexts(task_id) VALUES(?) ON CONFLICT DO NOTHING`, taskID); err != nil {
+		return err
 	}
-	return req, tx.Commit()
+	return tx.Commit()
+}
+
+func historyDiagnostic(err error, record any) openai.ChatCompletionMessage {
+	return openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: fmt.Sprintf("[历史响应校验失败：%v；仅作文字诊断，不作为工具调用回放]\n%+v", err, record)}
+}
+
+// sanitizeToolHistory 同时修复旧版本已持久化的异常调用及孤立结果，不改写合法的工具失败记录。
+func sanitizeToolHistory(messages []openai.ChatCompletionMessage) ([]openai.ChatCompletionMessage, bool) {
+	clean := make([]openai.ChatCompletionMessage, 0, len(messages))
+	changed := false
+	for i := 0; i < len(messages); {
+		msg := messages[i]
+		if msg.Role == openai.ChatMessageRoleAssistant && len(msg.ToolCalls) > 0 {
+			end := i + 1
+			for end < len(messages) && messages[end].Role == openai.ChatMessageRoleTool {
+				end++
+			}
+			err := agent.ValidateResponse(agent.Response{ToolCalls: msg.ToolCalls, FinishReason: "tool_calls"})
+			if err == nil {
+				pending := make(map[string]bool, len(msg.ToolCalls))
+				for _, call := range msg.ToolCalls {
+					pending[call.ID] = true
+				}
+				for _, result := range messages[i+1 : end] {
+					if !pending[result.ToolCallID] {
+						err = errors.New("tool result has no matching call")
+						break
+					}
+					delete(pending, result.ToolCallID)
+				}
+				if err == nil && len(pending) > 0 {
+					err = errors.New("tool calls have missing results")
+				}
+			}
+			if err != nil {
+				clean = append(clean, historyDiagnostic(err, messages[i:end]))
+				changed = true
+			} else {
+				clean = append(clean, messages[i:end]...)
+			}
+			i = end
+			continue
+		}
+		if msg.Role == openai.ChatMessageRoleTool {
+			clean = append(clean, historyDiagnostic(errors.New("orphan tool result"), msg))
+			changed = true
+		} else {
+			clean = append(clean, msg)
+		}
+		i++
+	}
+	return clean, changed
 }

@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -20,7 +21,7 @@ func TestManager_ContinuationWaitsAndSurvivesRestart(t *testing.T) {
 	m, err := Open(path, func(ctx context.Context, req agent.Request, emit func(agent.Event)) (agent.Result, error) {
 		close(started)
 		<-ctx.Done()
-		return agent.Result{Status: agent.Cancelled, Rounds: []agent.Round{{Response: agent.Response{ToolCalls: []openai.ToolCall{{ID: "call", Type: openai.ToolTypeFunction, Function: openai.FunctionCall{Name: "exec", Arguments: `{"command":"touch done"}`}}}}, Tools: []agent.ToolRecord{{Call: openai.ToolCall{ID: "call"}, Content: "created done"}}}}}, ctx.Err()
+		return agent.Result{Status: agent.Cancelled, Rounds: []agent.Round{{Response: agent.Response{FinishReason: "tool_calls", ToolCalls: []openai.ToolCall{{ID: "call", Type: openai.ToolTypeFunction, Function: openai.FunctionCall{Name: "exec", Arguments: `{"command":"touch done"}`}}}}, Tools: []agent.ToolRecord{{Call: openai.ToolCall{ID: "call"}, Content: "created done"}}}}}, ctx.Err()
 	}, func(context.Context, Task) (string, error) { return "", nil })
 	require.NoError(t, err)
 	parent, err := m.Submit(ctx, message("original", "alice"), dir, request("create file; never publish"))
@@ -96,4 +97,134 @@ func TestManager_ContinuationThroughCancelledQueuedRound(t *testing.T) {
 	var parentID int64
 	require.NoError(t, s.db.QueryRow(`SELECT parent_id FROM task_links WHERE task_id=?`, child.ID).Scan(&parentID))
 	require.Equal(t, parent.ID, parentID)
+}
+
+func TestManager_ContinuationRejectsMalformedToolHistory(t *testing.T) {
+	valid := openai.ToolCall{ID: "call", Type: openai.ToolTypeFunction, Function: openai.FunctionCall{Name: "exec", Arguments: `{"command":"inspect"}`}}
+	missingID, wrongType, missingName := valid, valid, valid
+	missingID.ID = ""
+	wrongType.Type = "unsupported"
+	missingName.Function.Name = ""
+	for _, tc := range []struct {
+		name   string
+		calls  []openai.ToolCall
+		finish string
+	}{
+		{"missing_id", []openai.ToolCall{missingID}, "tool_calls"},
+		{"duplicate_id", []openai.ToolCall{valid, valid}, "tool_calls"},
+		{"wrong_type", []openai.ToolCall{wrongType}, "tool_calls"},
+		{"missing_name", []openai.ToolCall{missingName}, "tool_calls"},
+		{"truncated", []openai.ToolCall{valid}, "length"},
+	} {
+		for _, journal := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/journal=%t", tc.name, journal), func(t *testing.T) {
+				ctx := context.Background()
+				dir := t.TempDir()
+				store, err := openStore(filepath.Join(t.TempDir(), "tasks.db"))
+				require.NoError(t, err)
+				defer func() { require.NoError(t, store.db.Close()) }()
+				m := &Manager{store: store, ctx: ctx}
+				source, err := m.Submit(ctx, message("source", "alice"), dir, request("original goal"))
+				require.NoError(t, err)
+				_, err = store.claim(ctx)
+				require.NoError(t, err)
+				runtime := agent.Runtime{Model: func(context.Context, agent.Request, func(agent.Event)) (agent.Response, error) {
+					return agent.Response{Content: "partial response", ToolCalls: tc.calls, FinishReason: tc.finish}, nil
+				}, Execute: func(context.Context, string, map[string]any) (agent.ToolOutput, error) {
+					t.Error("malformed call executed")
+					return agent.ToolOutput{}, nil
+				}}
+				result, runErr := runtime.Run(ctx, source.Request, func(e agent.Event) { require.NoError(t, store.record(ctx, source.ID, e)) })
+				require.Error(t, runErr)
+				if journal {
+					require.NoError(t, store.recover(ctx))
+				} else {
+					require.NoError(t, store.finish(ctx, source, result, runErr, false))
+				}
+				follow := message("follow", "alice")
+				follow.ReplyTo = "source"
+				child, err := m.Continue(ctx, follow, dir, request("continue"))
+				require.NoError(t, err)
+				req, err := m.continuationRequest(ctx, child)
+				require.NoError(t, err)
+				for _, msg := range req.Messages {
+					require.Empty(t, msg.ToolCalls)
+					require.NotEqual(t, openai.ChatMessageRoleTool, msg.Role)
+					require.Empty(t, msg.ToolCallID)
+				}
+				require.Contains(t, fmt.Sprint(req.Messages), "partial response")
+				require.Contains(t, fmt.Sprint(req.Messages), "历史响应校验失败")
+				require.Contains(t, fmt.Sprint(req.Messages), "inspect")
+				saved, err := m.Get(ctx, follow.Session, child.ID)
+				require.NoError(t, err)
+				require.Equal(t, req, saved.Request)
+				again, err := m.continuationRequest(ctx, saved)
+				require.NoError(t, err)
+				require.Equal(t, req, again)
+			})
+		}
+	}
+}
+
+func TestManager_ContinuationRepairsPreviouslySavedInvalidHistory(t *testing.T) {
+	call := openai.ToolCall{ID: "call", Type: openai.ToolTypeFunction, Function: openai.FunctionCall{Name: "exec", Arguments: `{}`}}
+	invalid := call
+	invalid.ID = ""
+	assistant := openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, ToolCalls: []openai.ToolCall{call}}
+	result := openai.ChatCompletionMessage{Role: openai.ChatMessageRoleTool, ToolCallID: "call", Content: `{"error":"tool_failed"}`}
+	wrong := result
+	wrong.ToolCallID = "other"
+	for _, tc := range []struct {
+		name    string
+		history []openai.ChatCompletionMessage
+		valid   bool
+	}{
+		{"empty_id", []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleAssistant, ToolCalls: []openai.ToolCall{invalid}}, {Role: openai.ChatMessageRoleTool, Content: "unknown effect"}}, false},
+		{"orphan_result", []openai.ChatCompletionMessage{result}, false},
+		{"missing_result", []openai.ChatCompletionMessage{assistant}, false},
+		{"wrong_result", []openai.ChatCompletionMessage{assistant, wrong}, false},
+		{"duplicate_result", []openai.ChatCompletionMessage{assistant, result, result}, false},
+		{"valid_tool_failure", []openai.ChatCompletionMessage{assistant, result}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			dir := t.TempDir()
+			store, err := openStore(filepath.Join(t.TempDir(), "tasks.db"))
+			require.NoError(t, err)
+			defer func() { require.NoError(t, store.db.Close()) }()
+			m := &Manager{store: store, ctx: ctx}
+			parent, err := m.Submit(ctx, message("source", "alice"), dir, request("original goal"))
+			require.NoError(t, err)
+			follow := message("follow", "alice")
+			follow.ReplyTo = parent.Message.ID
+			child, err := m.Continue(ctx, follow, dir, request("continue"))
+			require.NoError(t, err)
+			dirty := child.Request
+			dirty.Messages = append([]openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "original goal"}}, tc.history...)
+			dirty.Messages = append(dirty.Messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: "continue"})
+			data, err := json.Marshal(dirty)
+			require.NoError(t, err)
+			_, err = store.db.Exec(`UPDATE tasks SET request=? WHERE id=?`, data, child.ID)
+			require.NoError(t, err)
+			_, err = store.db.Exec(`INSERT INTO task_contexts(task_id) VALUES(?)`, child.ID)
+			require.NoError(t, err)
+			child, err = m.Get(ctx, follow.Session, child.ID)
+			require.NoError(t, err)
+			req, err := m.continuationRequest(ctx, child)
+			require.NoError(t, err)
+			if tc.valid {
+				require.Equal(t, dirty, req)
+			} else {
+				for _, msg := range req.Messages {
+					require.Empty(t, msg.ToolCalls)
+					require.NotEqual(t, openai.ChatMessageRoleTool, msg.Role)
+				}
+				require.Contains(t, fmt.Sprint(req.Messages), "历史响应校验失败")
+				require.Contains(t, req.Messages[1].Content, fmt.Sprintf("%+v", tc.history[0]))
+			}
+			saved, err := m.Get(ctx, follow.Session, child.ID)
+			require.NoError(t, err)
+			require.Equal(t, req, saved.Request)
+		})
+	}
 }

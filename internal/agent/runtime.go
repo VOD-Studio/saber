@@ -128,7 +128,7 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 		if err := ctx.Err(); err != nil {
 			return stop(err)
 		}
-		if err := validateResponse(response); err != nil {
+		if err := ValidateResponse(response); err != nil {
 			return stop(err)
 		}
 		if len(response.ToolCalls) == 0 {
@@ -163,7 +163,8 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 	return stop(ErrBudgetExhausted)
 }
 
-func validateResponse(response Response) error {
+// ValidateResponse 校验模型响应的完整性及工具调用身份，运行和历史恢复共用同一协议规则。
+func ValidateResponse(response Response) error {
 	if len(response.ToolCalls) == 0 {
 		if response.FinishReason != "stop" {
 			return fmt.Errorf("incomplete model response: finish_reason=%q", response.FinishReason)
