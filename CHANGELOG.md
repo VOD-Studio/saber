@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 加载配置时不再强制校验文件权限必须为 0600：移除 `checkFilePermissions` 与 `SABER_ALLOW_INSECURE_CONFIG` 逃生开关，权限管控交由部署环境负责
 
+#### 工具链
+
+- 构建工具链升级到 Go 1.27.1：`go.mod` 语言版本 `1.26.1` → `1.27.1`，Docker 构建镜像 `golang:1.26-alpine` → `golang:1.27.1-alpine`
+- 文档与贡献指南同步：README 前置要求、`AGENTS.md` 中的 Go 版本说明改为 1.27.1
+
 ### Removed
 
 #### QQ 机器人

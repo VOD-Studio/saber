@@ -1,5 +1,5 @@
 # 阶段1: 构建
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27.1-alpine AS builder
 
 # 设置 Alpine 镜像加速
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
