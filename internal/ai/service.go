@@ -15,6 +15,7 @@ import (
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/conversation"
+	"rua.plus/saber/internal/execution"
 	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/mcp"
 	"rua.plus/saber/internal/task"
@@ -50,6 +51,8 @@ type Service struct {
 	tasks *task.Manager
 	// taskDir 是应用启动时的规范化工作目录，不执行全局 chdir。
 	taskDir string
+	// executor 同时管理本地容器工具和 MCP 工具权限。
+	executor *execution.Executor
 }
 
 // NewService 创建一个新的 AI 服务实例。
@@ -107,6 +110,13 @@ func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpM
 		Display: displayConfig(cfg.StreamEdit),
 	}
 	service.toolExecutor = NewToolExecutor(service)
+	service.executor, err = execution.New(config.ExecutionConfig{}, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if mcpManager != nil {
+		mcpManager.SetAuthorizer(service.executor.CheckMCP)
+	}
 
 	slog.Info("AI服务初始化完成",
 		"enabled", cfg.Enabled,
@@ -393,7 +403,14 @@ func (s *Service) handleChat(ctx context.Context, message chat.Message, reply ch
 	if prompt != "" {
 		req.Messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleSystem, Content: prompt}}
 	}
-	req.Tools, _ = s.toolExecutor.PrepareTools()
+	identity := chat.Identity{Session: message.Session, SenderID: message.SenderID}
+	toolCtx := chat.WithIdentity(ctx, identity)
+	if s.executor != nil {
+		if dir, err := s.executor.Workspace(identity); err == nil {
+			toolCtx = execution.WithTask(toolCtx, 0, dir)
+		}
+	}
+	req.Tools, _ = s.toolExecutor.PrepareTools(toolCtx)
 	if s.tasks != nil {
 		return agent.Result{}, s.submitTask(ctx, message, req, reply)
 	}

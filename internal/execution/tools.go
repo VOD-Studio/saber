@@ -25,6 +25,9 @@ func (e *Executor) Tools(ctx context.Context) []openai.Tool {
 	var tools []openai.Tool
 	for _, d := range definitions {
 		if e.Check(ctx, d.name) == nil {
+			if d.required == nil {
+				d.required = []string{}
+			}
 			tools = append(tools, openai.Tool{Type: openai.ToolTypeFunction, Function: &openai.FunctionDefinition{Name: d.name, Description: d.description, Parameters: map[string]any{"type": "object", "properties": d.properties, "required": d.required, "additionalProperties": false}}})
 		}
 	}

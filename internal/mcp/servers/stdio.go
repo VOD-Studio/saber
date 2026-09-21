@@ -4,6 +4,7 @@ package servers
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
@@ -69,6 +70,8 @@ func CreateStdioServer(ctx context.Context, name string, cfg *config.ServerConfi
 
 	// 创建执行命令
 	cmd := exec.CommandContext(cmdCtx, cfg.Command, cfg.Args...)
+	// MCP 进程不继承机器人凭据；管理员只能通过 cfg.Env 显式提供所需变量。
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
 
 	// 设置环境变量
 	if len(cfg.Env) > 0 {
@@ -77,7 +80,7 @@ func CreateStdioServer(ctx context.Context, name string, cfg *config.ServerConfi
 		for k, v := range cfg.Env {
 			env = append(env, fmt.Sprintf("%s=%s", k, v))
 		}
-		cmd.Env = append(cmd.Environ(), env...)
+		cmd.Env = append(cmd.Env, env...)
 	}
 
 	// 创建 stdio 传输

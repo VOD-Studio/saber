@@ -10,6 +10,7 @@ import (
 	"github.com/sashabaranov/go-openai"
 	"maunium.net/go/mautrix/id"
 	"rua.plus/saber/internal/chat"
+	"rua.plus/saber/internal/execution"
 )
 
 // ToolExecutor 负责执行 AI 工具调用。
@@ -63,6 +64,17 @@ func (te *ToolExecutor) ExecuteToolCall(ctx context.Context, toolName string, ar
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if execution.LocalTool(toolName) {
+		if te.service.executor == nil {
+			return nil, fmt.Errorf("execution is not configured")
+		}
+		result, err := te.service.executor.Run(ctx, toolName, args)
+		// 保留失败时的完整日志位置；运行时用 IsError 将失败反馈给模型。
+		if err != nil {
+			result.Error = err.Error()
+		}
+		return result, nil
+	}
 	if toolName == "saber_task" && te.service.tasks != nil {
 		identity, ok := chat.IdentityFromContext(ctx)
 		if !ok {
@@ -107,8 +119,15 @@ func (te *ToolExecutor) ExecuteToolCall(ctx context.Context, toolName string, ar
 // 返回值:
 //   - []openai.Tool: 可用的 OpenAI 工具列表
 //   - bool: 是否成功准备了工具
-func (te *ToolExecutor) PrepareTools() ([]openai.Tool, bool) {
+func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool, bool) {
+	ctx := context.Background()
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
 	var tools []openai.Tool
+	if te.service.executor != nil {
+		tools = append(tools, te.service.executor.Tools(ctx)...)
+	}
 	if te.service.tasks != nil {
 		tools = append(tools, taskTool())
 	}
@@ -122,7 +141,11 @@ func (te *ToolExecutor) PrepareTools() ([]openai.Tool, bool) {
 	}
 
 	for _, mcpTool := range mcpTools {
-		if te.service.tasks != nil && mcpTool.Name == "saber_task" {
+		if execution.LocalTool(mcpTool.Name) || mcpTool.Name == "saber_task" {
+			continue
+		}
+		server := te.service.mcpManager.GetServerForTool(mcpTool.Name)
+		if te.service.executor == nil || te.service.executor.CheckMCP(ctx, server, mcpTool.Name) != nil {
 			continue
 		}
 		tools = append(tools, openai.Tool{
@@ -136,5 +159,5 @@ func (te *ToolExecutor) PrepareTools() ([]openai.Tool, bool) {
 	}
 
 	slog.Debug("启用工具调用", "tool_count", len(tools))
-	return tools, true
+	return tools, len(tools) > 0
 }

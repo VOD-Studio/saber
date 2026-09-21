@@ -8,7 +8,7 @@ import (
 
 // TestCoreDependencies 防止聊天核心通过间接依赖重新引入平台 SDK。
 func TestCoreDependencies(t *testing.T) {
-	command := exec.Command("go", "list", "-tags", "goolm", "-deps", "rua.plus/saber/internal/agent", "rua.plus/saber/internal/chat/...", "rua.plus/saber/internal/conversation", "rua.plus/saber/internal/model", "rua.plus/saber/internal/mcp", "rua.plus/saber/internal/task")
+	command := exec.Command("go", "list", "-tags", "goolm", "-deps", "rua.plus/saber/internal/agent", "rua.plus/saber/internal/chat/...", "rua.plus/saber/internal/conversation", "rua.plus/saber/internal/model", "rua.plus/saber/internal/mcp", "rua.plus/saber/internal/task", "rua.plus/saber/internal/execution")
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("dependency inspection: %v\n%s", err, output)

@@ -123,19 +123,8 @@ func New(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) 
 		}
 		w.Path = path
 		w.Env = maps.Clone(w.Env)
-		for key, value := range w.Env {
-			if key == "" || strings.ContainsAny(key, "=\x00") || strings.ContainsRune(value, 0) {
-				return nil, errors.New("invalid execution environment")
-			}
-			upper := strings.ToUpper(key)
-			if strings.HasPrefix(upper, "SABER_") || strings.HasPrefix(upper, "MATRIX_") || strings.HasPrefix(upper, "OPENAI_") || strings.HasPrefix(upper, "ANTHROPIC_") || strings.HasPrefix(upper, "DOCKER_") {
-				return nil, fmt.Errorf("reserved execution environment key %q", key)
-			}
-			for _, secret := range forbiddenSecrets {
-				if secret != "" && strings.Contains(value, secret) {
-					return nil, fmt.Errorf("workspace %q environment contains a Saber credential", name)
-				}
-			}
+		if err := ValidateEnvironment(w.Env, forbiddenSecrets); err != nil {
+			return nil, fmt.Errorf("workspace %q: %w", name, err)
 		}
 		cfg.Workspaces[name] = w
 	}
@@ -180,6 +169,27 @@ func New(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) 
 		}
 	}
 	return e, nil
+}
+
+// ValidateEnvironment 阻止执行工具与 stdio MCP 显式注入机器人自身凭据。
+func ValidateEnvironment(env map[string]string, forbiddenSecrets []string) error {
+	for key, value := range env {
+		if key == "" || strings.ContainsAny(key, "=\x00") || strings.ContainsRune(value, 0) {
+			return errors.New("invalid execution environment")
+		}
+		upper := strings.ToUpper(key)
+		for _, prefix := range []string{"SABER_", "MATRIX_", "OPENAI_", "ANTHROPIC_", "DOCKER_"} {
+			if strings.HasPrefix(upper, prefix) {
+				return fmt.Errorf("reserved execution environment key %q", key)
+			}
+		}
+		for _, secret := range forbiddenSecrets {
+			if secret != "" && strings.Contains(value, secret) {
+				return errors.New("environment contains a Saber credential")
+			}
+		}
+	}
+	return nil
 }
 
 func validCapability(capability string) bool {
@@ -234,6 +244,9 @@ func (e *Executor) Check(ctx context.Context, tool string) error {
 	run, ok := ctx.Value(scopeKey{}).(scope)
 	if !ok || run.dir != dir {
 		return errors.New("tool workspace does not match current authorization")
+	}
+	if _, blocked := e.blocked.Load(dir); blocked {
+		return errors.New("workspace quarantined after container cleanup failure")
 	}
 	grant := e.grants[identityKey(identity)]
 	if !slices.Contains(grant.Tools, tool) {

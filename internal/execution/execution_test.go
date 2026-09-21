@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,6 +51,9 @@ func TestPolicy_TrustedScopeAndSeparateCapabilities(t *testing.T) {
 	require.Error(t, e.CheckMCP(ctx, "deploy", "run"))
 	_, err = e.Run(ctx, "exec", map[string]any{"command": "true", "workspace": "/", "capabilities": []string{"deploy"}})
 	require.Error(t, err)
+	e.blocked.Store(dir, true)
+	require.Error(t, e.Check(ctx, "exec"))
+	require.Error(t, e.CheckMCP(ctx, "release", "push"))
 }
 
 func TestPolicy_RejectsSecretsAndUnsafeRoots(t *testing.T) {
@@ -179,4 +183,13 @@ func TestValidateArgs(t *testing.T) {
 	} {
 		require.Error(t, validateArgs(tc.tool, tc.args))
 	}
+}
+
+func TestMountRejectsHostSocket(t *testing.T) {
+	dir := t.TempDir()
+	// 使用较短路径避免 macOS Unix socket 路径长度限制。
+	listener, err := net.Listen("unix", filepath.Join(dir, "s"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, listener.Close()) }()
+	require.ErrorContains(t, checkMountFiles(context.Background(), dir), "IPC")
 }

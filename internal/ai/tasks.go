@@ -17,9 +17,30 @@ import (
 	"maunium.net/go/mautrix/id"
 	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
+	"rua.plus/saber/internal/config"
+	"rua.plus/saber/internal/execution"
 	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/task"
 )
+
+// ConfigureExecution 在任务启动前加载权限并清理残留容器，之后不允许聊天修改。
+func (s *Service) ConfigureExecution(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) error {
+	if s.tasks != nil {
+		return errors.New("configure execution before starting tasks")
+	}
+	e, err := execution.New(cfg, protectedPaths, forbiddenSecrets)
+	if err != nil {
+		return err
+	}
+	if err = e.Recover(context.Background()); err != nil {
+		return err
+	}
+	s.executor = e
+	if s.mcpManager != nil {
+		s.mcpManager.SetAuthorizer(e.CheckMCP)
+	}
+	return nil
+}
 
 // EnableTasks 在接收消息前启用持久化任务；数据库只供当前机器人进程使用。
 // 工作目录固定为启动目录，与已有 stdio 工具继承的 cwd 一致。
@@ -47,15 +68,48 @@ func (s *Service) EnableTasks(path string) error {
 		case <-ctx.Done():
 			return agent.Result{}, ctx.Err()
 		}
-		if task.WorkDir(ctx) != s.taskDir {
-			return agent.Result{}, fmt.Errorf("任务工作目录 %q 与当前启动目录 %q 不同，停止执行以免影响错误目录", task.WorkDir(ctx), s.taskDir)
+		expectedDir := s.taskDir
+		identity, _ := chat.IdentityFromContext(ctx)
+		if s.executor != nil {
+			if granted, err := s.executor.Workspace(identity); err == nil {
+				expectedDir = granted
+			}
 		}
+		if task.WorkDir(ctx) != expectedDir {
+			return agent.Result{}, fmt.Errorf("任务工作目录 %q 与当前授权目录 %q 不同，停止执行", task.WorkDir(ctx), expectedDir)
+		}
+		ctx = execution.WithTask(ctx, task.ID(ctx), expectedDir)
+		// 重启恢复时按当前权限重新筛选，旧请求快照不能保留已撤销能力。
+		req.Tools, _ = s.toolExecutor.PrepareTools(ctx)
 		if err := s.core.WaitForRateLimit(ctx); err != nil {
 			return agent.Result{}, err
 		}
 		return s.RunAgent(ctx, req, emit)
 	}, func(ctx context.Context, t task.Task) (string, error) {
-		return adapter.Send(ctx, taskReply(t, "result", task.Report(t)))
+		messageID, err := adapter.Send(ctx, taskReply(t, "result", task.Report(t)))
+		if err != nil || s.executor == nil || t.Status != "completed" {
+			return messageID, err
+		}
+		artifacts, err := s.executor.Artifacts(t.ID)
+		if err != nil {
+			return "", err
+		}
+		for _, artifact := range artifacts {
+			identity := chat.Identity{Session: t.Message.Session, SenderID: t.Message.SenderID}
+			artifactCtx := execution.WithTask(chat.WithIdentity(ctx, identity), t.ID, t.WorkDir)
+			if err = s.executor.Check(artifactCtx, "read_file"); err != nil {
+				return "", err
+			}
+			data, readErr := os.ReadFile(artifact.Path)
+			if readErr != nil {
+				return "", readErr
+			}
+			reply := taskReply(t, "artifact:"+filepath.Base(artifact.Path), artifact.Name)
+			if _, err = s.matrixService.SendTaskFile(ctx, id.RoomID(t.Message.Session.Conversation), artifact.Name, data, reply.TransactionID, id.EventID(t.Message.ID), id.EventID(t.Message.Session.Thread)); err != nil {
+				return "", err
+			}
+		}
+		return messageID, nil
 	})
 	if err != nil {
 		return err
@@ -92,7 +146,13 @@ func (s *Service) submitTask(ctx context.Context, message chat.Message, req agen
 		}
 	}
 	req.Messages = append(req.Messages, current)
-	t, err := s.tasks.Submit(ctx, message, s.taskDir, req)
+	dir := s.taskDir
+	if s.executor != nil {
+		if granted, err := s.executor.Workspace(chat.Identity{Session: message.Session, SenderID: message.SenderID}); err == nil {
+			dir = granted
+		}
+	}
+	t, err := s.tasks.Submit(ctx, message, dir, req)
 	if err != nil {
 		return err
 	}

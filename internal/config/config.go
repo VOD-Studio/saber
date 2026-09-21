@@ -1083,6 +1083,17 @@ mcp:
       # 最大输出长度（字符，默认 10000）
       max_output_length: 10000
 
+# 自主执行权限：默认不向任何成员开放命令/文件/MCP 工具。
+# 完整授权与 MCP 能力配置见 docs/execution.md。
+execution:
+  enabled: false
+  image: "python:3.13-slim"  # 管理员预先拉取的可信镜像，生产建议固定 digest
+  log_dir: "./data/execution"  # 必须在工作区外
+  timeout_seconds: 60
+  workspaces: {}
+  grants: []
+  mcp_requirements: {}
+
 # Meme/GIF 搜索配置（使用 Klipy API）
 meme:
   # 是否启用 meme 功能

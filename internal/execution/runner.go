@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,9 +115,6 @@ func (e *Executor) Run(ctx context.Context, tool string, args map[string]any) (r
 	if run.id <= 0 {
 		return result, errors.New("local tools require a persistent task")
 	}
-	if _, blocked := e.blocked.Load(run.dir); blocked {
-		return result, errors.New("workspace quarantined after container cleanup failure; restart after checking Docker")
-	}
 	if err = validateArgs(tool, args); err != nil {
 		return result, err
 	}
@@ -127,6 +124,9 @@ func (e *Executor) Run(ctx context.Context, tool string, args map[string]any) (r
 	resolved, resolveErr := filepath.EvalSymlinks(run.dir)
 	if resolveErr != nil || resolved != run.dir {
 		return result, errors.New("workspace path changed since authorization")
+	}
+	if err = checkMountFiles(ctx, run.dir); err != nil {
+		return result, err
 	}
 	data, err := json.Marshal(map[string]any{"tool": tool, "args": args, "env": w.Env})
 	if err != nil {
@@ -183,11 +183,11 @@ func (e *Executor) Run(ctx context.Context, tool string, args map[string]any) (r
 	cmd.Stdout = writer
 	cmd.Stderr = writer
 	runErr := cmd.Run()
-	if ctx.Err() != nil {
-		return result, ctx.Err()
-	}
 	if writer.err != nil {
 		return result, writer.err
+	}
+	if ctx.Err() != nil {
+		return result, ctx.Err()
 	}
 	if runErr != nil {
 		var exit *exec.ExitError
@@ -208,11 +208,28 @@ func (e *Executor) Run(ctx context.Context, tool string, args map[string]any) (r
 			return result, err
 		}
 		result.Artifact = filepath.Join(artifactDir, hex.EncodeToString(random[:])+"-"+filepath.Base(args["path"].(string)))
-		if err = copyArchive(log.Name(), result.Artifact); err != nil {
+		// 输出文件已停止写入，硬链接固定本次读取快照，避免额外复制及半成品。
+		if err = os.Link(log.Name(), result.Artifact); err != nil {
 			return result, err
 		}
 	}
 	return result, nil
+}
+
+func checkMountFiles(ctx context.Context, dir string) error {
+	// Unix socket 即使断网也可连到宿主服务；拒绝随工作区夹带 IPC/设备节点。
+	return filepath.WalkDir(dir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry.Type()&(os.ModeSocket|os.ModeDevice|os.ModeNamedPipe) != 0 {
+			return fmt.Errorf("workspace contains an IPC or device node: %s", path)
+		}
+		return nil
+	})
 }
 
 type archiveWriter struct {
@@ -244,21 +261,6 @@ func (w *archiveWriter) Write(p []byte) (int, error) {
 	}
 	w.err = err
 	return n, err
-}
-
-func copyArchive(source, target string) (err error) {
-	in, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer func() { err = errors.Join(err, in.Close()) }()
-	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return err
-	}
-	defer func() { err = errors.Join(err, out.Close()) }()
-	_, err = io.Copy(out, in)
-	return err
 }
 
 // Artifacts 只列举执行器私有目录中的快照，不能由模型指定宿主路径。

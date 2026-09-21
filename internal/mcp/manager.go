@@ -43,6 +43,15 @@ type Manager struct {
 	toolToServer map[string]string
 	// factories 不同类型服务器的工厂，键为服务器类型。
 	factories map[string]MCPServerFactory
+	// authorize 由应用注入统一权限入口；未配置时拒绝工具调用。
+	authorize func(context.Context, string, string) error
+}
+
+// SetAuthorizer 在启动阶段绑定权限检查；所有 MCP 实际调用都必须通过它。
+func (m *Manager) SetAuthorizer(check func(context.Context, string, string) error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.authorize = check
 }
 
 // NewManager 创建新的 MCP 管理器。
@@ -254,6 +263,15 @@ func (m *Manager) CallTool(ctx context.Context, serverName, toolName string, arg
 	identity, ok := chat.IdentityFromContext(ctx)
 	if !ok {
 		return nil, fmt.Errorf("缺少有效调用身份：需要平台、账号、会话和发送者")
+	}
+	m.mu.RLock()
+	authorize := m.authorize
+	m.mu.RUnlock()
+	if authorize == nil {
+		return nil, fmt.Errorf("MCP 工具未配置权限，默认拒绝")
+	}
+	if err := authorize(ctx, serverName, toolName); err != nil {
+		return nil, err
 	}
 	// 用户桶跨同账号会话共享，会话桶包含线程；不同平台或账号独立限流。
 	if !m.rateLimiter.Allow(identity.UserKey(), string(identity.Session.Key())) {

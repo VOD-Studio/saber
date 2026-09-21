@@ -19,6 +19,7 @@ import (
 	"rua.plus/saber/internal/ai"
 	"rua.plus/saber/internal/cli"
 	"rua.plus/saber/internal/config"
+	"rua.plus/saber/internal/execution"
 	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/mcp"
 	"rua.plus/saber/internal/meme"
@@ -212,6 +213,21 @@ func (s *appState) initServices() error {
 	if err := s.cfg.AI.Validate(); err != nil {
 		return fmt.Errorf("AI配置验证失败: %w", err)
 	}
+	secrets := []string{s.cfg.Matrix.AccessToken, s.cfg.Matrix.Password, s.cfg.AI.APIKey}
+	for _, provider := range s.cfg.AI.Providers {
+		secrets = append(secrets, provider.APIKey)
+		for _, model := range provider.Models {
+			secrets = append(secrets, model.APIKey)
+		}
+	}
+	for _, model := range s.cfg.AI.Models {
+		secrets = append(secrets, model.APIKey)
+	}
+	for name, server := range s.cfg.MCP.Servers {
+		if err := execution.ValidateEnvironment(server.Env, secrets); err != nil {
+			return fmt.Errorf("MCP %s 环境验证失败: %w", name, err)
+		}
+	}
 
 	svc.mcpManager = s.initMCPManager()
 	if svc.mcpManager != nil {
@@ -228,6 +244,11 @@ func (s *appState) initServices() error {
 		return fmt.Errorf("AI服务初始化失败: %w", err)
 	}
 	svc.aiService = aiService
+	configDir := filepath.Dir(s.flags.ConfigPath)
+	protected := []string{s.flags.ConfigPath, s.flags.ConfigPath + ".session", s.cfg.Matrix.E2EESessionPath, s.cfg.Matrix.E2EESessionPath + ".key", s.cfg.Matrix.PickleKeyPath, filepath.Join(configDir, "tasks.db"), filepath.Join(configDir, "persona.db")}
+	if err := aiService.ConfigureExecution(s.cfg.Execution, protected, secrets); err != nil {
+		return fmt.Errorf("执行权限初始化失败: %w", err)
+	}
 
 	slog.Info("AI服务初始化成功",
 		"provider", s.cfg.AI.Provider,

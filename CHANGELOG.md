@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 自主工具接入持久化群聊任务：按真实身份筛选工具并逐次复验，命令失败可反馈模型继续修正；`read_file(deliver=true)` 将文件快照加密上传并回复原消息，发送失败只重试投递
 - Docker 容器执行模块与服务端成员/群/工作区权限：提供命令、读写文件、目录检查和精确补丁工具；默认断网、唯一工作区挂载、无宿主凭据继承，支持输出归档、文件快照及超时/取消清理
 - SQLite 持久化任务队列：消息去重、独立请求与执行记录、工作目录串行执行、取消与重启中断恢复；结果投递独立重试，不重放已执行任务
 - Matrix 聊天任务立即回复编号，支持 `!task run/list/status/cancel`、常用中文任务操作和 `saber_task` 模型工具；结果引用原消息与话题，固定发送事务 ID 防止投递重试产生重复消息
@@ -19,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- MCP 工具改为默认拒绝，内置与外部服务器均需要管理员显式授权；发布、部署、跨目录能力独立声明，stdio 进程不再继承 Saber 环境变量（安全敏感变更）
 - 应用启动时启用配置文件同目录下的 `tasks.db`；用户聊天转为后台任务，不读取或写入共享房间历史。工作目录固定为启动目录，重启后目录不匹配时拒绝执行
 - Matrix 通过 `ChatAdapter` 规范化消息、图片、引用和线程，与内存聊天 adapter 共用 `conversation.Processor`；回复能力决定是否显示增量，模型流式传输独立配置
 - 模型客户端、注册表、重试和流式解析迁移至 `internal/model`；旧 `ai` 名称通过兼容层引用，核心依赖检查禁止引入 Matrix SDK

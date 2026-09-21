@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"rua.plus/saber/internal/chat/memory"
 	"rua.plus/saber/internal/config"
 	appcontext "rua.plus/saber/internal/context"
+	"rua.plus/saber/internal/execution"
 	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/mcp"
 )
@@ -48,8 +50,10 @@ func TestService_RunAgentWithoutMatrix(t *testing.T) {
 }
 
 func TestService_RunAgentMCPFailure(t *testing.T) {
+	var executed atomic.Int32
 	sdkServer := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "test", Version: "1"}, nil)
 	sdkServer.AddTool(&mcpsdk.Tool{Name: "lookup", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		executed.Add(1)
 		return &mcpsdk.CallToolResult{IsError: true, Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "lookup denied"}}}, nil
 	})
 	endpoint := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return sdkServer }, nil))
@@ -97,10 +101,37 @@ func TestService_RunAgentMCPFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	available, _ := service.toolExecutor.PrepareTools()
-	result, err := service.RunAgent(appcontext.WithUserContext(ctx, "@test:local", "!test:local"), agent.Request{Model: cfg.DefaultModel, Tools: available}, nil)
+	taskCtx := appcontext.WithUserContext(ctx, "@test:local", "!test:local")
+	// 工具默认隐藏，直接调用 Manager 也不能绕过授权。
+	if available, _ := service.toolExecutor.PrepareTools(taskCtx); len(available) != 0 {
+		t.Fatal("ungranted tools exposed")
+	}
+	if _, err := manager.CallTool(taskCtx, "test", "lookup", nil); err == nil {
+		t.Fatal("ungranted MCP call accepted")
+	}
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.executor, err = execution.New(config.ExecutionConfig{Enabled: true, LogDir: t.TempDir(), Workspaces: map[string]config.WorkspaceConfig{"test": {Path: workspace}}, Grants: []config.ExecutionGrant{{Platform: "matrix", Account: "legacy", Room: "!test:local", Users: []string{"@test:local"}, Workspace: "test", Tools: []string{"mcp:test:lookup"}, Capabilities: []string{"external"}}}, MCPRequirements: map[string][]string{"mcp:test:lookup": {}}}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.SetAuthorizer(service.executor.CheckMCP)
+	taskCtx = execution.WithTask(taskCtx, 1, workspace)
+	available, _ := service.toolExecutor.PrepareTools(taskCtx)
+	result, err := service.RunAgent(taskCtx, agent.Request{Model: cfg.DefaultModel, Tools: available}, nil)
 	if err != nil || result.Status != agent.Completed || result.Rounds[0].Tools[0].ErrorCode != "tool_failed" {
 		t.Fatalf("%+v %v", result, err)
+	}
+	identity, _ := chat.IdentityFromContext(taskCtx)
+	identity.SenderID = "@mallory:local"
+	forgedCtx := chat.WithIdentity(taskCtx, identity)
+	if _, err := manager.CallTool(forgedCtx, "test", "lookup", map[string]any{"sender_id": "@test:local", "capabilities": []string{"external"}}); err == nil {
+		t.Fatal("forged parameters bypassed MCP permission")
+	}
+	if executed.Load() != 1 {
+		t.Fatal("denied MCP call reached external server")
 	}
 }
 

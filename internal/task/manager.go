@@ -176,6 +176,7 @@ func (m *Manager) execute(ctx context.Context, cancel context.CancelFunc, t Task
 	defer func() { m.mu.Lock(); delete(m.active, t.ID); m.mu.Unlock(); m.notify() }()
 	ctx = chat.WithIdentity(ctx, chat.Identity{Session: t.Message.Session, SenderID: t.Message.SenderID})
 	ctx = context.WithValue(ctx, workDirKey{}, t.WorkDir)
+	ctx = context.WithValue(ctx, taskIDKey{}, t.ID)
 	var journalErr error
 	result, runErr := m.run(ctx, t.Request, func(event agent.Event) {
 		if journalErr != nil {
@@ -233,6 +234,10 @@ func (m *Manager) Close() error {
 }
 
 type workDirKey struct{}
+type taskIDKey struct{}
+
+// ID 返回当前持久化任务编号，供执行器关联日志和文件归档。
+func ID(ctx context.Context) int64 { id, _ := ctx.Value(taskIDKey{}).(int64); return id }
 
 // WorkDir 从执行上下文读取工作目录；工具不得通过修改进程 cwd 切换目录。
 func WorkDir(ctx context.Context) string { dir, _ := ctx.Value(workDirKey{}).(string); return dir }

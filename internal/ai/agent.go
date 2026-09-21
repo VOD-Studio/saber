@@ -9,6 +9,7 @@ import (
 	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/conversation"
+	"rua.plus/saber/internal/execution"
 	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/model"
 )
@@ -42,6 +43,9 @@ func (s *Service) runAgent(ctx context.Context, req agent.Request, emit func(age
 			output := agent.ToolOutput{Value: value}
 			if result, ok := value.(*mcpsdk.CallToolResult); ok && result != nil {
 				output.IsError = result.IsError
+			}
+			if result, ok := value.(execution.Result); ok {
+				output.IsError = result.ExitCode != 0 || result.Error != ""
 			}
 			return output, err
 		},
