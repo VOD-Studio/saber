@@ -92,7 +92,7 @@ func (s *Service) EnableTasks(path string) error {
 			return "", ctx.Err()
 		}
 		return s.deliverTask(ctx, adapter, t)
-	}, s.authorizeSchedule)
+	}, task.Authorization{Schedule: s.authorizeSchedule, Manage: func(identity chat.Identity) bool { return s.executor != nil && s.executor.IsTaskAdmin(identity) }})
 	if err != nil {
 		return err
 	}
@@ -271,7 +271,7 @@ func (s *Service) taskOperation(ctx context.Context, identity chat.Identity, act
 
 func taskTool() openai.Tool {
 	return openai.Tool{Type: openai.ToolTypeFunction, Function: &openai.FunctionDefinition{
-		Name: "saber_task", Description: "查询本群任务列表或状态，或者取消当前用户自己发起的指定任务。身份与群由系统提供，不得代其他用户操作。创建任务由聊天入口自动完成。",
+		Name: "saber_task", Description: "查询本群任务列表或状态，或者取消当前用户自己发起或具备本群管理权限的指定任务。身份与群由系统提供，不得代其他用户操作。创建任务由聊天入口自动完成。",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{
 			"action": map[string]any{"type": "string", "enum": []string{"list", "status", "cancel"}},
 			"id":     map[string]any{"type": "integer", "minimum": 1},

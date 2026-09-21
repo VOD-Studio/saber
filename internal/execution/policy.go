@@ -24,6 +24,7 @@ type Executor struct {
 	cfg     config.ExecutionConfig
 	grants  map[string]config.ExecutionGrant
 	owner   string
+	admins  map[string]bool
 	blocked sync.Map
 }
 
@@ -135,7 +136,18 @@ func New(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) 
 			}
 		}
 	}
-	e := &Executor{cfg: cfg, grants: make(map[string]config.ExecutionGrant), owner: fmt.Sprintf("%x", sha256.Sum256([]byte(cfg.LogDir)))}
+	e := &Executor{cfg: cfg, grants: make(map[string]config.ExecutionGrant), admins: make(map[string]bool), owner: fmt.Sprintf("%x", sha256.Sum256([]byte(cfg.LogDir)))}
+	for _, admin := range cfg.TaskAdmins {
+		if admin.Platform == "" || admin.Account == "" || admin.Room == "" || len(admin.Users) == 0 || strings.Contains(admin.Platform+admin.Account+admin.Room, "*") {
+			return nil, errors.New("task admin requires exact platform, account, room and users")
+		}
+		for _, user := range admin.Users {
+			if user == "" || strings.Contains(user, "*") {
+				return nil, errors.New("task admin requires exact member IDs")
+			}
+			e.admins[identityKey(chat.Identity{Session: chat.Session{Platform: admin.Platform, Account: admin.Account, Conversation: admin.Room}, SenderID: user})] = true
+		}
+	}
 	for _, grant := range cfg.Grants {
 		if _, ok := cfg.Workspaces[grant.Workspace]; !ok {
 			return nil, fmt.Errorf("unknown workspace %q", grant.Workspace)
@@ -273,3 +285,6 @@ func (e *Executor) CheckMCP(ctx context.Context, server, tool string) error {
 
 // Timeout 返回工具的程序配置上限。
 func (e *Executor) Timeout() time.Duration { return time.Duration(e.cfg.TimeoutSeconds) * time.Second }
+
+// IsTaskAdmin 查询配置中的精确管理授权；管理员身份不开放任何执行工具。
+func (e *Executor) IsTaskAdmin(identity chat.Identity) bool { return e.admins[identityKey(identity)] }

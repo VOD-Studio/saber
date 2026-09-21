@@ -12,6 +12,8 @@ type ExecutionConfig struct {
 	TimeoutSeconds int `yaml:"timeout_seconds"`
 	// Workspaces 将管理员命名的工作区绑定到宿主目录。
 	Workspaces map[string]WorkspaceConfig `yaml:"workspaces"`
+	// TaskAdmins 仅授予同群任务取消、日志读取和计划管理，不授予执行工具。
+	TaskAdmins []TaskAdmin `yaml:"task_admins"`
 	// Grants 精确授权账号、群、成员与工作区。
 	Grants []ExecutionGrant `yaml:"grants"`
 	// MCPRequirements 按 mcp:服务器:工具 声明额外能力；未声明的工具禁止调用。
@@ -43,4 +45,16 @@ type ExecutionGrant struct {
 	Tools []string `yaml:"tools"`
 	// Capabilities 单独授予 external、publish、deploy 或 cross_directory 能力。
 	Capabilities []string `yaml:"capabilities"`
+}
+
+// TaskAdmin 按平台、机器人账号和群精确指定任务管理员。
+type TaskAdmin struct {
+	// Platform 是接入平台。
+	Platform string `yaml:"platform"`
+	// Account 是机器人账号。
+	Account string `yaml:"account"`
+	// Room 是允许管理的群。
+	Room string `yaml:"room"`
+	// Users 是完整成员 ID，不接受通配符。
+	Users []string `yaml:"users"`
 }

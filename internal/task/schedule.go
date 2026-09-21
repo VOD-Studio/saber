@@ -249,14 +249,14 @@ func (m *Manager) ChangeSchedule(ctx context.Context, identity chat.Identity, id
 	if err != nil {
 		return Schedule{}, err
 	}
-	if s.Message.SenderID != identity.SenderID {
-		return Schedule{}, errors.New("只能修改自己创建的计划")
+	if !m.CanManage(identity, s.Message.SenderID) {
+		return Schedule{}, errors.New("只有负责人或本群任务管理员可以修改计划")
 	}
 	status := map[string]string{"pause": "paused", "delete": "deleted"}[action]
 	if status == "" {
 		return Schedule{}, errors.New("只支持 pause 或 delete")
 	}
-	_, err = m.store.db.ExecContext(ctx, `UPDATE schedules SET status=?,reason=? WHERE id=? AND status!='deleted'`, status, "负责人操作："+action, id)
+	_, err = m.store.db.ExecContext(ctx, `UPDATE schedules SET status=?,reason=? WHERE id=? AND status!='deleted'`, status, "成员 "+identity.SenderID+" 操作："+action, id)
 	if err != nil {
 		return Schedule{}, err
 	}

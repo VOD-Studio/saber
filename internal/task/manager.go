@@ -19,6 +19,14 @@ type RunFunc func(context.Context, agent.Request, func(agent.Event)) (agent.Resu
 // SendFunc 只发送已保存的结果；各上传和发送步骤须独立限时并使用稳定平台幂等键。
 type SendFunc func(context.Context, Task) (string, error)
 
+// Authorization 注入当前部署的计划执行权限及任务管理员规则，不能由聊天或工具参数覆盖。
+type Authorization struct {
+	// Schedule 在计划创建和执行时复查当前权限。
+	Schedule ScheduleAuthorize
+	// Manage 判断当前来源成员是否可以管理同群其他人的任务及计划。
+	Manage func(chat.Identity) bool
+}
+
 // Manager 管理单个机器人进程的队列；同一数据库只允许一个 Manager 实例。
 type Manager struct {
 	store      *store
@@ -35,10 +43,11 @@ type Manager struct {
 	closeErr   error
 	scheduleMu sync.Mutex
 	authorize  ScheduleAuthorize
+	manage     func(chat.Identity) bool
 }
 
 // Open 打开数据库，标记中断任务，并启动队列和结果投递。
-func Open(path string, run RunFunc, send SendFunc, authorize ...ScheduleAuthorize) (*Manager, error) {
+func Open(path string, run RunFunc, send SendFunc, authorization ...Authorization) (*Manager, error) {
 	if run == nil || send == nil {
 		return nil, errors.New("task manager requires runner and sender")
 	}
@@ -52,8 +61,9 @@ func Open(path string, run RunFunc, send SendFunc, authorize ...ScheduleAuthoriz
 		return nil, errors.Join(err, s.db.Close())
 	}
 	m := &Manager{store: s, run: run, send: send, ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), done: make(chan struct{}), active: make(map[int64]context.CancelFunc)}
-	if len(authorize) > 0 {
-		m.authorize = authorize[0]
+	if len(authorization) > 0 {
+		m.authorize = authorization[0].Schedule
+		m.manage = authorization[0].Manage
 	}
 	go m.loop()
 	return m, nil
@@ -85,7 +95,7 @@ func (m *Manager) Get(ctx context.Context, session chat.Session, taskID int64) (
 	return m.store.get(ctx, session, taskID)
 }
 
-// Cancel 只允许发起人取消；运行中任务退出前不会释放工作目录。
+// Cancel 只允许发起人或同群授权管理员取消；运行中任务退出前不会释放工作目录。
 func (m *Manager) Cancel(ctx context.Context, identity chat.Identity, taskID int64) (Task, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -93,8 +103,8 @@ func (m *Manager) Cancel(ctx context.Context, identity chat.Identity, taskID int
 	if err != nil {
 		return Task{}, err
 	}
-	if t.Message.SenderID != identity.SenderID {
-		return Task{}, errors.New("只能取消自己发起的任务")
+	if !m.CanManage(identity, t.Message.SenderID) {
+		return Task{}, errors.New("只有发起人或本群任务管理员可以取消任务")
 	}
 	_, err = m.store.db.ExecContext(ctx, `UPDATE tasks SET cancel_requested=1,status=CASE WHEN status='queued' THEN 'cancelled' ELSE status END WHERE id=? AND status IN ('queued','running')`, taskID)
 	if err != nil {
@@ -265,4 +275,9 @@ func Report(t Task) string {
 		return text + "\n" + t.Result.Content
 	}
 	return text + "\n" + t.Error
+}
+
+// CanManage 检查发起人或受信配置中的管理员，不授予工作区执行权限。
+func (m *Manager) CanManage(identity chat.Identity, owner string) bool {
+	return identity.SenderID != "" && (identity.SenderID == owner || (m.manage != nil && m.manage(identity)))
 }

@@ -193,3 +193,22 @@ func TestMountRejectsHostSocket(t *testing.T) {
 	defer func() { require.NoError(t, listener.Close()) }()
 	require.ErrorContains(t, checkMountFiles(context.Background(), dir), "IPC")
 }
+
+func TestExecutor_TaskAdminsAreScopedAndDoNotGrantExecution(t *testing.T) {
+	cfg := config.ExecutionConfig{TaskAdmins: []config.TaskAdmin{{Platform: "matrix", Account: "bot", Room: "room", Users: []string{"admin"}}}}
+	e, err := New(cfg, nil, nil)
+	require.NoError(t, err)
+	identity := chat.Identity{Session: chat.Session{Platform: "matrix", Account: "bot", Conversation: "room"}, SenderID: "admin"}
+	require.True(t, e.IsTaskAdmin(identity))
+	_, err = e.Workspace(identity)
+	require.Error(t, err)
+	identity.Session.Account = "other"
+	require.False(t, e.IsTaskAdmin(identity))
+	cfg.TaskAdmins[0].Users = []string{"*"}
+	_, err = New(cfg, nil, nil)
+	require.Error(t, err)
+	cfg.TaskAdmins[0].Users = []string{"admin"}
+	cfg.TaskAdmins[0].Room = "*"
+	_, err = New(cfg, nil, nil)
+	require.Error(t, err)
+}
