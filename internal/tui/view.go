@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"image/color"
 	"strings"
 	"unicode"
 
@@ -18,28 +19,58 @@ import (
 )
 
 var (
-	background  = lipgloss.Color("#10161E")
-	panel       = lipgloss.Color("#17212B")
-	foreground  = lipgloss.Color("#DFE8EF")
-	muted       = lipgloss.Color("#8A9CAB")
-	faint       = lipgloss.Color("#344552")
-	accent      = lipgloss.Color("#83E2C4")
-	danger      = lipgloss.Color("#F29898")
+	background  = lipgloss.Color("#15131C")
+	panel       = lipgloss.Color("#1E1B28")
+	raised      = lipgloss.Color("#282333")
+	selected    = lipgloss.Color("#352C48")
+	foreground  = lipgloss.Color("#EAE5F2")
+	muted       = lipgloss.Color("#A49AAF")
+	faint       = lipgloss.Color("#453B53")
+	accent      = lipgloss.Color("#BC9BFA")
+	pink        = lipgloss.Color("#E5A1CE")
+	success     = lipgloss.Color("#8BD5BE")
+	danger      = lipgloss.Color("#F19BAA")
 	accentStyle = lipgloss.NewStyle().Foreground(accent)
 	mutedStyle  = lipgloss.NewStyle().Foreground(muted)
 	textStyle   = lipgloss.NewStyle().Foreground(foreground)
+	quietStyle  = lipgloss.NewStyle().Foreground(faint)
 )
 
 func inputStyles() textarea.Styles {
 	styles := textarea.DefaultDarkStyles()
 	styles.Focused.Base = lipgloss.NewStyle().Foreground(foreground).Background(panel)
-	styles.Focused.Text = textStyle
-	styles.Focused.Prompt = accentStyle
-	styles.Focused.Placeholder = mutedStyle
-	styles.Focused.CursorLine = lipgloss.NewStyle()
-	styles.Focused.EndOfBuffer = lipgloss.NewStyle().Foreground(panel)
+	styles.Focused.Text = textStyle.Background(panel)
+	styles.Focused.Prompt = accentStyle.Background(panel)
+	styles.Focused.Placeholder = mutedStyle.Background(panel)
+	styles.Focused.CursorLine = lipgloss.NewStyle().Background(panel)
+	styles.Focused.EndOfBuffer = lipgloss.NewStyle().Foreground(panel).Background(panel)
 	styles.Blurred = styles.Focused
+	styles.Blurred.Prompt = mutedStyle.Background(panel)
+	styles.Cursor.Color = accent
 	return styles
+}
+
+// splitLine 在同一行保留右侧操作，长标题按终端列宽截断。
+func splitLine(left, right string, width int) string {
+	width = max(1, width)
+	if lipgloss.Width(right) >= width {
+		return ansi.Truncate(right, width, "…")
+	}
+	left = ansi.Truncate(left, max(0, width-lipgloss.Width(right)-1), "…")
+	return left + strings.Repeat(" ", max(0, width-lipgloss.Width(left+right))) + right
+}
+
+func gradient(text string) string {
+	colors := lipgloss.Blend1D(len([]rune(text)), accent, pink)
+	var result strings.Builder
+	for i, r := range []rune(text) {
+		result.WriteString(lipgloss.NewStyle().Foreground(colors[i]).Bold(true).Render(string(r)))
+	}
+	return result.String()
+}
+
+func keyHint(key, label string) string {
+	return textStyle.Render(key) + mutedStyle.Render(" "+label)
 }
 func clean(text string) string {
 	return strings.Map(func(r rune) rune {
@@ -115,7 +146,7 @@ func (m *model) refresh() {
 }
 func (m *model) markdown(text string) string {
 	theme := styles.DarkStyleConfig
-	textColor, accentColor, codeColor, panelColor := "#DFE8EF", "#83E2C4", "#E9C58E", "#17212B"
+	textColor, accentColor, codeColor, panelColor := "#EAE5F2", "#BC9BFA", "#EBCB8B", "#282333"
 	margin, bold := uint(0), true
 	theme.Document.Color, theme.Document.Margin = &textColor, &margin
 	theme.Heading.Color, theme.Heading.Bold = &accentColor, &bold
@@ -124,6 +155,7 @@ func (m *model) markdown(text string) string {
 		heading.Color, heading.Bold = &accentColor, &bold
 	}
 	theme.Code.Color, theme.Code.BackgroundColor = &codeColor, &panelColor
+	theme.Link.Color, theme.LinkText.Color = &accentColor, &accentColor
 	theme.CodeBlock.Theme, theme.CodeBlock.Chroma = "catppuccin-mocha", nil
 	renderer, err := glamour.NewTermRenderer(glamour.WithStyles(theme), glamour.WithWordWrap(max(8, m.bodyWidth-4)), glamour.WithTableWrap(true))
 	if err == nil {
@@ -135,14 +167,18 @@ func (m *model) markdown(text string) string {
 }
 func (m *model) renderTurn(turn server.Turn) string {
 	width := max(1, m.bodyWidth-4)
-	userLabel := textStyle.Bold(true).Render("你") + mutedStyle.Render("  "+turn.CreatedAt.Local().Format("15:04"))
-	user := lipgloss.NewStyle().Foreground(foreground).BorderLeft(true).BorderStyle(lipgloss.NormalBorder()).BorderForeground(faint).PaddingLeft(1).Width(width).Render(clean(turn.Input))
-	assistantLabel := accentStyle.Bold(true).Render("◈ Saber")
+	userLabel := splitLine(accentStyle.Background(panel).Bold(true).Render("你"), mutedStyle.Background(panel).Render(turn.CreatedAt.Local().Format("15:04")), width-3)
+	user := lipgloss.NewStyle().Foreground(foreground).Background(panel).
+		BorderLeft(true).BorderStyle(lipgloss.Border{Left: "▎"}).BorderForeground(accent).BorderBackground(panel).
+		Padding(0, 1).Width(width).Render(userLabel + "\n" + clean(turn.Input))
+	user = paint(user, width, lipgloss.Height(user), panel)
+	assistantLabel := lipgloss.NewStyle().Foreground(success).Bold(true).Render("✦ Saber")
 	var parts []string
-	parts = append(parts, userLabel, user, "", assistantLabel)
+	parts = append(parts, user, "", assistantLabel, "")
 	if len(turn.Tools) > 0 {
+		var toolLines []string
 		for _, tool := range turn.Tools {
-			marker, color := "✓", accent
+			marker, color := "✓", success
 			state := "完成"
 			if tool.ErrorCode != "" {
 				marker, color, state = "!", danger, "失败"
@@ -153,9 +189,9 @@ func (m *model) renderTurn(turn server.Turn) string {
 				}
 			}
 			name := clipped(tool.Call.Function.Name, max(8, width/3))
-			summary := clipped(toolSummary(tool.Call.Function.Arguments), max(1, width-lipgloss.Width(name+state)-7))
-			line := lipgloss.NewStyle().Foreground(color).Render(marker) + " " + textStyle.Render(name) + mutedStyle.Render("  "+summary+"  "+state)
-			parts = append(parts, line)
+			summary := clipped(toolSummary(tool.Call.Function.Arguments), max(1, width-lipgloss.Width(name+state)-9))
+			line := lipgloss.NewStyle().Foreground(color).Background(panel).Render(marker) + " " + textStyle.Background(panel).Render(name) + mutedStyle.Background(panel).Render("  "+summary)
+			toolLines = append(toolLines, splitLine(line, mutedStyle.Background(panel).Render(state), width-2))
 			if m.details {
 				detail := clean(tool.Call.Function.Arguments)
 				if tool.Content != "" {
@@ -165,10 +201,11 @@ func (m *model) renderTurn(turn server.Turn) string {
 				if len(runes) > 4000 {
 					detail = string(runes[:4000]) + "\n…"
 				}
-				parts = append(parts, lipgloss.NewStyle().Foreground(muted).BorderLeft(true).BorderStyle(lipgloss.NormalBorder()).BorderForeground(faint).PaddingLeft(1).Width(width-2).Render(detail))
+				toolLines = append(toolLines, mutedStyle.Background(panel).PaddingLeft(2).Width(width-2).Render(detail))
 			}
 		}
-		parts = append(parts, "")
+		tools := lipgloss.NewStyle().Background(panel).Padding(0, 1).Width(width).Render(strings.Join(toolLines, "\n"))
+		parts = append(parts, paint(tools, width, lipgloss.Height(tools), panel), "")
 	}
 	content := turn.Content
 	if content == "" {
@@ -194,7 +231,7 @@ func (m *model) renderTurn(turn server.Turn) string {
 		if turn.Model != "" {
 			meta = clipped(m.modelName(turn.Model), max(8, width-lipgloss.Width(meta)-5)) + "  ·  " + meta
 		}
-		parts = append(parts, mutedStyle.Render(clipped(meta, width)))
+		parts = append(parts, "", mutedStyle.Render(clipped("↳ "+meta, width)))
 	default:
 		label := map[string]string{"failed": "回答未完成", "cancelled": "已停止", "interrupted": "服务重启前的任务已中断"}[turn.Status]
 		if label == "" {
@@ -241,91 +278,112 @@ func (m *model) modelName(id string) string {
 	return id
 }
 func (m *model) header(width int) string {
-	logo := accentStyle.Bold(true).Render("◈ SABER")
+	logo := gradient("SABER")
 	title := "新会话"
 	if len(m.turns) > 0 {
 		title = m.turns[0].Input
 	}
-	status, color := "● 已连接", accent
+	status, color := "● 已连接", success
 	if !m.connected {
 		status, color = "○ 未连接", muted
 	}
 	if m.loading {
-		status = "◌ 连接中"
+		status, color = "◌ 连接中", accent
 	}
 	right := lipgloss.NewStyle().Foreground(color).Render(status)
-	label := mutedStyle.Render("  /  " + clipped(title, max(1, width-lipgloss.Width(logo+right)-7)))
-	gap := max(1, width-lipgloss.Width(logo+label)-lipgloss.Width(right))
-	first := logo + label + strings.Repeat(" ", gap) + right
-	return first + "\n" + lipgloss.NewStyle().Foreground(faint).Render(strings.Repeat("─", width)) + "\n"
+	label := quietStyle.Render("  /  ") + mutedStyle.Render(clipped(title, max(1, width-lipgloss.Width(logo+right)-7)))
+	return splitLine(logo+label, right, width) + "\n\n"
 }
 func (m *model) sidebar(height int) string {
-	var lines []string
-	lines = append(lines, mutedStyle.Bold(true).Render("会话"), "", mutedStyle.Render("＋ 新建        Ctrl+N"), "")
-	count := min(len(m.sessions), max(0, height-6))
-	if count == 0 {
-		lines = append(lines, mutedStyle.Render("还没有历史会话"))
+	const width = 22
+	normal, quiet := textStyle.Background(panel), mutedStyle.Background(panel)
+	title := splitLine(normal.Bold(true).Render("会话"), quiet.Render(fmt.Sprint(len(m.sessions))), width)
+	button := lipgloss.NewStyle().Foreground(accent).Background(raised).Width(width).Render(splitLine("＋ 新建", "Ctrl+N", width))
+	lines := []string{title, "", button, ""}
+	footer := quiet.Render("Ctrl+O 查看全部") + "\n" + quiet.Render("Ctrl+B 收起侧栏")
+	available := max(0, height-2-len(lines)-lipgloss.Height(footer)-1)
+	count := min(len(m.sessions), available/3)
+	if len(m.sessions) == 0 && available > 0 {
+		lines = append(lines, quiet.Render("还没有历史会话"))
 	}
 	for _, session := range m.sessions[:count] {
-		label := clipped(session.Input, 14)
-		style := mutedStyle
-		prefix := " "
+		style, meta, marker := normal, quiet, " "
 		if session.Session == m.session {
-			style = lipgloss.NewStyle().Foreground(accent).Background(panel)
-			prefix = "▌"
+			style = accentStyle.Background(selected).Bold(true)
+			meta = mutedStyle.Background(selected)
+			marker = "▎"
 		}
-		state := session.CreatedAt.Local().Format("15:04")
-		if session.Status == "running" {
-			state = "●"
+		state := "已完成"
+		switch session.Status {
+		case "running":
+			state = "回答中"
+		case "queued":
+			state = "排队中"
+		case "failed":
+			state = "失败"
+		case "cancelled", "interrupted":
+			state = "已停止"
 		}
-		gap := strings.Repeat(" ", max(1, 21-lipgloss.Width(label+state)))
-		lines = append(lines, style.Width(22).Render(prefix+label+gap+state))
+		lines = append(lines,
+			style.Width(width).Render(marker+" "+clipped(session.Input, width-3)),
+			meta.Width(width).Render("  "+session.CreatedAt.Local().Format("01/02 15:04")+" · "+state), "")
 	}
-	text := strings.Join(lines, "\n")
-	return lipgloss.NewStyle().Width(26).Height(height).BorderRight(true).BorderStyle(lipgloss.NormalBorder()).BorderForeground(faint).PaddingRight(1).Render(text)
+	text := lipgloss.NewStyle().Height(max(1, height-2-lipgloss.Height(footer))).Render(strings.Join(lines, "\n")) + "\n" + footer
+	view := lipgloss.NewStyle().Background(panel).Width(26).Height(height).MaxHeight(height).Padding(1, 2).Render(text)
+	return paint(view, 26, height, panel)
 }
 func (m *model) composer() string {
-	border := accent
+	focus := accent
 	if m.menu != "" {
-		border = faint
+		focus = faint
 	}
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).BorderBackground(background).Background(panel).Padding(0, 1).Width(m.bodyWidth).Render(m.input.View())
 	name := m.modelName(m.selectedModel)
 	if name == "" {
 		name = "等待模型配置"
 	}
 	width := max(1, m.bodyWidth-4)
-	effort := " · 思考 " + clean(m.effectiveEffort())
-	metadata := clipped(name, max(1, width-lipgloss.Width(effort))) + effort
-	keys := "Enter 发送 · Alt+Enter 换行 · / 命令"
+	effort := mutedStyle.Background(panel).Render(" · 思考 " + clean(m.effectiveEffort()))
+	keys := keyHint("↵", "发送") + "   " + keyHint("/", "命令")
 	if m.menu != "" {
-		keys = "↑↓ 选择 · ↵ 确定 · Esc 返回"
+		keys = ""
 	} else if m.active() {
-		keys = "Ctrl+C 停止 · Ctrl+Q 离开 · / 命令"
-	} else if width < 42 {
-		keys = "↵ 发送 · ⌥↵ 换行 · / 命令"
+		keys = keyHint("Ctrl+C", "停止")
 	}
+	metaWidth := width
+	if width >= 64 {
+		// 固定保留操作区域，打开选择器时不改变输入区高度。
+		metaWidth -= 20
+	}
+	metadata := accentStyle.Background(panel).Render("◇ "+clipped(name, max(1, metaWidth-lipgloss.Width(effort)-2))) + effort
+	metadata = ansi.Truncate(metadata, metaWidth, "…")
+	if width >= 64 {
+		metadata = splitLine(metadata, keys, width)
+	} else {
+		metadata += "\n" + lipgloss.PlaceHorizontal(width, lipgloss.Right, keys)
+	}
+	padding, gap := 1, "\n\n"
+	if m.height < 22 {
+		padding, gap = 0, "\n"
+	}
+	box := lipgloss.NewStyle().BorderLeft(true).BorderStyle(lipgloss.Border{Left: "▎"}).
+		BorderForeground(focus).BorderBackground(panel).Background(panel).
+		Padding(padding, 2, padding, 1).Width(m.bodyWidth).Render(m.input.View() + gap + metadata)
+	box = paint(box, m.bodyWidth, lipgloss.Height(box), panel)
 	notice := m.notice
 	if m.unread && !m.viewport.AtBottom() {
 		notice = "↓ 新内容 · Ctrl+End 到底部"
-	} else if notice == "" && m.active() {
-		notice = "离开界面后，任务继续运行"
 	}
-	info := []string{metadata, keys, notice}
-	for i := range info {
-		info[i] = mutedStyle.Render("  " + clipped(info[i], width))
-	}
-	return box + "\n" + strings.Join(info, "\n")
+	return box + "\n" + mutedStyle.Render("  "+clipped(notice, width))
 }
 
 // paint 补齐嵌套 ANSI 样式重置后缺失的底色，保留面板和代码块的独立背景。
-func paint(content string, width, height int) string {
+func paint(content string, width, height int, bg color.Color) string {
 	canvas := lipgloss.NewCanvas(width, height).Compose(lipgloss.NewLayer(content))
 	for y := range height {
 		for x := range width {
 			cell := canvas.CellAt(x, y)
 			if cell != nil && cell.Width > 0 && cell.Style.Bg == nil {
-				cell.Style.Bg = background
+				cell.Style.Bg = bg
 			}
 		}
 	}
@@ -333,16 +391,29 @@ func paint(content string, width, height int) string {
 }
 func (m *model) welcome() string {
 	width, height := m.viewport.Width(), m.viewport.Height()
-	title := accentStyle.Bold(true).Render("◈  S A B E R")
-	subtitle := textStyle.Render("把想法变成下一步。")
-	hints := mutedStyle.Render("解释代码   /   一起设计   /   整理思路")
-	foot := mutedStyle.Render("输入消息开始，或按 Ctrl+O 继续上次的会话")
-	content := lipgloss.JoinVertical(lipgloss.Center, title, "", subtitle, "", hints, "", foot)
-	if width < 58 {
-		content = lipgloss.JoinVertical(lipgloss.Center, title, "", subtitle, "", mutedStyle.Render("输入消息开始对话"))
+	title := gradient("S A B E R")
+	subtitle := textStyle.Render("从一个想法开始。")
+	content := lipgloss.JoinVertical(lipgloss.Center, title, "", subtitle)
+	if width >= 54 && height >= 18 {
+		logo := []string{
+			"█▀▀▀▀  ▄▀▀▀▄  █▀▀▀▄  █▀▀▀▀  █▀▀▀▄",
+			"▀▀▀▀█  █▄▄▄█  █▀▀▀▄  █▀▀▀   █▄▄▄▀",
+			"▄▄▄▄█  █   █  █▄▄▄▀  █▄▄▄▄  █   █",
+		}
+		for i := range logo {
+			logo[i] = gradient(logo[i])
+		}
+		art := strings.Join(logo, "\n")
+		var shortcuts []string
+		for _, item := range [][2]string{{"新建会话", "Ctrl+N"}, {"选择模型", "Ctrl+P"}, {"继续对话", "Ctrl+O"}} {
+			shortcuts = append(shortcuts, lipgloss.NewStyle().Background(panel).Padding(1, 2).Width(16).Render(textStyle.Background(panel).Render(item[0])+"\n"+accentStyle.Background(panel).Render(item[1])))
+		}
+		content = lipgloss.JoinVertical(lipgloss.Center, art, "", subtitle, mutedStyle.Render("写代码、找答案，把想法聊清楚。"), "", lipgloss.JoinHorizontal(lipgloss.Top, shortcuts[0], "  ", shortcuts[1], "  ", shortcuts[2]))
+	} else if height >= 9 {
+		content = lipgloss.JoinVertical(lipgloss.Center, content, "", mutedStyle.Render("输入消息开始对话"))
 	}
-	if height < 7 {
-		content = title + "\n" + subtitle
+	if height < 5 {
+		content = title
 	}
 	return lipgloss.NewStyle().Width(width).Height(height).MaxHeight(height).Render(lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content))
 }
@@ -371,9 +442,11 @@ func (m *model) View() tea.View {
 	frame := lipgloss.NewStyle().Foreground(foreground).Background(background).Padding(1, 2).Width(m.width).Height(m.height).MaxWidth(m.width).MaxHeight(m.height).Render(content)
 	if m.menu != "" {
 		dialog := m.menuView()
-		frame = lipgloss.NewCompositor(lipgloss.NewLayer(frame), lipgloss.NewLayer(dialog).X((m.width-lipgloss.Width(dialog))/2).Y((m.height-lipgloss.Height(dialog))/2)).Render()
+		x, y := (m.width-lipgloss.Width(dialog))/2, (m.height-lipgloss.Height(dialog))/2
+		shadow := lipgloss.NewStyle().Background(lipgloss.Color("#0E0C13")).Width(lipgloss.Width(dialog)).Height(lipgloss.Height(dialog)).Render("")
+		frame = lipgloss.NewCompositor(lipgloss.NewLayer(frame), lipgloss.NewLayer(shadow).X(x+1).Y(y+1), lipgloss.NewLayer(dialog).X(x).Y(y)).Render()
 	}
-	v := tea.NewView(paint(frame, m.width, m.height))
+	v := tea.NewView(paint(frame, m.width, m.height, background))
 	v.AltScreen = true
 	v.BackgroundColor, v.ForegroundColor = background, foreground
 	v.WindowTitle = "Saber · Chat"

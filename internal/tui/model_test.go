@@ -30,20 +30,28 @@ func previewModel() *model {
 }
 
 func TestModel_ResponsiveViews(t *testing.T) {
-	for _, size := range [][2]int{{200, 50}, {132, 40}, {108, 32}, {107, 32}, {100, 32}, {80, 24}, {44, 18}, {36, 14}, {24, 10}} {
-		for _, state := range []string{"welcome", "chat", "running", "error", "tools", "multiline", "long-model", "models", "reasoning", "sessions", "help"} {
+	for _, size := range [][2]int{{200, 50}, {132, 40}, {108, 32}, {108, 14}, {107, 32}, {100, 32}, {80, 24}, {64, 20}, {44, 18}, {36, 14}, {24, 10}} {
+		for _, state := range []string{"welcome", "chat", "short-chat", "running", "queued", "error", "disconnected", "tools", "multiline", "long-model", "models", "reasoning", "sessions", "help"} {
 			t.Run(fmt.Sprintf("%dx%d/%s", size[0], size[1], state), func(t *testing.T) {
 				m := previewModel()
 				turn := server.Turn{ID: 1, Session: "design", Input: "将任务执行与结果投递拆开，让 TUI 和 Matrix 各自接收结果。", Content: "可以。任务会在服务端独立运行。\n\n### 一套执行，两种入口\n\n- TUI 实时展示进度与回答。\n- Matrix 按原会话投递结果。\n- 关闭界面后，任务继续执行。\n\n```go\nmanager.RegisterDelivery(\"matrix\", deliver)\n```", Model: m.selectedModel, Status: "completed", Tokens: 1842, Duration: 3400 * time.Millisecond, CreatedAt: time.Date(2026, 9, 21, 16, 30, 0, 0, time.Local), Tools: []agent.ToolRecord{{Call: openai.ToolCall{ID: "read", Function: openai.FunctionCall{Name: "read_file", Arguments: `{"path":"internal/task/manager.go"}`}}, Content: "已读取任务执行入口", Duration: 10 * time.Millisecond}}}
 				if state != "welcome" {
 					m.turns = []server.Turn{turn}
 					m.sessions = []server.Turn{turn}
+					for i, title := range []string{"整理项目结构", "一个新的想法", "帮我解释这段代码"} {
+						m.sessions = append(m.sessions, server.Turn{Session: fmt.Sprint(i), Input: title, CreatedAt: turn.CreatedAt.Add(-time.Duration(i+1) * time.Hour), Status: "completed"})
+					}
 				}
 				switch state {
-				case "running":
-					m.turns[0].Status = "running"
+				case "short-chat":
+					m.turns[0].Input, m.turns[0].Content, m.turns[0].Tools = "你好", "你好！今天想一起做点什么？", nil
+				case "running", "queued":
+					m.turns[0].Status = state
 				case "error":
 					m.turns[0].Status, m.turns[0].Error = "failed", "连接中断，请稍后再试。"
+				case "disconnected":
+					m.connected = false
+					m.notice = "连接已断开，请按 F5 重新连接。"
 				case "tools":
 					m.details = true
 				case "multiline":
@@ -54,6 +62,9 @@ func TestModel_ResponsiveViews(t *testing.T) {
 				case "models", "reasoning", "sessions", "help":
 					m.openMenu(state)
 				}
+				if len(m.turns) > 0 {
+					m.sessions[0] = m.turns[0]
+				}
 				m.resize(size[0], size[1])
 				view := m.View()
 				require.True(t, view.AltScreen)
@@ -62,6 +73,11 @@ func TestModel_ResponsiveViews(t *testing.T) {
 					require.LessOrEqual(t, lipgloss.Width(line), size[0], "line: %q", clean(line))
 				}
 				if size[0] >= 36 && size[1] >= 14 {
+					require.LessOrEqual(t, lipgloss.Width(m.composer()), m.bodyWidth, "composer must fit before the frame clips it")
+					require.LessOrEqual(t, 2+lipgloss.Height(m.header(m.width-4))+m.viewport.Height()+lipgloss.Height(m.composer()), m.height)
+					if m.menu != "" {
+						require.LessOrEqual(t, lipgloss.Height(m.menuView()), m.height-4)
+					}
 					require.Contains(t, clean(view.Content), "SABER")
 					if m.active() {
 						require.Contains(t, clean(view.Content), "停止")
@@ -77,6 +93,30 @@ func TestModel_ResponsiveViews(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestModel_PanelBackgrounds(t *testing.T) {
+	m := previewModel()
+	m.resize(132, 40)
+	m.openMenu("models")
+	composer := m.composer()
+	for name, content := range map[string]string{
+		"composer": strings.Join(strings.Split(composer, "\n")[:lipgloss.Height(composer)-1], "\n"),
+		"sidebar":  m.sidebar(32),
+		"menu":     m.menuView(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			canvas := lipgloss.NewCanvas(lipgloss.Width(content), lipgloss.Height(content)).Compose(lipgloss.NewLayer(content))
+			for y := range lipgloss.Height(content) {
+				for x := range lipgloss.Width(content) {
+					cell := canvas.CellAt(x, y)
+					if cell != nil && cell.Width > 0 {
+						require.NotNil(t, cell.Style.Bg, "ANSI resets must not cut holes in a panel at %d,%d", x, y)
+					}
+				}
+			}
+		})
 	}
 }
 

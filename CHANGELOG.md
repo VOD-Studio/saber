@@ -59,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- TUI 参考 Crush 重绘视觉：深紫灰面板、渐变字标和欢迎页、带状态的会话列表；移除输入区与选择器的整圈边框，将多行底栏收敛为输入区内的模型信息和简短操作提示，并修复嵌套 ANSI 样式造成的面板底色断层
+
 - TUI 选择器支持名称与标识搜索并覆盖展示，保留草稿和历史位置；工具显示紧凑参数摘要，阅读历史时提示新内容，Ctrl+Home/End 跳转首尾
 
 - TUI 输入框按内容与自动折行增高至六行，按实际组件高度分配对话区；宽屏正文限制为 108 列，支持 Ctrl+B 或 `/sidebar` 手动切换侧栏

@@ -28,7 +28,7 @@ func (m *model) choices() (string, []choice) {
 	case "reasoning":
 		return "思考等级", []choice{{"继承模型配置", "", "使用服务端为此模型配置的默认值"}, {"None", "none", "不启用额外推理"}, {"Low", "low", "较低"}, {"Medium", "medium", "中等"}, {"High", "high", "较高"}, {"XHigh", "xhigh", "更高"}, {"Max", "max", "最高"}}
 	default:
-		return "让对话保持顺手", []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}, {"/sidebar", "sidebar", "收起或展开侧栏 · Ctrl+B"}, {"/tools", "tools", "展开工具详情 · Ctrl+T"}, {"F5", "reconnect", "刷新连接与会话"}, {"/quit", "quit", "离开界面 · Ctrl+Q"}}
+		return "快捷操作", []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}, {"/sidebar", "sidebar", "收起或展开侧栏 · Ctrl+B"}, {"/tools", "tools", "展开工具详情 · Ctrl+T"}, {"F5", "reconnect", "刷新连接与会话"}, {"/quit", "quit", "离开界面 · Ctrl+Q"}}
 	}
 }
 func (m *model) openMenu(menu string) tea.Cmd {
@@ -174,17 +174,24 @@ func (m *model) menuView() string {
 	if height < 14 {
 		rowHeight = 1
 	}
-	rows := max(1, (height-7)/rowHeight)
+	helpRows := 0
+	if m.menu == "help" && height >= 14 {
+		helpRows = 1
+	}
+	rows := max(1, (height-7-helpRows)/rowHeight)
 	start := max(0, m.menuIndex-rows+1)
 	end := min(len(items), start+rows)
-	lines := []string{accentStyle.Bold(true).Background(panel).Render(clipped(title, width-4)), m.filter.View(), ""}
+	filter := lipgloss.NewStyle().Background(raised).Padding(0, 1).Width(width - 4).Render(m.filter.View())
+	lines := []string{
+		accentStyle.Bold(true).Background(panel).Render(clipped(title, width-4)),
+		paint(filter, width-4, lipgloss.Height(filter), raised), "",
+	}
 	if len(items) == 0 {
 		lines = append(lines, quiet.Render("没有匹配项"))
 	}
 	for i := start; i < end; i++ {
 		style, description, prefix := normal, quiet, "  "
 		if i == m.menuIndex {
-			selected := lipgloss.Color("#263D43")
 			style = accentStyle.Background(selected).Bold(true)
 			description = mutedStyle.Background(selected)
 			prefix = "› "
@@ -196,11 +203,16 @@ func (m *model) menuView() string {
 	}
 	hint := "↑↓ 选择 · ↵ 确定 · Esc 返回"
 	if width < 40 {
-		hint = "↑↓ 选择  ↵ 确定  Esc 关闭"
+		hint = "↑↓ 选择  ↵ 确定  Esc 返回"
 	}
 	if end < len(items) {
 		hint = fmt.Sprintf("↓ 还有 %d 项 · Esc 返回", len(items)-end)
 	}
-	lines = append(lines, "", quiet.Render(clipped(hint, width-4)))
-	return lipgloss.NewStyle().Background(panel).Border(lipgloss.RoundedBorder()).BorderForeground(faint).BorderBackground(panel).Padding(0, 1).Width(width).Render(strings.Join(lines, "\n"))
+	lines = append(lines, "")
+	if helpRows > 0 {
+		lines = append(lines, quiet.Render(clipped("Enter 发送 · Alt+Enter 换行", width-4)))
+	}
+	lines = append(lines, quiet.Render(clipped(hint, width-4)))
+	view := lipgloss.NewStyle().Background(panel).Padding(1, 2).Width(width).Render(strings.Join(lines, "\n"))
+	return paint(view, width, lipgloss.Height(view), panel)
 }

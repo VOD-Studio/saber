@@ -118,9 +118,10 @@ func newModel(ctx context.Context, client *server.Client, session string) *model
 	filter := textinput.New()
 	filter.Prompt, filter.Placeholder, filter.CharLimit = "› ", "输入以筛选…", 200
 	filterStyles := textinput.DefaultDarkStyles()
-	filterStyles.Focused.Text = textStyle.Background(panel)
-	filterStyles.Focused.Prompt = accentStyle.Background(panel)
-	filterStyles.Focused.Placeholder = mutedStyle.Background(panel)
+	filterStyles.Focused.Text = textStyle.Background(raised)
+	filterStyles.Focused.Prompt = accentStyle.Background(raised)
+	filterStyles.Focused.Placeholder = mutedStyle.Background(raised)
+	filterStyles.Cursor.Color = accent
 	filter.SetStyles(filterStyles)
 	if session == "" {
 		session = uuid.NewString()
