@@ -347,7 +347,7 @@ func (m *model) composer() string {
 	if m.menu != "" {
 		keys = ""
 	} else if m.active() {
-		keys = keyHint("Ctrl+C", "停止")
+		keys = keyHint("Esc", "停止")
 	}
 	metaWidth := width
 	if width >= 64 {

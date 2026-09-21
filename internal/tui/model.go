@@ -212,7 +212,7 @@ func (m *model) submit() tea.Cmd {
 		return nil
 	}
 	if m.active() {
-		m.notice = "当前回答尚未结束；Ctrl+C 停止后可以继续。"
+		m.notice = "当前回答尚未结束；Esc 停止后可以继续。"
 		return nil
 	}
 	if m.pending == nil || m.pending.Text != text || m.pendingSession != m.session {
@@ -399,18 +399,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if key == "ctrl+c" {
+			m.input.Reset()
 			if m.menu != "" {
 				return m, m.openMenu("")
 			}
-			if m.active() {
-				return m, m.cancel()
-			}
-			if m.input.Value() != "" {
-				m.input.Reset()
-				return m, nil
-			}
-			m.stopStream()
-			return m, tea.Quit
+			return m, nil
 		}
 		if key == "f5" {
 			m.stopStream()
@@ -421,6 +414,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.menuKey(msg)
 		}
 		switch key {
+		case "esc":
+			return m, m.cancel()
 		case "/":
 			if m.input.Value() == "" {
 				return m, m.openMenu("commands")

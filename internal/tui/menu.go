@@ -232,7 +232,7 @@ func (m *model) menuView() string {
 	}
 	lines = append(lines, "")
 	if helpRows > 0 {
-		lines = append(lines, quiet.Render(clipped("Enter 发送 · Alt+Enter 换行", width-4)))
+		lines = append(lines, quiet.Render(clipped("Enter 发送 · Alt+Enter 换行 · Ctrl+C 清空", width-4)))
 	}
 	lines = append(lines, quiet.Render(clipped(hint, width-4)))
 	view := lipgloss.NewStyle().Background(panel).Padding(1, 2).Width(width).Render(strings.Join(lines, "\n"))

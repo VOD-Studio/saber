@@ -2,8 +2,11 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -164,6 +167,76 @@ func TestModel_ResizePreservesReadingPosition(t *testing.T) {
 	require.True(t, m.viewport.AtBottom())
 }
 
+func TestModel_ControlCClearsInput(t *testing.T) {
+	for _, status := range []string{"completed", "running", "queued"} {
+		for _, menu := range []string{"", "models", "commands"} {
+			t.Run(status+"/"+menu, func(t *testing.T) {
+				m := previewModel()
+				m.turns = []server.Turn{{ID: 42, Session: m.session, Status: status}}
+				streamCtx, cancel := context.WithCancel(m.ctx)
+				t.Cleanup(cancel)
+				m.cancelStream = cancel
+				m.input.SetValue("尚未发送的草稿\n第二行")
+				m.openMenu(menu)
+				if menu != "" {
+					m.filter.SetValue("model")
+				}
+				m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+				require.Empty(t, m.input.Value())
+				require.Empty(t, m.menu)
+				require.Empty(t, m.filter.Value())
+				require.True(t, m.input.Focused())
+				require.Equal(t, status, m.turns[0].Status)
+				require.NoError(t, streamCtx.Err(), "clearing a draft must keep the event stream open")
+				require.Empty(t, m.notice, "Ctrl+C must not request cancellation")
+				_, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+				require.Nil(t, cmd, "Ctrl+C on an empty input must neither quit nor cancel")
+			})
+		}
+	}
+}
+
+func TestModel_EscStopsCurrentTask(t *testing.T) {
+	for _, status := range []string{"running", "queued"} {
+		t.Run(status, func(t *testing.T) {
+			requests := make(chan string, 1)
+			endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests <- r.Method + " " + r.URL.Path
+				if err := json.NewEncoder(w).Encode(server.Turn{ID: 42, Status: "cancelled"}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer endpoint.Close()
+			m := previewModel()
+			var err error
+			m.client, err = server.NewClient(endpoint.URL, "test-token")
+			require.NoError(t, err)
+			m.turns = []server.Turn{{ID: 1, Status: "completed"}, {ID: 42, Session: m.session, Status: status}}
+			m.input.SetValue("保留草稿")
+			m.openMenu("models")
+			m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+			require.Empty(t, m.menu)
+			require.Empty(t, m.notice, "Esc dismisses a dialog before stopping the task")
+			require.Equal(t, "保留草稿", m.input.Value())
+			_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+			require.NotNil(t, cmd)
+			result := cmd().(cancelledMsg)
+			require.NoError(t, result.err)
+			require.Equal(t, "POST /v1/sessions/design/tasks/42/cancel", <-requests)
+			require.Equal(t, m.session, result.session)
+			m.Update(result)
+			require.Contains(t, m.notice, "已请求停止")
+			require.Equal(t, "保留草稿", m.input.Value())
+			require.True(t, m.input.Focused())
+		})
+	}
+	m := previewModel()
+	m.input.SetValue("空闲草稿")
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Nil(t, cmd)
+	require.Equal(t, "空闲草稿", m.input.Value())
+}
+
 func TestModel_MenuSearchPreservesDraftAndHistory(t *testing.T) {
 	m := previewModel()
 	m.info.Models = append(m.info.Models, ai.ChatModel{ID: "provider.other", Name: "另一个模型"})
@@ -314,7 +387,7 @@ func TestModel_VisualHierarchy(t *testing.T) {
 		}
 	}
 	m.turns[0].Status = "running"
-	require.Contains(t, clean(m.composer()), "Ctrl+C 停止")
+	require.Contains(t, clean(m.composer()), "Esc 停止")
 }
 
 func TestModel_EventsRetryAndStaleSession(t *testing.T) {
