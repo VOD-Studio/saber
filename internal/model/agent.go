@@ -28,7 +28,16 @@ func AgentModel(getClient func(string) (*Client, error), retry *RetryConfigWrapp
 				requestErr = clientErr
 				if requestErr == nil {
 					req.Model = model
-					if req.Stream {
+					if client.usesResponses() {
+						collector := newAgentStreamHandler(emit)
+						var result *ChatCompletionResponse
+						result, requestErr = client.createResponse(ctx, req, collector)
+						if result != nil {
+							response = *result
+						} else {
+							response = collector.response()
+						}
+					} else if req.Stream {
 						collector := newAgentStreamHandler(emit)
 						requestErr = client.CreateStreamingChatCompletionWithTools(ctx, req, collector)
 						response = collector.response()

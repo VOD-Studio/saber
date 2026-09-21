@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 新增 `openai-responses` 协议：支持 go-openai 非流式/流式请求、文本与图片、现有 Agent 工具循环和流式编辑；保留工具续轮及任务恢复所需的加密推理输出，明确拒绝断流和截断响应，并提供 Podlink Responses 模型配置示例
+
 - Matrix `!schedule once/every/weekdays/list/status/pause/delete` 和同逻辑自然语言工具，回显时区与下次运行；负责人、工作目录和汇报目标绑定真实来源，每次发生独立投递并关联原消息/话题
 - SQLite 持久化定时计划核心：一次性、固定周期和带 IANA 时区的工作日时间；触发与普通任务入队原子提交，重启合并错过周期、未结束时跳过并记录，派发与执行前复查负责人权限
 - 自主工具接入持久化群聊任务：按真实身份筛选工具并逐次复验，命令失败可反馈模型继续修正；`read_file(deliver=true)` 将文件快照加密上传并回复原消息，发送失败只重试投递

@@ -9,11 +9,12 @@ import (
 // ProviderConfig 存储单个 AI 提供商的配置。
 // 每个提供商可以有自己的 API 端点、认证信息和模型配置。
 type ProviderConfig struct {
-	Type    string                 `yaml:"type"`     // 提供商类型（如 openai, azure），默认使用配置键名
-	BaseURL string                 `yaml:"base_url"` // API 基础 URL
-	APIKey  string                 `yaml:"api_key"`  // API 密钥
-	Models  map[string]ModelConfig `yaml:"models"`   // 该提供商下的模型配置
-	Extra   map[string]any         `yaml:",inline"`  // 提供商特有配置（如 Azure deployment）
+	API     string                 `yaml:"api,omitempty"` // 协议：openai-completions 或 openai-responses
+	Type    string                 `yaml:"type"`          // 提供商类型（如 openai, azure），默认使用配置键名
+	BaseURL string                 `yaml:"base_url"`      // API 基础 URL
+	APIKey  string                 `yaml:"api_key"`       // API 密钥
+	Models  map[string]ModelConfig `yaml:"models"`        // 该提供商下的模型配置
+	Extra   map[string]any         `yaml:",inline"`       // 提供商特有配置（如 Azure deployment）
 }
 
 // Validate 验证提供商配置是否有效。
@@ -26,6 +27,10 @@ func (p *ProviderConfig) Validate(providerName string) error {
 
 	if p.BaseURL == "" {
 		return fmt.Errorf("base_url is required")
+	}
+
+	if err := ValidateAPI(p.API); err != nil {
+		return err
 	}
 
 	// APIKey 可以为空（某些本地服务如 Ollama 不需要）
@@ -82,4 +87,14 @@ func ParseModelID(id string) (provider, model string, err error) {
 // FormatModelID 格式化模型标识符为完全限定名称。
 func FormatModelID(provider, model string) string {
 	return provider + "." + model
+}
+
+// ValidateAPI 拒绝未知协议，避免错误地向兼容端点发送 Chat Completions 请求。
+func ValidateAPI(api string) error {
+	switch api {
+	case "", "openai-completions", "openai-responses":
+		return nil
+	default:
+		return fmt.Errorf("unsupported api %q (use openai-completions or openai-responses)", api)
+	}
 }

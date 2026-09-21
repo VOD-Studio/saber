@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -79,6 +80,7 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 	}
 	// 新建切片防止追加历史覆盖调用方预留的容量。
 	req.Messages = append([]openai.ChatCompletionMessage(nil), req.Messages...)
+	req.ResponsesHistory = maps.Clone(req.ResponsesHistory)
 	allowed := make(map[string]bool, len(req.Tools))
 	for _, tool := range req.Tools {
 		if tool.Function != nil {
@@ -137,6 +139,12 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 		}
 		if number == limits.MaxRounds {
 			return stop(ErrBudgetExhausted)
+		}
+		if len(response.ResponsesOutput) > 0 {
+			if req.ResponsesHistory == nil {
+				req.ResponsesHistory = make(map[string][]json.RawMessage)
+			}
+			req.ResponsesHistory[response.ToolCalls[0].ID] = response.ResponsesOutput
 		}
 		req.Messages = append(req.Messages, openai.ChatCompletionMessage{
 			Role: openai.ChatMessageRoleAssistant, Content: response.Content, ToolCalls: response.ToolCalls,

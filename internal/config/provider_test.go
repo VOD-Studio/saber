@@ -246,3 +246,19 @@ func findSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+func TestProviderConfig_ValidateAPI(t *testing.T) {
+	for _, api := range []string{"", "openai-completions", "openai-responses", "anthropic-messages", "bad"} {
+		t.Run(api, func(t *testing.T) {
+			p := ProviderConfig{API: api, BaseURL: "http://localhost:8317/v1", Models: map[string]ModelConfig{"m": {Model: "m"}}}
+			valid := api == "" || api == "openai-completions" || api == "openai-responses"
+			if err := p.Validate("relay"); (err == nil) != valid {
+				t.Fatalf("provider validation: %v", err)
+			}
+			m := ModelConfig{Model: "m", API: api}
+			if err := m.Validate(); (err == nil) != valid {
+				t.Fatalf("model validation: %v", err)
+			}
+		})
+	}
+}

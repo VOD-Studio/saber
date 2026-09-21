@@ -160,6 +160,9 @@ type ServerConfig struct {
 
 // ModelConfig 存储特定模型配置
 type ModelConfig struct {
+	API             string `yaml:"api,omitempty"`              // 协议（覆盖提供商）；空值沿用原有 Chat Completions。
+	ReasoningEffort string `yaml:"reasoning_effort,omitempty"` // Responses 推理强度；空值使用上游默认。
+
 	Model       string  `yaml:"model"`       // 模型标识符
 	Provider    string  `yaml:"provider"`    // 提供商（覆盖全局）
 	BaseURL     string  `yaml:"base_url"`    // API URL（覆盖全局）
@@ -585,6 +588,9 @@ func (s *ShutdownConfig) Validate() error {
 
 // Validate 验证模型配置是否有效
 func (m *ModelConfig) Validate() error {
+	if err := ValidateAPI(m.API); err != nil {
+		return err
+	}
 	if m.Model == "" {
 		return fmt.Errorf("model is required in ModelConfig")
 	}
@@ -736,6 +742,9 @@ func (a *AIConfig) GetModelConfig(modelID string) (ModelConfig, bool) {
 // mergeProviderConfig 合并提供商配置到模型配置。
 func (a *AIConfig) mergeProviderConfig(cfg ModelConfig, providerCfg ProviderConfig) ModelConfig {
 	// Model 字段由调用方设置，这里不处理
+	if cfg.API == "" {
+		cfg.API = providerCfg.API
+	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = providerCfg.BaseURL
 	}

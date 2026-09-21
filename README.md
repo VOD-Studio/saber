@@ -653,16 +653,21 @@ meme:
 
 | 字段       | 必填 | 描述                                 |
 |------------|------|--------------------------------------|
-| `type`     | 是   | 提供商类型（`openai`, `azure`）      |
+| `type`     | 否   | 提供商类型（`openai`, `azure`, `openai-responses`），默认使用键名 |
+| `api`      | 否   | 协议：`openai-completions` / `openai-responses` |
 | `base_url` | 是   | API 基础 URL                         |
 | `api_key`  | 是   | API 密钥                             |
 | `models`   | 否   | 模型配置 map（键为模型名，值为配置） |
+
+Responses / Podlink 配置与完整模型清单见 [接入说明](docs/responses.md)。
 
 ### 模型配置 (models)
 
 | 字段          | 必填 | 描述                          |
 |---------------|------|-------------------------------|
 | `model`       | 是   | 实际使用的模型名称            |
+| `api`         | 否   | 协议（覆盖提供商）             |
+| `reasoning_effort` | 否 | Responses 推理强度，省略使用上游默认 |
 | `temperature` | 否   | 响应随机性（覆盖全局设置）    |
 | `max_tokens`  | 否   | 最大 token 数（覆盖全局设置） |
 

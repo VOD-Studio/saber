@@ -111,6 +111,10 @@ func NewClientWithModel(cfg *config.ModelConfig) (*Client, error) {
 		return nil, fmt.Errorf("model config is required")
 	}
 
+	if err := config.ValidateAPI(cfg.API); err != nil {
+		return nil, err
+	}
+
 	httpClient := &http.Client{
 		Timeout:   30 * time.Second,
 		Transport: sharedTransport,
@@ -124,6 +128,9 @@ func NewClientWithModel(cfg *config.ModelConfig) (*Client, error) {
 	// 使用工厂创建客户端配置
 	factory := GetDefaultFactory()
 	clientConfig := factory.CreateClientConfig(cfg)
+	if cfg.API == "openai-responses" || (cfg.API == "" && cfg.Provider == "openai-responses") {
+		clientConfig = (&OpenAIStrategy{}).CreateClientConfig(cfg)
+	}
 
 	// 设置 HTTP 客户端
 	clientConfig.HTTPClient = httpClient
@@ -151,6 +158,9 @@ func NewClientWithModel(cfg *config.ModelConfig) (*Client, error) {
 //   - *ChatCompletionResponse: 聊天完成响应
 //   - error: 操作过程中发生的错误
 func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionRequest) (*ChatCompletionResponse, error) {
+	if c.usesResponses() {
+		return c.createResponse(ctx, req, nil)
+	}
 	slog.Debug("开始AI请求",
 		"model", req.Model,
 		"stream", req.Stream,
@@ -283,6 +293,12 @@ func (c *Client) CreateStreamingChatCompletion(
 	req ChatCompletionRequest,
 	handler StreamingChatCompletionHandler,
 ) error {
+	if c.usesResponses() {
+		req.Stream = true
+		_, err := c.createResponse(ctx, req, handler)
+		return err
+	}
+
 	slog.Debug("开始回调式流式AI请求",
 		"model", req.Model,
 		"messages_count", len(req.Messages),
@@ -372,6 +388,12 @@ func (c *Client) CreateStreamingChatCompletionWithTools(
 	req ChatCompletionRequest,
 	handler StreamingToolCallHandler,
 ) error {
+	if c.usesResponses() {
+		req.Stream = true
+		_, err := c.createResponse(ctx, req, handler)
+		return err
+	}
+
 	slog.Debug("开始支持工具调用的流式AI请求",
 		"model", req.Model,
 		"messages_count", len(req.Messages),

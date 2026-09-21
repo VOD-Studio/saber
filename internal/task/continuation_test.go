@@ -21,7 +21,7 @@ func TestManager_ContinuationWaitsAndSurvivesRestart(t *testing.T) {
 	m, err := Open(path, func(ctx context.Context, req agent.Request, emit func(agent.Event)) (agent.Result, error) {
 		close(started)
 		<-ctx.Done()
-		return agent.Result{Status: agent.Cancelled, Rounds: []agent.Round{{Response: agent.Response{FinishReason: "tool_calls", ToolCalls: []openai.ToolCall{{ID: "call", Type: openai.ToolTypeFunction, Function: openai.FunctionCall{Name: "exec", Arguments: `{"command":"touch done"}`}}}}, Tools: []agent.ToolRecord{{Call: openai.ToolCall{ID: "call"}, Content: "created done"}}}}}, ctx.Err()
+		return agent.Result{Status: agent.Cancelled, Rounds: []agent.Round{{Response: agent.Response{ResponsesOutput: []json.RawMessage{json.RawMessage(`{"type":"reasoning","encrypted_content":"opaque","summary":[]}`)}, FinishReason: "tool_calls", ToolCalls: []openai.ToolCall{{ID: "call", Type: openai.ToolTypeFunction, Function: openai.FunctionCall{Name: "exec", Arguments: `{"command":"touch done"}`}}}}, Tools: []agent.ToolRecord{{Call: openai.ToolCall{ID: "call"}, Content: "created done"}}}}}, ctx.Err()
 	}, func(context.Context, Task) (string, error) { return "", nil })
 	require.NoError(t, err)
 	parent, err := m.Submit(ctx, message("original", "alice"), dir, request("create file; never publish"))
@@ -45,6 +45,7 @@ func TestManager_ContinuationWaitsAndSurvivesRestart(t *testing.T) {
 	case req := <-seen:
 		require.Equal(t, "create file; never publish", req.Messages[0].Content)
 		require.Equal(t, "call", req.Messages[1].ToolCalls[0].ID)
+		require.JSONEq(t, `{"type":"reasoning","encrypted_content":"opaque","summary":[]}`, string(req.ResponsesHistory["call"][0]))
 		require.Equal(t, "created done", req.Messages[2].Content)
 		require.Equal(t, "check it", req.Messages[len(req.Messages)-1].Content)
 	case <-time.After(3 * time.Second):

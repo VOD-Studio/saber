@@ -3,6 +3,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -30,6 +31,9 @@ var ErrBudgetExhausted = errors.New("agent round budget exhausted")
 
 // Request 保留现有模型协议，供流式和非流式 adapter 共用。
 type Request struct {
+	// ResponsesHistory 按首个工具调用 ID 保存原始输出，保留加密推理和消息 phase。
+	ResponsesHistory map[string][]json.RawMessage `json:"responses_history,omitempty"`
+
 	// Messages 是当前轮的对话历史；adapter 不得修改其中的消息。
 	Messages []openai.ChatCompletionMessage `json:"messages"`
 	// Stream 选择模型传输方式，不改变运行规则。
@@ -48,6 +52,9 @@ type Request struct {
 
 // Response 是一轮完整响应；失败时也可返回已收到的部分响应用于记录。
 type Response struct {
+	// ResponsesOutput 保留 Responses 原始输出供工具续轮和任务恢复使用。
+	ResponsesOutput []json.RawMessage `json:"responses_output,omitempty"`
+
 	// Content 是模型返回的文本。
 	Content string `json:"content"`
 	// Usage 是模型报告的用量，未报告时为零。

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 
 	"github.com/sashabaranov/go-openai"
 	"rua.plus/saber/internal/agent"
@@ -88,6 +89,7 @@ func (m *Manager) continuationRequest(ctx context.Context, t Task) (agent.Reques
 		return t.Request, err
 	}
 	messages := append([]openai.ChatCompletionMessage(nil), parentReq.Messages...)
+	responsesHistory := maps.Clone(parentReq.ResponsesHistory)
 	rounds := parent.Result.Rounds
 	// 硬退出可能来不及保存 Result，使用已落盘的模型和工具完成事件恢复轨迹。
 	if len(rounds) == 0 {
@@ -121,6 +123,12 @@ func (m *Manager) continuationRequest(ctx context.Context, t Task) (agent.Reques
 		if resp.Content == "" && len(resp.ToolCalls) == 0 {
 			continue
 		}
+		if len(resp.ToolCalls) > 0 && len(resp.ResponsesOutput) > 0 {
+			if responsesHistory == nil {
+				responsesHistory = make(map[string][]json.RawMessage)
+			}
+			responsesHistory[resp.ToolCalls[0].ID] = resp.ResponsesOutput
+		}
 		messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: resp.Content, ToolCalls: resp.ToolCalls})
 		for _, call := range resp.ToolCalls {
 			content := "执行结果未知或尚未执行；先核查外部副作用，不要自动重放。"
@@ -145,6 +153,7 @@ func (m *Manager) continuationRequest(ctx context.Context, t Task) (agent.Reques
 	}
 	req := t.Request
 	req.Messages, _ = sanitizeToolHistory(messages)
+	req.ResponsesHistory = responsesHistory
 	return req, m.saveContinuationRequest(ctx, t.ID, req)
 }
 
