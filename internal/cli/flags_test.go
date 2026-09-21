@@ -195,3 +195,12 @@ func TestParseArgs_Subcommands(t *testing.T) {
 		}
 	}
 }
+
+func TestParseArgs_Chat(t *testing.T) {
+	for _, args := range [][]string{{"chat", "--session", "existing"}, {"-c", "config.yaml", "chat", "--session", "existing"}} {
+		flags, err := ParseArgs(args)
+		if err != nil || flags.Command != "chat" || flags.Session != "existing" {
+			t.Fatalf("%v: %+v %v", args, flags, err)
+		}
+	}
+}

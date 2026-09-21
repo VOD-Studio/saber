@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 新增 `saber chat` Charm v2 TUI：自适应会话侧栏、流式 Markdown/代码高亮、工具详情、模型和思考等级选择、历史续接、断线续读；退出界面不停止服务端，Ctrl+C 可取消当前任务
+
 - 默认启动本机常驻服务（`saber serve`），提供认证的会话接口与 SSE 事件续读；持久化会话续接、消息去重、取消及每轮模型/思考等级覆盖
 
 - 任务执行独立于聊天入口：可按平台注册结果投递，并通过持久化游标续读文本与工具事件，未启用 Matrix 时同样可运行任务

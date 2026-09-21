@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -138,7 +139,9 @@ func TestServer_AuthDisabledAndToken(t *testing.T) {
 func TestServe_Cancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	require.NoError(t, Serve(ctx, &http.Server{Addr: "127.0.0.1:0", Handler: New(nil, "token"), ReadHeaderTimeout: time.Second}))
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	require.NoError(t, Serve(ctx, &http.Server{Addr: "127.0.0.1:0", Handler: New(nil, "token"), ReadHeaderTimeout: time.Second}, listener))
 }
 
 func TestMessage_UnknownFields(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -82,10 +83,7 @@ func New(service *ai.Service, token string) http.Handler {
 			http.Error(w, "请配置 ai.enabled 和模型后重启服务", http.StatusServiceUnavailable)
 			return
 		}
-		if session := r.PathValue("session"); session != "" && !identifier.MatchString(session) {
-			http.Error(w, "无效会话编号", http.StatusBadRequest)
-			return
-		}
+
 		mux.ServeHTTP(w, r)
 	})
 }
@@ -129,7 +127,7 @@ func (h *handler) info(w http.ResponseWriter, _ *http.Request) {
 func (h *handler) sessions(w http.ResponseWriter, r *http.Request) {
 	tasks, err := h.service.Tasks().Conversations(r.Context(), "terminal", "saber")
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	h.turns(w, tasks)
@@ -143,30 +141,30 @@ func (h *handler) turns(w http.ResponseWriter, tasks []task.Task) {
 }
 func (h *handler) history(w http.ResponseWriter, r *http.Request) {
 	if !identifier.MatchString(r.PathValue("session")) {
-		http.Error(w, "无效会话编号", 400)
+		http.Error(w, "无效会话编号", http.StatusBadRequest)
 		return
 	}
 	tasks, err := h.service.Tasks().History(r.Context(), session(r))
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	h.turns(w, tasks)
 }
 func (h *handler) submit(w http.ResponseWriter, r *http.Request) {
 	if !identifier.MatchString(r.PathValue("session")) {
-		http.Error(w, "无效会话编号", 400)
+		http.Error(w, "无效会话编号", http.StatusBadRequest)
 		return
 	}
 	var input Message
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil {
-		http.Error(w, "无效消息: "+err.Error(), 400)
+		http.Error(w, "无效消息: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	if decoder.Decode(new(any)) != io.EOF || !identifier.MatchString(input.ID) {
-		http.Error(w, "需要有效的消息编号和单个 JSON 对象", 400)
+		http.Error(w, "需要有效的消息编号和单个 JSON 对象", http.StatusBadRequest)
 		return
 	}
 	t, err := h.service.SubmitChatTask(r.Context(), chat.Message{Session: session(r), SenderID: identity(r).SenderID, ID: input.ID, Text: input.Text}, input.Model, input.Effort)
@@ -184,12 +182,12 @@ func taskID(r *http.Request) (int64, error) { return strconv.ParseInt(r.PathValu
 func (h *handler) cancel(w http.ResponseWriter, r *http.Request) {
 	id, err := taskID(r)
 	if err != nil {
-		http.Error(w, "无效任务编号", 400)
+		http.Error(w, "无效任务编号", http.StatusBadRequest)
 		return
 	}
 	t, err := h.service.Tasks().Cancel(r.Context(), identity(r), id)
 	if err != nil {
-		http.Error(w, err.Error(), 404)
+		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 	respond(w, h.view(t))
@@ -197,7 +195,7 @@ func (h *handler) cancel(w http.ResponseWriter, r *http.Request) {
 func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 	id, err := taskID(r)
 	if err != nil {
-		http.Error(w, "无效任务编号", 400)
+		http.Error(w, "无效任务编号", http.StatusBadRequest)
 		return
 	}
 	after := int64(0)
@@ -205,13 +203,13 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 	if cursor != "" {
 		after, err = strconv.ParseInt(cursor, 10, 64)
 		if err != nil || after < 0 {
-			http.Error(w, "无效事件游标", 400)
+			http.Error(w, "无效事件游标", http.StatusBadRequest)
 			return
 		}
 	}
 	manager := h.service.Tasks()
 	if _, err = manager.Get(r.Context(), session(r), id); err != nil {
-		http.Error(w, "任务不存在", 404)
+		http.Error(w, "任务不存在", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -276,9 +274,9 @@ func sendEvent(w http.ResponseWriter, controller *http.ResponseController, kind 
 }
 
 // Serve 在取消时关闭 HTTP 连接；任务取消和收尾由应用生命周期统一处理。
-func Serve(ctx context.Context, srv *http.Server) error {
+func Serve(ctx context.Context, srv *http.Server, listener net.Listener) error {
 	done := make(chan error, 1)
-	go func() { done <- srv.ListenAndServe() }()
+	go func() { done <- srv.Serve(listener) }()
 	select {
 	case err := <-done:
 		return err

@@ -3,8 +3,12 @@ package bot
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,10 +20,6 @@ import (
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 
-	"errors"
-	"flag"
-	"net/http"
-
 	"rua.plus/saber/internal/ai"
 	"rua.plus/saber/internal/cli"
 	"rua.plus/saber/internal/config"
@@ -29,6 +29,7 @@ import (
 	"rua.plus/saber/internal/meme"
 	"rua.plus/saber/internal/persona"
 	"rua.plus/saber/internal/server"
+	"rua.plus/saber/internal/tui"
 )
 
 // services 持有所有需要管理的服务实例。
@@ -68,6 +69,33 @@ func run(parent context.Context, info matrix.BuildInfo) error {
 		return err
 	}
 
+	if state.flags.Command == "chat" {
+		endpoint := state.flags.ServerURL
+		if endpoint == "" {
+			endpoint = "http://" + state.cfg.Server.Listen
+		}
+		token, err := server.Token(state.cfg.Server.TokenPath(state.flags.ConfigPath), false)
+		if err != nil {
+			return err
+		}
+		client, err := server.NewClient(endpoint, token)
+		if err != nil {
+			return err
+		}
+		return tui.Run(parent, client, state.flags.Session)
+	}
+	if err := state.cfg.Server.Validate(); err != nil {
+		return err
+	}
+	listener, err := net.Listen("tcp", state.cfg.Server.Listen)
+	if err != nil {
+		return fmt.Errorf("无法启动服务（可能已运行）: %w", err)
+	}
+	defer func() {
+		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			slog.Warn("关闭监听失败", "error", err)
+		}
+	}()
 	ctx, cancel := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	state.services = &services{}
@@ -86,15 +114,12 @@ func run(parent context.Context, info matrix.BuildInfo) error {
 		state.setupEventHandlers()
 		state.startSync(ctx)
 	}
-	if err := state.cfg.Server.Validate(); err != nil {
-		return err
-	}
 	token, err := server.Token(state.cfg.Server.TokenPath(state.flags.ConfigPath), true)
 	if err != nil {
 		return err
 	}
 	slog.Info("Saber 服务已就绪", "listen", state.cfg.Server.Listen, "chat", "saber chat")
-	return server.Serve(ctx, &http.Server{Addr: state.cfg.Server.Listen, Handler: server.New(state.services.aiService, token), ReadHeaderTimeout: 5 * time.Second})
+	return server.Serve(ctx, &http.Server{Addr: state.cfg.Server.Listen, Handler: server.New(state.services.aiService, token), ReadHeaderTimeout: 5 * time.Second}, listener)
 }
 
 // initConfig 处理配置初始化。
@@ -133,6 +158,14 @@ func (s *appState) initConfig() error {
 		return ExitSuccess()
 	}
 
+	if s.flags.Command == "chat" {
+		cfg, err := config.LoadOrDefault(s.flags.ConfigPath)
+		if err != nil {
+			return fmt.Errorf("加载配置失败: %w", err)
+		}
+		s.cfg = cfg
+		return nil
+	}
 	setupLogging(s.flags.Verbose)
 
 	slog.Info("Starting Saber",
@@ -624,7 +657,7 @@ func (s *appState) shutdown(cancel context.CancelFunc) {
 	}
 
 	cancel()
-	slog.Info("Bot 已停止")
+	slog.Info("Saber 已停止")
 }
 
 // setupLogging 配置全局日志记录器。

@@ -1,6 +1,6 @@
 # Saber
 
-一个使用 Go 构建的 AI Agent，默认运行本机聊天服务，可选接入 Matrix。
+一个使用 Go 构建的 AI Agent，默认运行本机聊天服务，提供 Charm TUI，可选接入 Matrix。
 
 ## 功能特性
 
@@ -84,13 +84,15 @@ ai:
 
 ```bash
 ./bin/saber
+# 在另一个终端打开 TUI 聊天
+./bin/saber chat
 # 或指定配置文件路径
 ./bin/saber -c /path/to/config.yaml
 # 启用调试日志
 ./bin/saber -v
 ```
 
-直接运行 `./bin/saber` 或 `./bin/saber serve` 启动常驻服务，默认监听 `127.0.0.1:8320`。首次启动在配置目录创建 `.saber-token`（0600）；HTTP 接口使用 Bearer 令牌认证。会话、任务和增量事件保存到 `tasks.db`，订阅断开不取消任务。Matrix 是独立的可选聊天入口。
+直接运行 `./bin/saber` 或 `./bin/saber serve` 启动常驻服务，默认监听 `127.0.0.1:8320`。首次启动在配置目录创建 `.saber-token`（0600）；HTTP 接口使用 Bearer 令牌认证。会话、任务和增量事件保存到 `tasks.db`，订阅断开不取消任务。Matrix 是独立的可选聊天入口。使用 `./bin/saber chat` 进入 TUI，支持流式 Markdown、工具状态、会话切换、模型与思考等级选择。界面预览和快捷键见 [终端聊天](docs/tui.md)。
 
 Matrix 仅在 `matrix.enabled: true` 时校验账号并连接服务器。升级旧配置时，已有 Matrix 用户也需要显式添加该开关。AI 未启用时服务继续运行，聊天入口提示完成模型配置。
 
@@ -874,9 +876,9 @@ saber/
       bot.go                       # 机器人初始化和生命周期
       errors.go                    # 错误定义
     server/                        # 本机会话接口、令牌认证和持久化事件流
+    tui/                           # Charm 聊天界面、模型选择、断线续读
     cli/
       flags.go                     # 命令行标志解析
-      terminal.go                  # 终端输入与完整回答展示
     config/
       config.go                    # 配置加载和验证
       provider.go                  # 提供商配置和模型 ID 解析

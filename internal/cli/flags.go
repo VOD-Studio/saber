@@ -10,6 +10,8 @@ import (
 // Flags 包含已解析的命令行标志。
 type Flags struct {
 	Command        string
+	ServerURL      string
+	Session        string
 	ParseError     error
 	ConfigPath     string
 	Verbose        bool
@@ -28,11 +30,14 @@ func Parse() *Flags {
 // ParseArgs 使用独立 FlagSet 解析子命令，保留旧的全局参数写法。
 func ParseArgs(args []string) (*Flags, error) {
 	f := &Flags{Command: "serve"}
-	fs := flag.NewFlagSet("saber [serve]", flag.ContinueOnError)
-	if len(args) > 0 && args[0] == "serve" {
+	fs := flag.NewFlagSet("saber [serve|chat]", flag.ContinueOnError)
+	if len(args) > 0 && (args[0] == "serve" || args[0] == "chat") {
+		f.Command = args[0]
 		args = args[1:]
 	}
 
+	fs.StringVar(&f.ServerURL, "server", "", "Saber server URL (chat only)")
+	fs.StringVar(&f.Session, "session", "", "resume a chat session")
 	fs.StringVar(&f.ConfigPath, "config", "./config.yaml", "config file path")
 	fs.StringVar(&f.ConfigPath, "c", "./config.yaml", "config file path (shorthand)")
 	fs.BoolVar(&f.Verbose, "verbose", false, "enable debug logging")
@@ -45,8 +50,16 @@ func ParseArgs(args []string) (*Flags, error) {
 		return f, err
 	}
 	if fs.NArg() > 0 {
-		if fs.NArg() != 1 || fs.Arg(0) != "serve" {
-			return f, fmt.Errorf("未知子命令: %s", fs.Arg(0))
+		rest := fs.Args()
+		if rest[0] != "serve" && rest[0] != "chat" {
+			return f, fmt.Errorf("未知子命令: %s", rest[0])
+		}
+		f.Command = rest[0]
+		if err := fs.Parse(rest[1:]); err != nil {
+			return f, err
+		}
+		if fs.NArg() != 0 {
+			return f, fmt.Errorf("多余参数: %s", fs.Arg(0))
 		}
 	}
 	return f, nil

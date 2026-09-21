@@ -40,7 +40,7 @@ func main() {
 			os.Exit(code)
 		}
 		// 其他错误
-		slog.Error("机器人启动失败", "error", err)
+		slog.Error("Saber 启动失败", "error", err)
 		os.Exit(1)
 	}
 }

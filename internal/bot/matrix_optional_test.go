@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -57,4 +58,17 @@ func TestExampleConfig_DefaultsToServer(t *testing.T) {
 	require.Empty(t, cfg.Matrix.UserID)
 	require.Empty(t, cfg.Matrix.AccessToken)
 	require.Equal(t, 8192, cfg.AI.MaxTokens)
+}
+
+func TestRun_PortConflictBeforeServiceInitialization(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, listener.Close()) }()
+	args := os.Args
+	t.Cleanup(func() { os.Args = args })
+	path := createTestConfigFile(t, "server:\n  listen: "+listener.Addr().String()+"\nai:\n  enabled: true\n")
+	os.Args = []string{"saber", "-c", path}
+	require.ErrorContains(t, run(context.Background(), matrix.BuildInfo{}), "无法启动服务")
+	_, err = os.Stat(filepath.Join(filepath.Dir(path), "tasks.db"))
+	require.True(t, os.IsNotExist(err))
 }
