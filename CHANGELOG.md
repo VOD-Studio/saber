@@ -59,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- TUI 输入框按内容与自动折行增高至六行，按实际组件高度分配对话区；宽屏正文限制为 108 列，支持 Ctrl+B 或 `/sidebar` 手动切换侧栏
+
 - TUI 统一画布背景与消息左边距，收紧会话列表，模型短名称和用量移至回答末尾，输入区集中展示当前模型与情境快捷键
 
 - 配置按 `ai`、`agent`、`matrix` 分工重整，移除旧单提供商迁移及旧字段；严格拒绝未知字段，默认生成精简服务端配置，Matrix/MCP/执行器均默认关闭，不预置空密钥模型

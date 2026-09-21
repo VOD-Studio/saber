@@ -30,7 +30,7 @@ func previewModel() *model {
 }
 
 func TestModel_ResponsiveViews(t *testing.T) {
-	for _, size := range [][2]int{{132, 40}, {100, 32}, {80, 24}, {44, 18}, {36, 14}, {24, 10}} {
+	for _, size := range [][2]int{{200, 50}, {132, 40}, {108, 32}, {107, 32}, {100, 32}, {80, 24}, {44, 18}, {36, 14}, {24, 10}} {
 		for _, state := range []string{"welcome", "chat", "models", "reasoning", "sessions", "help"} {
 			t.Run(fmt.Sprintf("%dx%d/%s", size[0], size[1], state), func(t *testing.T) {
 				m := previewModel()
@@ -64,6 +64,50 @@ func TestModel_ResponsiveViews(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestModel_ComposerResizeAndSidebar(t *testing.T) {
+	m := previewModel()
+	m.resize(132, 40)
+	height := m.viewport.Height()
+	require.Equal(t, 1, m.input.Height())
+	text := strings.Repeat("中文与 emoji 🌱 输入不会因六行高度限制而丢失\n", 10)
+	m.Update(tea.PasteMsg{Content: text})
+	require.Equal(t, text, m.input.Value())
+	require.Equal(t, 6, m.input.Height())
+	require.Equal(t, height-5, m.viewport.Height())
+	require.Contains(t, clean(m.View().Content), "发送")
+	m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	require.Empty(t, m.input.Value())
+	require.Equal(t, 1, m.input.Height())
+	require.Equal(t, height, m.viewport.Height())
+	m.Update(tea.PasteMsg{Content: strings.Repeat("宽字符", 40)})
+	require.Greater(t, m.input.Height(), 1, "soft-wrapped input must grow too")
+	m.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	require.False(t, m.showSidebar())
+	require.Equal(t, 108, m.bodyWidth)
+	m.resize(80, 24)
+	m.resize(200, 50)
+	require.False(t, m.showSidebar(), "manual preference survives resize")
+	require.Equal(t, 108, m.bodyWidth)
+	m.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+	require.True(t, m.showSidebar())
+	m.resize(36, 14)
+	require.LessOrEqual(t, m.input.Height(), 2)
+	require.GreaterOrEqual(t, m.viewport.Height(), 2)
+	require.Contains(t, clean(m.View().Content), "发送")
+}
+
+func TestModel_ResizePreservesReadingPosition(t *testing.T) {
+	m := previewModel()
+	m.turns = []server.Turn{{ID: 1, Status: "completed", Content: strings.Repeat("历史内容\n\n", 50)}}
+	m.resize(100, 32)
+	m.viewport.SetYOffset(10)
+	m.Update(tea.PasteMsg{Content: "第一行\n第二行\n第三行"})
+	require.Equal(t, 10, m.viewport.YOffset())
+	m.viewport.GotoBottom()
+	m.Update(tea.PasteMsg{Content: "\n第四行"})
+	require.True(t, m.viewport.AtBottom())
 }
 
 func TestModel_VisualHierarchy(t *testing.T) {

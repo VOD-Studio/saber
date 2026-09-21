@@ -53,15 +53,42 @@ func clipped(text string, width int) string {
 }
 func (m *model) resize(width, height int) {
 	m.width, m.height = max(1, width), max(1, height)
-	m.bodyWidth = max(1, m.width-4)
-	if m.width >= 108 {
-		m.bodyWidth -= 28
-	}
-	m.viewport.SetWidth(m.bodyWidth)
-	m.viewport.SetHeight(max(1, m.height-11))
-	m.input.SetWidth(max(1, m.bodyWidth-4))
-	m.renderCache = make(map[string]string)
+	m.layout()
 	m.refresh()
+}
+func (m *model) showSidebar() bool { return m.width >= 108 && !m.sidebarHidden }
+
+func (m *model) layout() {
+	atBottom, offset := m.viewport.AtBottom(), m.viewport.YOffset()
+	available := max(1, m.width-4)
+	if m.showSidebar() {
+		available -= 28
+	}
+	width := min(108, max(1, available))
+	widthChanged := m.bodyWidth != width
+	maxInputHeight := min(6, max(1, m.height-12))
+	if widthChanged || m.input.MaxHeight != maxInputHeight {
+		m.bodyWidth = width
+		m.input.MaxHeight = maxInputHeight
+		m.input.SetWidth(max(1, width-4))
+		m.viewport.SetWidth(width)
+	}
+	height := max(1, m.height-2-lipgloss.Height(m.header(max(1, m.width-4)))-lipgloss.Height(m.composer()))
+	heightChanged := m.viewport.Height() != height
+	if heightChanged {
+		m.viewport.SetHeight(height)
+	}
+	if widthChanged {
+		m.renderCache = make(map[string]string)
+		m.refresh()
+	}
+	if widthChanged || heightChanged {
+		if atBottom {
+			m.viewport.GotoBottom()
+		} else {
+			m.viewport.SetYOffset(offset)
+		}
+	}
 }
 func (m *model) refresh() {
 	atBottom := m.viewport.AtBottom()
@@ -239,7 +266,7 @@ func (m *model) sidebar(height int) string {
 		lines = append(lines, style.Width(22).Render(prefix+label+gap+state))
 	}
 	text := strings.Join(lines, "\n")
-	return lipgloss.NewStyle().Width(24).Height(height).BorderRight(true).BorderStyle(lipgloss.NormalBorder()).BorderForeground(faint).PaddingRight(1).Render(text)
+	return lipgloss.NewStyle().Width(26).Height(height).BorderRight(true).BorderStyle(lipgloss.NormalBorder()).BorderForeground(faint).PaddingRight(1).Render(text)
 }
 func (m *model) composer() string {
 	border := accent
@@ -316,8 +343,13 @@ func (m *model) View() tea.View {
 		transcript = m.menuView()
 	}
 	right := lipgloss.JoinVertical(lipgloss.Left, lipgloss.NewStyle().Width(m.bodyWidth).Height(m.viewport.Height()).Render(transcript), m.composer())
+	available := width
+	if m.showSidebar() {
+		available -= 28
+	}
+	right = lipgloss.PlaceHorizontal(available, lipgloss.Center, right)
 	body := right
-	if m.width >= 108 {
+	if m.showSidebar() {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, m.sidebar(lipgloss.Height(right)), "  ", right)
 	}
 	content := lipgloss.JoinVertical(lipgloss.Left, m.header(width), body)

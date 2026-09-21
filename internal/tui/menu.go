@@ -28,7 +28,7 @@ func (m *model) choices() (string, []choice) {
 	case "reasoning":
 		return "思考等级", []choice{{"继承模型配置", "", "使用服务端为此模型配置的默认值"}, {"None", "none", "不启用额外推理"}, {"Low", "low", "较低"}, {"Medium", "medium", "中等"}, {"High", "high", "较高"}, {"XHigh", "xhigh", "更高"}, {"Max", "max", "最高"}}
 	default:
-		return "让对话保持顺手", []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}, {"/tools", "tools", "展开工具详情 · Ctrl+T"}, {"F5", "reconnect", "刷新连接与会话"}, {"/quit", "quit", "离开界面 · Ctrl+Q"}}
+		return "让对话保持顺手", []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}, {"/sidebar", "sidebar", "收起或展开侧栏 · Ctrl+B"}, {"/tools", "tools", "展开工具详情 · Ctrl+T"}, {"F5", "reconnect", "刷新连接与会话"}, {"/quit", "quit", "离开界面 · Ctrl+Q"}}
 	}
 }
 func (m *model) menuKey(key string) tea.Cmd {
@@ -67,6 +67,8 @@ func (m *model) menuKey(key string) tea.Cmd {
 			case "tools":
 				m.details = !m.details
 				m.refresh()
+			case "sidebar":
+				m.sidebarHidden = !m.sidebarHidden
 			case "quit":
 				m.stopStream()
 				return tea.Quit
@@ -117,6 +119,8 @@ func (m *model) command(text string) tea.Cmd {
 	case "/tools":
 		m.details = !m.details
 		m.refresh()
+	case "/sidebar":
+		m.sidebarHidden = !m.sidebarHidden
 	case "/help":
 		m.menu, m.menuIndex = "help", 0
 	case "/quit", "/exit":

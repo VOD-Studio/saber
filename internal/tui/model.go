@@ -34,6 +34,7 @@ type model struct {
 	sessions                                    []server.Turn
 	turns                                       []server.Turn
 	connected, loading, sending, dirty, details bool
+	sidebarHidden                               bool
 	notice                                      string
 	menu                                        string
 	menuIndex                                   int
@@ -101,6 +102,9 @@ func newModel(ctx context.Context, client *server.Client, session string) *model
 	})
 	input.ShowLineNumbers = false
 	input.CharLimit = 100000
+	input.DynamicHeight = true
+	input.MinHeight, input.MaxHeight = 1, 6
+	input.MaxContentHeight = input.CharLimit
 	input.SetHeight(1)
 	input.SetWidth(70)
 	input.SetVirtualCursor(true)
@@ -239,6 +243,7 @@ func (m *model) switchSession(session string) tea.Cmd {
 	return m.loadHistory()
 }
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	defer m.layout()
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -398,6 +403,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.menuKey(key)
 		}
 		switch key {
+		case "ctrl+b":
+			m.sidebarHidden = !m.sidebarHidden
+			return m, nil
 		case "ctrl+n":
 			return m, m.switchSession(uuid.NewString())
 		case "ctrl+o":
