@@ -110,19 +110,23 @@ func (s *Service) EnableTasks(path string) error {
 			}
 		}
 		return messageID, nil
-	})
+	}, s.authorizeSchedule)
 	if err != nil {
 		return err
 	}
 	s.tasks, s.taskDir = manager, dir
 	close(ready)
 	s.matrixService.RegisterCommandWithDesc("task", "后台任务：run <内容> | list | status <ID> | cancel <ID>", &taskCommand{service: s})
+	s.matrixService.RegisterCommandWithDesc("schedule", "定时计划：once/every/weekdays <时间> <时区> <目标> | list | status/pause/delete <ID>", &scheduleCommand{service: s})
 	return nil
 }
 
 func taskReply(t task.Task, kind, text string) chat.Reply {
 	// 使用来源身份而非仅递增编号，重建数据库也不会与旧投递事务碰撞。
 	key := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s", t.Message.Session.Platform, t.Message.Session.Account, t.Message.Session.Conversation, t.Message.ID, kind)
+	if t.EventKey != "" && t.EventKey != t.Message.ID {
+		key += "\x00" + t.EventKey
+	}
 	return chat.Reply{Session: t.Message.Session, ReplyTo: t.Message.ID, Text: taskText(text), TransactionID: fmt.Sprintf("saber-task-%x", sha256.Sum256([]byte(key)))}
 }
 

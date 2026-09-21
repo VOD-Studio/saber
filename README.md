@@ -820,6 +820,7 @@ Saber 的 Matrix 聊天入口通过 `chat.Handler` 接收并持久化任务，�
 接口、会话隔离及验收命令见 [通用聊天接入](docs/chat-adapters.md)。
 任务命令、恢复规则和验收命令见 [持久化任务](docs/tasks.md)。
 自主命令/文件工具、容器隔离和成员授权见 [执行权限配置](docs/execution.md)。
+定时计划命令、时区与重启语义见 [持久化定时计划](docs/schedules.md)。
 
 ```
 saber/
@@ -833,7 +834,7 @@ saber/
     chat/                          # 通用消息、会话、回复与展示能力契约
       memory/                      # 无网络聊天 adapter
     conversation/                  # 平台无关的历史、串行调度与回复交付
-    task/                          # SQLite 任务、执行日志、目录互斥和结果重试
+    task/                          # SQLite 任务与定时计划、执行日志、目录互斥和结果重试
     execution/                     # 容器命令/文件工具、权限检查、日志与交付文件
     agent/
       runtime.go                   # 独立执行循环、预算、取消和工具错误回传

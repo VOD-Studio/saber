@@ -51,8 +51,8 @@ func TestTaskAutonomousDockerWorkflow(t *testing.T) {
 		var args map[string]any
 		switch n {
 		case 1:
-			if len(req.Tools) != 6 {
-				t.Errorf("expected authorized local tools and task tool, got %d", len(req.Tools))
+			if len(req.Tools) != 7 {
+				t.Errorf("expected authorized local tools, task and schedule tools, got %d", len(req.Tools))
 			}
 			name = "exec"
 			args = map[string]any{"command": "cat not-created-yet.txt"}

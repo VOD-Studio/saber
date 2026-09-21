@@ -394,15 +394,7 @@ func (s *Service) handleChat(ctx context.Context, message chat.Message, reply ch
 	if len(message.Attachments) > 0 && cfg.Media.Model != "" {
 		modelName = cfg.Media.Model
 	}
-	prompt := cfg.SystemPrompt
-	// 人格服务仍是 Matrix 账号的适配能力，不将 Matrix 房间含义扩散到其他平台。
-	if message.Session.Platform == "matrix" && s.promptProvider != nil {
-		prompt = s.promptProvider.GetSystemPrompt(id.RoomID(message.Session.Conversation), prompt)
-	}
-	req := agent.Request{Model: modelName, Stream: cfg.StreamEnabled, MaxTokens: cfg.MaxTokens, Temperature: cfg.Temperature}
-	if prompt != "" {
-		req.Messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleSystem, Content: prompt}}
-	}
+	req := s.taskRequest(message, modelName)
 	identity := chat.Identity{Session: message.Session, SenderID: message.SenderID}
 	toolCtx := chat.WithIdentity(ctx, identity)
 	if s.executor != nil {
@@ -415,6 +407,20 @@ func (s *Service) handleChat(ctx context.Context, message chat.Message, reply ch
 		return agent.Result{}, s.submitTask(ctx, message, req, reply)
 	}
 	return s.chatProcessor.Handle(ctx, message, req, reply)
+}
+
+func (s *Service) taskRequest(message chat.Message, modelName string) agent.Request {
+	cfg := s.core.GetConfig()
+	prompt := cfg.SystemPrompt
+	// 计划和即时任务使用相同的人格与模型配置，不复制群聊历史。
+	if message.Session.Platform == "matrix" && s.promptProvider != nil {
+		prompt = s.promptProvider.GetSystemPrompt(id.RoomID(message.Session.Conversation), prompt)
+	}
+	req := agent.Request{Model: modelName, Stream: cfg.StreamEnabled, MaxTokens: cfg.MaxTokens, Temperature: cfg.Temperature}
+	if prompt != "" {
+		req.Messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleSystem, Content: prompt}}
+	}
+	return req
 }
 
 func displayConfig(cfg config.StreamEditConfig) chat.Display {
