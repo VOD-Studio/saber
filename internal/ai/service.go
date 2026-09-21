@@ -362,11 +362,6 @@ func (s *Service) GenerateStreamingSimpleResponse(ctx context.Context, modelName
 
 // handleAICommand 保留 Matrix 命令入口，消息规范化和媒体下载由 Matrix adapter 完成。
 func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID id.RoomID, modelName string, args []string) error {
-	if s.tasks != nil {
-		if body, ok := matrix.GetReplyBody(ctx); ok {
-			args = []string{body}
-		}
-	}
 	cfg := s.core.GetConfig()
 	adapter := matrix.NewChatAdapter(s.matrixService, s.mediaService, cfg.Media, cfg.StreamEdit.Enabled, func(ctx context.Context, message chat.Message, reply chat.Adapter) (agent.Result, error) {
 		return s.handleChat(ctx, message, reply, modelName)
@@ -387,7 +382,11 @@ func (s *Service) handleChat(ctx context.Context, message chat.Message, reply ch
 		return agent.Result{}, err
 	}
 	if s.tasks != nil {
-		if action, taskID, ok := naturalTaskCommand(message.Text); ok {
+		text := message.Text
+		if body, ok := matrix.GetReplyBody(ctx); ok {
+			text = body
+		}
+		if action, taskID, ok := naturalTaskCommand(text); ok {
 			return agent.Result{}, s.replyTaskCommand(ctx, message, reply, action, taskID)
 		}
 	} else {

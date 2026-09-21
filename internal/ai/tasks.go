@@ -120,7 +120,7 @@ func taskText(text string) string {
 	return text
 }
 
-func (s *Service) submitTask(ctx context.Context, message chat.Message, req agent.Request, reply chat.Adapter) error {
+func taskInput(message chat.Message) openai.ChatCompletionMessage {
 	current := openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: message.Text}
 	if len(message.Attachments) > 0 {
 		current.Content = ""
@@ -131,15 +131,25 @@ func (s *Service) submitTask(ctx context.Context, message chat.Message, req agen
 			current.MultiContent = append(current.MultiContent, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeImageURL, ImageURL: &openai.ChatMessageImageURL{URL: a.URL, Detail: openai.ImageURLDetailAuto}})
 		}
 	}
-	req.Messages = append(req.Messages, current)
+	return current
+}
+
+func (s *Service) submitTask(ctx context.Context, message chat.Message, req agent.Request, reply chat.Adapter) error {
+	continuation := message
+	if body, ok := matrix.GetReplyBody(ctx); ok {
+		continuation.Text = body
+	}
+	req.Messages = append(req.Messages, taskInput(continuation))
 	dir := s.taskDir
 	if s.executor != nil {
 		if granted, err := s.executor.Workspace(chat.Identity{Session: message.Session, SenderID: message.SenderID}); err == nil {
 			dir = granted
 		}
 	}
-	t, err := s.tasks.Continue(ctx, message, dir, req)
+	t, err := s.tasks.Continue(ctx, continuation, dir, req)
 	if errors.Is(err, sql.ErrNoRows) {
+		// 未找到任务关联时，保留普通回复中的原话，而非仅传递“解释刚才这句话”。
+		req.Messages[len(req.Messages)-1] = taskInput(message)
 		t, err = s.tasks.Submit(ctx, message, dir, req)
 	}
 	if err != nil {

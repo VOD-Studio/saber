@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- 回复非任务机器人消息时保留被引用内容；仅在持久化任务关联成功后使用新正文续接，控制指令仍从原始正文直接识别
+
 - 明确 Agent 执行器采用宿主二进制 + 本机 Docker CLI/daemon 部署，补充安装、持久化状态、用户服务及真实群验收步骤；现有 Distroless 镜像仅支持关闭执行器的部署
 
 - 续接可跨过已取消但尚未执行的补充轮次，幂等保存已恢复上下文，避免丢失祖先任务目标或重复拼接轨迹

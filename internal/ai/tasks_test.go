@@ -225,3 +225,76 @@ func TestTaskReply_StableBoundedAndScoped(t *testing.T) {
 	taskA.Message.Session.Account = "other"
 	require.NotEqual(t, a.TransactionID, taskReply(taskA, "result", "").TransactionID)
 }
+
+func TestTasks_MatrixReplyKeepsQuoteUnlessContinuingTask(t *testing.T) {
+	seen := make(chan agent.Request, 4)
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req agent.Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+			return
+		}
+		seen <- req
+		if _, err := fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"解释完成"},"finish_reason":"stop"}]}`); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer model.Close()
+	quotes := map[string]string{"$proactive": "今天适合读书", "$help": "使用 !task 查看任务", "$legacy": "旧机器人消息", "$known": "展示摘要不应再次进入续接输入"}
+	homeserver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			if err := json.NewEncoder(w).Encode(map[string]any{"event_id": filepath.Base(r.URL.Path), "sender": "@bot:test", "type": "m.room.message", "content": map[string]string{"msgtype": "m.text", "body": quotes[filepath.Base(r.URL.Path)]}}); err != nil {
+				t.Error(err)
+			}
+			return
+		}
+		if err := json.NewEncoder(w).Encode(map[string]string{"event_id": "$" + filepath.Base(r.URL.Path)}); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer homeserver.Close()
+	client, err := mautrix.NewClient(homeserver.URL, "@bot:test", "test")
+	require.NoError(t, err)
+	commands := matrix.NewCommandService(client, "@bot:test", nil)
+	cfg := config.DefaultAIConfig()
+	cfg.Enabled = true
+	cfg.Provider = "openai"
+	cfg.BaseURL = model.URL
+	cfg.APIKey = "test"
+	cfg.DefaultModel = "local"
+	cfg.StreamEnabled = false
+	cfg.SystemPrompt = "system"
+	service, err := NewService(&cfg, commands, nil, nil)
+	require.NoError(t, err)
+	defer service.Stop()
+	require.NoError(t, service.EnableTasks(filepath.Join(t.TempDir(), "tasks.db")))
+	commands.SetReplyAIHandler(NewAICommand(service))
+	session := chat.Session{Platform: "matrix", Account: "@bot:test", Conversation: "!room:test"}
+	for _, replyTo := range []string{"$proactive", "$help", "$legacy", "$known"} {
+		t.Run(replyTo, func(t *testing.T) {
+			incoming := &event.Event{Type: event.EventMessage, ID: id.EventID("$reply-" + replyTo), Sender: "@alice:test", RoomID: "!room:test", Content: event.Content{Parsed: &event.MessageEventContent{MsgType: event.MsgText, Body: "> <@bot:test> " + quotes[replyTo] + "\n\n解释刚才这句话", RelatesTo: &event.RelatesTo{InReplyTo: &event.InReplyTo{EventID: id.EventID(replyTo)}}}}}
+			require.NoError(t, commands.HandleEvent(context.Background(), incoming))
+			var req agent.Request
+			select {
+			case req = <-seen:
+			case <-time.After(3 * time.Second):
+				t.Fatal("model request missing")
+			}
+			last := req.Messages[len(req.Messages)-1].Content
+			if replyTo == "$known" {
+				require.Equal(t, "解释刚才这句话", last)
+				require.Contains(t, fmt.Sprint(req.Messages), quotes["$legacy"])
+				require.NotContains(t, fmt.Sprint(req.Messages), quotes[replyTo])
+			} else {
+				require.Equal(t, "[引用消息]\n"+quotes[replyTo]+"\n\n[回复]\n解释刚才这句话", last)
+			}
+			tasks, err := service.tasks.List(context.Background(), session)
+			require.NoError(t, err)
+			require.Equal(t, last, tasks[0].Message.Text)
+			if replyTo == "$legacy" {
+				require.NoError(t, service.tasks.RememberMessage(context.Background(), tasks[0].ID, "$known"))
+			}
+		})
+	}
+}
