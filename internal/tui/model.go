@@ -12,6 +12,7 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"github.com/google/uuid"
@@ -27,6 +28,8 @@ type model struct {
 	client                                      *server.Client
 	width, height, bodyWidth                    int
 	input                                       textarea.Model
+	filter                                      textinput.Model
+	unread                                      bool
 	viewport                                    viewport.Model
 	spinner                                     spinner.Model
 	info                                        server.Info
@@ -112,10 +115,17 @@ func newModel(ctx context.Context, client *server.Client, session string) *model
 	input.SetStyles(inputStyles())
 	input.Focus()
 	spin := spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(accentStyle))
+	filter := textinput.New()
+	filter.Prompt, filter.Placeholder, filter.CharLimit = "› ", "输入以筛选…", 200
+	filterStyles := textinput.DefaultDarkStyles()
+	filterStyles.Focused.Text = textStyle.Background(panel)
+	filterStyles.Focused.Prompt = accentStyle.Background(panel)
+	filterStyles.Focused.Placeholder = mutedStyle.Background(panel)
+	filter.SetStyles(filterStyles)
 	if session == "" {
 		session = uuid.NewString()
 	}
-	m := &model{ctx: ctx, client: client, session: session, input: input, viewport: viewport.New(viewport.WithWidth(70), viewport.WithHeight(15)), spinner: spin, live: make(map[int64]string), loading: true, renderCache: make(map[string]string)}
+	m := &model{ctx: ctx, client: client, session: session, input: input, filter: filter, viewport: viewport.New(viewport.WithWidth(70), viewport.WithHeight(15)), spinner: spin, live: make(map[int64]string), loading: true, renderCache: make(map[string]string)}
 	m.resize(100, 32)
 	return m
 }
@@ -239,8 +249,9 @@ func (m *model) switchSession(session string) tea.Cmd {
 	m.live = make(map[int64]string)
 	m.effort = ""
 	m.loading = true
+	m.unread = false
 	m.refresh()
-	return m.loadHistory()
+	return tea.Batch(m.openMenu(""), m.loadHistory())
 }
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	defer m.layout()
@@ -346,6 +357,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyEvent(*msg.update.Event)
 		}
 		if msg.update.Task != nil {
+			if !m.viewport.AtBottom() {
+				m.unread = true
+			}
 			t := *msg.update.Task
 			for i := range m.turns {
 				if m.turns[i].ID == t.ID {
@@ -384,6 +398,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if key == "ctrl+c" {
+			if m.menu != "" {
+				return m, m.openMenu("")
+			}
 			if m.active() {
 				return m, m.cancel()
 			}
@@ -400,7 +417,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.boot()
 		}
 		if m.menu != "" {
-			return m, m.menuKey(key)
+			return m, m.menuKey(msg)
 		}
 		switch key {
 		case "ctrl+b":
@@ -409,31 +426,52 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+n":
 			return m, m.switchSession(uuid.NewString())
 		case "ctrl+o":
-			m.menu, m.menuIndex = "sessions", 0
-			return m, nil
+			return m, m.openMenu("sessions")
 		case "ctrl+p":
-			m.menu, m.menuIndex = "models", 0
-			return m, nil
+			return m, m.openMenu("models")
 		case "ctrl+r":
-			m.menu, m.menuIndex = "reasoning", 0
-			return m, nil
+			return m, m.openMenu("reasoning")
 		case "ctrl+t":
 			m.details = !m.details
 			m.refresh()
 			return m, nil
 		case "enter":
 			return m, m.submit()
-		case "pgup", "pgdown", "ctrl+home", "ctrl+end":
+		case "ctrl+home":
+			m.viewport.GotoTop()
+			return m, nil
+		case "ctrl+end":
+			m.viewport.GotoBottom()
+			m.unread = false
+			return m, nil
+		case "pgup", "pgdown":
 			m.viewport, cmd = m.viewport.Update(msg)
+			if m.viewport.AtBottom() {
+				m.unread = false
+			}
 			return m, cmd
 		}
 	case tea.MouseWheelMsg:
+		if m.menu != "" {
+			return m, nil
+		}
 		m.viewport, cmd = m.viewport.Update(msg)
+		if m.viewport.AtBottom() {
+			m.unread = false
+		}
 		return m, cmd
 	case spinner.TickMsg:
 		m.spinner, cmd = m.spinner.Update(msg)
 		if m.dirty || m.active() {
 			m.refresh()
+		}
+		return m, cmd
+	}
+	if m.menu != "" {
+		before := m.filter.Value()
+		m.filter, cmd = m.filter.Update(msg)
+		if m.filter.Value() != before {
+			m.menuIndex = 0
 		}
 		return m, cmd
 	}
@@ -452,6 +490,9 @@ func (m *model) updateSession(turn server.Turn) {
 func (m *model) applyEvent(event task.Record) {
 	if len(m.turns) == 0 {
 		return
+	}
+	if !m.viewport.AtBottom() {
+		m.unread = true
 	}
 	t := &m.turns[len(m.turns)-1]
 	switch event.Kind {

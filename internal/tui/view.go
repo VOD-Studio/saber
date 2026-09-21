@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode"
@@ -66,6 +67,7 @@ func (m *model) layout() {
 	}
 	width := min(108, max(1, available))
 	widthChanged := m.bodyWidth != width
+	m.filter.SetWidth(max(1, m.menuWidth()-8))
 	maxInputHeight := min(6, max(1, m.height-12))
 	if widthChanged || m.input.MaxHeight != maxInputHeight {
 		m.bodyWidth = width
@@ -107,6 +109,7 @@ func (m *model) refresh() {
 	m.viewport.SetContent(strings.Join(blocks, "\n\n"))
 	if atBottom {
 		m.viewport.GotoBottom()
+		m.unread = false
 	}
 	m.dirty = false
 }
@@ -149,7 +152,9 @@ func (m *model) renderTurn(turn server.Turn) string {
 					marker, color, state = m.spinner.View(), accent, "执行中"
 				}
 			}
-			line := lipgloss.NewStyle().Foreground(color).Render(marker+" "+clipped(tool.Call.Function.Name, width-16)) + mutedStyle.Render("  "+state)
+			name := clipped(tool.Call.Function.Name, max(8, width/3))
+			summary := clipped(toolSummary(tool.Call.Function.Arguments), max(1, width-lipgloss.Width(name+state)-7))
+			line := lipgloss.NewStyle().Foreground(color).Render(marker) + " " + textStyle.Render(name) + mutedStyle.Render("  "+summary+"  "+state)
 			parts = append(parts, line)
 			if m.details {
 				detail := clean(tool.Call.Function.Arguments)
@@ -198,6 +203,17 @@ func (m *model) renderTurn(turn server.Turn) string {
 		parts = append(parts, lipgloss.NewStyle().Foreground(danger).Width(width).Render(label+"  "+clean(turn.Error)))
 	}
 	return lipgloss.NewStyle().Padding(0, 2).Width(m.bodyWidth).Render(strings.Join(parts, "\n"))
+}
+func toolSummary(arguments string) string {
+	var args map[string]any
+	if json.Unmarshal([]byte(arguments), &args) == nil {
+		for _, key := range []string{"path", "file_path", "command", "query", "url"} {
+			if value, ok := args[key].(string); ok && value != "" {
+				return value
+			}
+		}
+	}
+	return strings.Join(strings.Fields(clean(arguments)), " ")
 }
 func compactNumber(n int) string {
 	if n >= 1000 {
@@ -282,15 +298,17 @@ func (m *model) composer() string {
 	effort := " · 思考 " + clean(m.effectiveEffort())
 	metadata := clipped(name, max(1, width-lipgloss.Width(effort))) + effort
 	keys := "Enter 发送 · Alt+Enter 换行 · / 命令"
-	if m.active() {
-		keys = "Ctrl+C 停止 · Ctrl+Q 离开 · / 命令"
-	} else if m.menu != "" {
+	if m.menu != "" {
 		keys = "↑↓ 选择 · ↵ 确定 · Esc 返回"
+	} else if m.active() {
+		keys = "Ctrl+C 停止 · Ctrl+Q 离开 · / 命令"
 	} else if width < 42 {
 		keys = "↵ 发送 · ⌥↵ 换行 · / 命令"
 	}
 	notice := m.notice
-	if notice == "" && m.active() {
+	if m.unread && !m.viewport.AtBottom() {
+		notice = "↓ 新内容 · Ctrl+End 到底部"
+	} else if notice == "" && m.active() {
 		notice = "离开界面后，任务继续运行"
 	}
 	info := []string{metadata, keys, notice}
@@ -339,9 +357,6 @@ func (m *model) View() tea.View {
 	if len(m.turns) == 0 && !m.loading {
 		transcript = m.welcome()
 	}
-	if m.menu != "" {
-		transcript = m.menuView()
-	}
 	right := lipgloss.JoinVertical(lipgloss.Left, lipgloss.NewStyle().Width(m.bodyWidth).Height(m.viewport.Height()).Render(transcript), m.composer())
 	available := width
 	if m.showSidebar() {
@@ -354,6 +369,10 @@ func (m *model) View() tea.View {
 	}
 	content := lipgloss.JoinVertical(lipgloss.Left, m.header(width), body)
 	frame := lipgloss.NewStyle().Foreground(foreground).Background(background).Padding(1, 2).Width(m.width).Height(m.height).MaxWidth(m.width).MaxHeight(m.height).Render(content)
+	if m.menu != "" {
+		dialog := m.menuView()
+		frame = lipgloss.NewCompositor(lipgloss.NewLayer(frame), lipgloss.NewLayer(dialog).X((m.width-lipgloss.Width(dialog))/2).Y((m.height-lipgloss.Height(dialog))/2)).Render()
+	}
 	v := tea.NewView(paint(frame, m.width, m.height))
 	v.AltScreen = true
 	v.BackgroundColor, v.ForegroundColor = background, foreground

@@ -22,7 +22,7 @@ func (m *model) choices() (string, []choice) {
 	case "models":
 		var items []choice
 		for _, model := range m.info.Models {
-			items = append(items, choice{model.ID, model.ID, model.Name})
+			items = append(items, choice{m.modelName(model.ID), model.ID, model.ID})
 		}
 		return "选择模型", items
 	case "reasoning":
@@ -31,15 +31,40 @@ func (m *model) choices() (string, []choice) {
 		return "让对话保持顺手", []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}, {"/sidebar", "sidebar", "收起或展开侧栏 · Ctrl+B"}, {"/tools", "tools", "展开工具详情 · Ctrl+T"}, {"F5", "reconnect", "刷新连接与会话"}, {"/quit", "quit", "离开界面 · Ctrl+Q"}}
 	}
 }
-func (m *model) menuKey(key string) tea.Cmd {
-	_, items := m.choices()
-	switch key {
+func (m *model) openMenu(menu string) tea.Cmd {
+	m.menu, m.menuIndex = menu, 0
+	m.filter.Reset()
+	if menu == "" {
+		m.filter.Blur()
+		return m.input.Focus()
+	}
+	m.input.Blur()
+	return m.filter.Focus()
+}
+
+func (m *model) filteredChoices() (string, []choice) {
+	title, items := m.choices()
+	query := strings.ToLower(strings.TrimSpace(m.filter.Value()))
+	if query == "" {
+		return title, items
+	}
+	var matches []choice
+	for _, item := range items {
+		if strings.Contains(strings.ToLower(item.label+" "+item.description), query) {
+			matches = append(matches, item)
+		}
+	}
+	return title, matches
+}
+
+func (m *model) menuKey(msg tea.KeyPressMsg) tea.Cmd {
+	_, items := m.filteredChoices()
+	switch msg.String() {
 	case "esc":
-		m.menu = ""
-		return nil
-	case "up", "k":
+		return m.openMenu("")
+	case "up":
 		m.menuIndex = max(0, m.menuIndex-1)
-	case "down", "j":
+	case "down":
 		m.menuIndex = min(max(0, len(items)-1), m.menuIndex+1)
 	case "enter":
 		if len(items) == 0 {
@@ -47,7 +72,7 @@ func (m *model) menuKey(key string) tea.Cmd {
 		}
 		selected := items[min(m.menuIndex, len(items)-1)]
 		menu := m.menu
-		m.menu = ""
+		focus := m.openMenu("")
 		switch menu {
 		case "sessions":
 			if selected.value == "" {
@@ -77,9 +102,18 @@ func (m *model) menuKey(key string) tea.Cmd {
 				m.loading = true
 				return m.boot()
 			default:
-				m.menu, m.menuIndex = selected.value, 0
+				return m.openMenu(selected.value)
 			}
 		}
+		return focus
+	default:
+		before := m.filter.Value()
+		var cmd tea.Cmd
+		m.filter, cmd = m.filter.Update(msg)
+		if m.filter.Value() != before {
+			m.menuIndex = 0
+		}
+		return cmd
 	}
 	return nil
 }
@@ -88,15 +122,14 @@ func (m *model) command(text string) tea.Cmd {
 	m.input.Reset()
 	switch args[0] {
 	case "/":
-		m.menu, m.menuIndex = "help", 0
+		return m.openMenu("help")
 	case "/new":
 		return m.switchSession(uuid.NewString())
 	case "/sessions":
-		m.menu, m.menuIndex = "sessions", 0
+		return m.openMenu("sessions")
 	case "/model":
 		if len(args) == 1 {
-			m.menu, m.menuIndex = "models", 0
-			break
+			return m.openMenu("models")
 		}
 		for _, model := range m.info.Models {
 			if args[1] == model.ID {
@@ -108,8 +141,7 @@ func (m *model) command(text string) tea.Cmd {
 		m.notice = "没有找到此模型；使用 /model 查看可用模型。"
 	case "/reasoning":
 		if len(args) == 1 {
-			m.menu, m.menuIndex = "reasoning", 0
-			break
+			return m.openMenu("reasoning")
 		}
 		m.effort = args[1]
 		if m.effort == "default" {
@@ -122,7 +154,7 @@ func (m *model) command(text string) tea.Cmd {
 	case "/sidebar":
 		m.sidebarHidden = !m.sidebarHidden
 	case "/help":
-		m.menu, m.menuIndex = "help", 0
+		return m.openMenu("help")
 	case "/quit", "/exit":
 		m.stopStream()
 		return tea.Quit
@@ -132,41 +164,43 @@ func (m *model) command(text string) tea.Cmd {
 	}
 	return nil
 }
+func (m *model) menuWidth() int { return max(20, min(70, m.width-6)) }
+
 func (m *model) menuView() string {
-	title, items := m.choices()
-	if m.viewport.Height() < 8 {
-		lines := []string{accentStyle.Bold(true).Render(title)}
-		if len(items) > 0 {
-			lines = append(lines, textStyle.Render("› "+clipped(items[min(m.menuIndex, len(items)-1)].label, m.viewport.Width()-3)))
-		}
-		if m.viewport.Height() > 2 {
-			lines = append(lines, mutedStyle.Render("↑↓ 选择  ↵ 确定  Esc 返回"))
-		}
-		return lipgloss.NewStyle().Width(m.viewport.Width()).Height(m.viewport.Height()).MaxHeight(m.viewport.Height()).Render(strings.Join(lines, "\n"))
+	title, items := m.filteredChoices()
+	width, height := m.menuWidth(), max(8, m.height-4)
+	normal, quiet := textStyle.Background(panel), mutedStyle.Background(panel)
+	rowHeight := 2
+	if height < 14 {
+		rowHeight = 1
 	}
-	width := max(20, min(70, m.viewport.Width()-4))
-	rows := max(1, (m.viewport.Height()-6)/2)
+	rows := max(1, (height-7)/rowHeight)
 	start := max(0, m.menuIndex-rows+1)
 	end := min(len(items), start+rows)
-	lines := []string{accentStyle.Bold(true).Render(title), ""}
+	lines := []string{accentStyle.Bold(true).Background(panel).Render(clipped(title, width-4)), m.filter.View(), ""}
+	if len(items) == 0 {
+		lines = append(lines, quiet.Render("没有匹配项"))
+	}
 	for i := start; i < end; i++ {
-		style := textStyle
-		prefix := "  "
+		style, description, prefix := normal, quiet, "  "
 		if i == m.menuIndex {
-			style = lipgloss.NewStyle().Foreground(accent).Background(panel).Bold(true)
+			selected := lipgloss.Color("#263D43")
+			style = accentStyle.Background(selected).Bold(true)
+			description = mutedStyle.Background(selected)
 			prefix = "› "
 		}
-		lines = append(lines, style.Width(width-4).Render(prefix+clipped(items[i].label, width-7)))
-		lines = append(lines, mutedStyle.Render("  "+clipped(items[i].description, width-7)))
+		lines = append(lines, style.Width(width-4).Render(prefix+clipped(items[i].label, width-6)))
+		if rowHeight == 2 {
+			lines = append(lines, description.Width(width-4).Render("  "+clipped(items[i].description, width-6)))
+		}
 	}
-	hint := "↑↓ 选择  ↵ 确定  Esc 返回"
-	if m.menu == "reasoning" {
-		hint = "支持的等级由模型决定；/reasoning 可输入其他值"
+	hint := "↑↓ 选择 · ↵ 确定 · Esc 返回"
+	if width < 40 {
+		hint = "↑↓ 选择  ↵ 确定  Esc 关闭"
 	}
-	lines = append(lines, "", mutedStyle.Render(clipped(hint, width-4)))
 	if end < len(items) {
-		lines[len(lines)-1] = mutedStyle.Render(fmt.Sprintf("↓ 还有 %d 项 · Esc 返回", len(items)-end))
+		hint = fmt.Sprintf("↓ 还有 %d 项 · Esc 返回", len(items)-end)
 	}
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(faint).Padding(0, 1).Width(width).Render(strings.Join(lines, "\n"))
-	return lipgloss.Place(m.viewport.Width(), m.viewport.Height(), lipgloss.Center, lipgloss.Center, box)
+	lines = append(lines, "", quiet.Render(clipped(hint, width-4)))
+	return lipgloss.NewStyle().Background(panel).Border(lipgloss.RoundedBorder()).BorderForeground(faint).BorderBackground(panel).Padding(0, 1).Width(width).Render(strings.Join(lines, "\n"))
 }

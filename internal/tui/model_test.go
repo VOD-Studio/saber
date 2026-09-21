@@ -31,7 +31,7 @@ func previewModel() *model {
 
 func TestModel_ResponsiveViews(t *testing.T) {
 	for _, size := range [][2]int{{200, 50}, {132, 40}, {108, 32}, {107, 32}, {100, 32}, {80, 24}, {44, 18}, {36, 14}, {24, 10}} {
-		for _, state := range []string{"welcome", "chat", "models", "reasoning", "sessions", "help"} {
+		for _, state := range []string{"welcome", "chat", "running", "error", "tools", "multiline", "long-model", "models", "reasoning", "sessions", "help"} {
 			t.Run(fmt.Sprintf("%dx%d/%s", size[0], size[1], state), func(t *testing.T) {
 				m := previewModel()
 				turn := server.Turn{ID: 1, Session: "design", Input: "将任务执行与结果投递拆开，让 TUI 和 Matrix 各自接收结果。", Content: "可以。任务会在服务端独立运行。\n\n### 一套执行，两种入口\n\n- TUI 实时展示进度与回答。\n- Matrix 按原会话投递结果。\n- 关闭界面后，任务继续执行。\n\n```go\nmanager.RegisterDelivery(\"matrix\", deliver)\n```", Model: m.selectedModel, Status: "completed", Tokens: 1842, Duration: 3400 * time.Millisecond, CreatedAt: time.Date(2026, 9, 21, 16, 30, 0, 0, time.Local), Tools: []agent.ToolRecord{{Call: openai.ToolCall{ID: "read", Function: openai.FunctionCall{Name: "read_file", Arguments: `{"path":"internal/task/manager.go"}`}}, Content: "已读取任务执行入口", Duration: 10 * time.Millisecond}}}
@@ -39,8 +39,20 @@ func TestModel_ResponsiveViews(t *testing.T) {
 					m.turns = []server.Turn{turn}
 					m.sessions = []server.Turn{turn}
 				}
-				if state != "welcome" && state != "chat" {
-					m.menu = state
+				switch state {
+				case "running":
+					m.turns[0].Status = "running"
+				case "error":
+					m.turns[0].Status, m.turns[0].Error = "failed", "连接中断，请稍后再试。"
+				case "tools":
+					m.details = true
+				case "multiline":
+					m.input.SetValue(strings.Repeat("中文与 emoji 🌱 长输入\n", 8))
+				case "long-model":
+					m.selectedModel = strings.Repeat("very-long-model-", 10)
+					m.turns[0].Model = m.selectedModel
+				case "models", "reasoning", "sessions", "help":
+					m.openMenu(state)
 				}
 				m.resize(size[0], size[1])
 				view := m.View()
@@ -51,13 +63,15 @@ func TestModel_ResponsiveViews(t *testing.T) {
 				}
 				if size[0] >= 36 && size[1] >= 14 {
 					require.Contains(t, clean(view.Content), "SABER")
-					if m.menu == "" {
+					if m.active() {
+						require.Contains(t, clean(view.Content), "停止")
+					} else if m.menu == "" {
 						require.Contains(t, clean(view.Content), "发送")
 					} else {
 						require.Contains(t, clean(view.Content), "返回")
 					}
 				}
-				if dir := os.Getenv("SABER_TUI_SNAPSHOT_DIR"); dir != "" && (state == "welcome" || state == "chat" || state == "models") {
+				if dir := os.Getenv("SABER_TUI_SNAPSHOT_DIR"); dir != "" {
 					require.NoError(t, os.MkdirAll(dir, 0700))
 					require.NoError(t, os.WriteFile(filepath.Join(dir, fmt.Sprintf("%dx%d-%s.ansi", size[0], size[1], state)), []byte(view.Content), 0600))
 				}
@@ -108,6 +122,71 @@ func TestModel_ResizePreservesReadingPosition(t *testing.T) {
 	m.viewport.GotoBottom()
 	m.Update(tea.PasteMsg{Content: "\n第四行"})
 	require.True(t, m.viewport.AtBottom())
+}
+
+func TestModel_MenuSearchPreservesDraftAndHistory(t *testing.T) {
+	m := previewModel()
+	m.info.Models = append(m.info.Models, ai.ChatModel{ID: "provider.other", Name: "另一个模型"})
+	m.input.SetValue("尚未发送的草稿")
+	m.turns = []server.Turn{{ID: 1, Status: "completed", Content: strings.Repeat("历史内容\n\n", 50)}}
+	m.resize(100, 32)
+	m.viewport.SetYOffset(8)
+	m.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	require.False(t, m.input.Focused())
+	require.True(t, m.filter.Focused())
+	m.Update(tea.PasteMsg{Content: "另一个"})
+	_, items := m.filteredChoices()
+	require.Len(t, items, 1)
+	require.Equal(t, "provider.other", items[0].value)
+	require.Contains(t, clean(m.View().Content), "历史内容", "dialog must overlay the transcript")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Empty(t, m.menu)
+	require.Equal(t, "provider.other", m.selectedModel)
+	require.Equal(t, "尚未发送的草稿", m.input.Value())
+	require.Equal(t, 8, m.viewport.YOffset())
+	require.True(t, m.input.Focused())
+	m.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	require.Equal(t, "j", m.filter.Value(), "letter keys must filter rather than navigate")
+	require.Contains(t, clean(m.menuView()), "没有匹配项")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, "models", m.menu)
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Empty(t, m.menu)
+	require.True(t, m.input.Focused())
+}
+
+func TestModel_NewContentWhileReading(t *testing.T) {
+	m := previewModel()
+	m.turns = []server.Turn{{ID: 1, Status: "running"}}
+	m.live[1] = strings.Repeat("正在阅读的历史\n\n", 60)
+	m.resize(100, 32)
+	m.viewport.SetYOffset(10)
+	m.applyEvent(task.Record{Kind: agent.TextDelta, Text: "新的内容"})
+	m.refresh()
+	require.Equal(t, 10, m.viewport.YOffset())
+	require.True(t, m.unread)
+	require.Contains(t, clean(m.composer()), "Ctrl+End")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnd, Mod: tea.ModCtrl})
+	require.True(t, m.viewport.AtBottom())
+	require.False(t, m.unread)
+	m.applyEvent(task.Record{Kind: agent.TextDelta, Text: "继续追加"})
+	m.refresh()
+	require.True(t, m.viewport.AtBottom())
+	m.Update(tea.KeyPressMsg{Code: tea.KeyHome, Mod: tea.ModCtrl})
+	require.Equal(t, 0, m.viewport.YOffset())
+}
+
+func TestToolSummary(t *testing.T) {
+	for _, tc := range []struct{ args, want string }{
+		{`{"path":"internal/tui/view.go","offset":10}`, "internal/tui/view.go"},
+		{`{"command":"go test -tags goolm ./internal/tui"}`, "go test -tags goolm ./internal/tui"},
+		{`{"query":"中文搜索"}`, "中文搜索"},
+		{`{"count":3}`, `{"count":3}`},
+		{"unstructured\noutput", "unstructured output"},
+	} {
+		t.Run(tc.args, func(t *testing.T) { require.Equal(t, tc.want, toolSummary(tc.args)) })
+	}
 }
 
 func TestModel_VisualHierarchy(t *testing.T) {
@@ -168,7 +247,7 @@ func TestModel_CommandsAndRequestFailure(t *testing.T) {
 	require.Equal(t, "medium", m.effectiveEffort())
 	m.command("/model")
 	require.Equal(t, "models", m.menu)
-	m.menuKey("esc")
+	m.menuKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	require.Empty(t, m.menu)
 	m.input.SetValue("保留这条消息")
 	m.sending = true
