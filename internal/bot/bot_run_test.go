@@ -158,7 +158,7 @@ func TestRun_VersionFlag(t *testing.T) {
 			name:           "version 标志",
 			args:           []string{"-version"},
 			expectedExit:   0,
-			outputContains: "Saber Matrix Bot",
+			outputContains: "Saber v",
 		},
 	}
 
@@ -317,6 +317,7 @@ func TestRun_ConfigLoadFailure(t *testing.T) {
 			setupConfig: func(dir string) string {
 				configPath := filepath.Join(dir, "incomplete.yaml")
 				incompleteConfig := `matrix:
+  enabled: true
   homeserver: "https://matrix.org"
   # 缺少 user_id 和认证信息
 `
@@ -380,6 +381,7 @@ func TestRun_ValidConfigButNoServer(t *testing.T) {
 
 	// 创建有效的配置文件，但使用虚假的服务器地址
 	validConfig := `matrix:
+  enabled: true
   homeserver: "https://nonexistent.matrix.server.invalid"
   user_id: "@bot:matrix.org"
   access_token: "fake-token-for-testing"

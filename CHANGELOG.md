@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 默认提供终端 AI 对话，复用共享会话历史与工具权限；支持逐行输入、EOF、`/exit` 和 Ctrl+C 退出，Matrix 通过默认关闭的 `matrix.enabled` 显式启用
+
 - 新增 `openai-responses` 协议：支持 go-openai 非流式/流式请求、文本与图片、现有 Agent 工具循环和流式编辑；保留工具续轮及任务恢复所需的加密推理输出，明确拒绝断流和截断响应，并提供 Podlink Responses 模型配置示例
 
 - Matrix `!schedule once/every/weekdays/list/status/pause/delete` 和同逻辑自然语言工具，回显时区与下次运行；负责人、工作目录和汇报目标绑定真实来源，每次发生独立投递并关联原消息/话题
@@ -43,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 回复任务回执时使用原始正文识别取消等控制指令，控制识别使用去除 Matrix 引用回退后的新正文，避免控制操作排入执行队列
 
 ### Changed
+
+- 示例配置不再预填 Matrix 用户和伪令牌，默认输出上限改为 8192 tokens；旧 Matrix 部署需添加 `matrix.enabled: true`，未启用任何入口时提示配置并正常退出
 
 - MCP 工具改为默认拒绝，内置与外部服务器均需要管理员显式授权；发布、部署、跨目录能力独立声明，stdio 进程不再继承 Saber 环境变量（安全敏感变更）
 - 应用启动时启用配置文件同目录下的 `tasks.db`；用户聊天转为后台任务，不读取或写入共享房间历史。工作目录固定为启动目录，重启后目录不匹配时拒绝执行

@@ -28,6 +28,7 @@ type ShutdownConfig struct {
 
 // MatrixConfig 存储 Matrix 连接配置
 type MatrixConfig struct {
+	Enabled                bool     `yaml:"enabled"` // 显式启用 Matrix 入口；默认关闭，改用终端对话。
 	Homeserver             string   `yaml:"homeserver"`
 	UserID                 string   `yaml:"user_id"`                   // 完整的 Matrix ID，如 @user:matrix.org
 	DeviceID               string   `yaml:"device_id"`                 // 设备标识符
@@ -246,7 +247,7 @@ func DefaultAIConfig() AIConfig {
 		Provider:              "",
 		BaseURL:               "",
 		APIKey:                "",
-		MaxTokens:             256000,
+		MaxTokens:             8192,
 		Temperature:           0.7,
 		SystemPrompt:          "",
 		RateLimitPerMinute:    0,
@@ -404,7 +405,7 @@ func DefaultShutdownConfig() ShutdownConfig {
 	}
 }
 
-// Validate 验证配置是否有效
+// Validate 在创建已启用的 Matrix 客户端时验证连接配置。
 func (m *MatrixConfig) Validate() error {
 	if m.Homeserver == "" {
 		return fmt.Errorf("homeserver is required")
@@ -869,17 +870,19 @@ func DefaultConfig() *Config {
 // ExampleConfig 返回示例配置内容。
 func ExampleConfig() string {
 	return `matrix:
+  # 可选入口；默认使用终端对话。接入 Matrix 时改为 true 并填写账号。
+  enabled: false
   # Matrix 服务器地址
   homeserver: "https://matrix.org"
   # 完整的 Matrix 用户 ID（格式：@username:server.org）
-  user_id: "@your-bot:matrix.org"
+  user_id: ""
   # 设备标识符（可选，留空则服务器自动生成）
   device_id: "saber-bot-device"
   # 设备显示名称（可选）
   device_name: "Saber Bot"
   # 认证方式（二选一，access_token 优先级更高）
   # 方式 1: 使用 Access Token（推荐，更安全）
-  access_token: "syt_xxxxxxxxxxxxx_xxxxxxxxxxxx"
+  access_token: ""
   # 方式 2: 使用密码登录（首次登录使用）
   # password: "your-secure-password"
   # 启动时自动加入的房间列表（可选）
@@ -912,6 +915,15 @@ ai:
           model: "gpt-4o-mini"
         gpt-4o:
           model: "gpt-4o"
+    # Podlink Responses 示例（选择此模型时同时修改 default_model）
+    # podlink-responses:
+    #   type: "openai"
+    #   api: "openai-responses"
+    #   base_url: "http://127.0.0.1:8317/v1"
+    #   api_key: ""
+    #   models:
+    #     gpt-5.6-sol:
+    #       model: "gpt-5.6-sol"
     # Ollama 本地模型示例
     # ollama:
     #   type: "openai"  # Ollama 兼容 OpenAI API
@@ -940,7 +952,7 @@ ai:
   # API 密钥
   # api_key: ""
   # 最大生成 token 数
-  max_tokens: 256000
+  max_tokens: 8192
   # 生成温度（0-2）
   temperature: 0.7
   # 系统提示词（可选，用于自定义 AI 行为）

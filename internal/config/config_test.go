@@ -186,8 +186,8 @@ func TestDefaultConfigs(t *testing.T) {
 		if cfg.Enabled {
 			t.Error("Default AI should be disabled")
 		}
-		if cfg.MaxTokens != 256000 {
-			t.Errorf("Default MaxTokens = %d, want 256000", cfg.MaxTokens)
+		if cfg.MaxTokens != 8192 {
+			t.Errorf("Default MaxTokens = %d, want 8192", cfg.MaxTokens)
 		}
 		if cfg.Temperature != 0.7 {
 			t.Errorf("Default Temperature = %f, want 0.7", cfg.Temperature)

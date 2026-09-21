@@ -50,13 +50,17 @@ type appState struct {
 
 // Run 初始化并运行机器人。
 //
-// 它处理 CLI 标志、配置加载、Matrix 客户端设置和优雅关闭。
+// 它处理 CLI 标志与配置，默认运行终端对话，显式启用时运行 Matrix。
 // 返回错误而非直接调用 os.Exit，支持测试和优雅关闭。
 func Run(info matrix.BuildInfo) error {
 	state := &appState{info: info}
 
 	if err := state.initConfig(); err != nil {
 		return err
+	}
+
+	if !state.cfg.Matrix.Enabled {
+		return state.runTerminal()
 	}
 
 	services, err := state.initMatrixClient()
@@ -85,7 +89,7 @@ func (s *appState) initConfig() error {
 	s.flags = cli.Parse()
 
 	if s.flags.ShowVersion {
-		fmt.Printf("Saber Matrix Bot v%s\n", s.info.Version)
+		fmt.Printf("Saber v%s\n", s.info.Version)
 		fmt.Printf("  Git: %s (%s)\n", s.info.GitCommit, s.info.GitBranch)
 		fmt.Printf("  Built: %s\n", s.info.BuildTime)
 		fmt.Printf("  Go: %s\n", s.info.GoVersion)
@@ -110,7 +114,7 @@ func (s *appState) initConfig() error {
 
 	setupLogging(s.flags.Verbose)
 
-	slog.Info("Starting Saber Matrix Bot",
+	slog.Info("Starting Saber",
 		"version", s.info.Version,
 		"git", s.info.GitCommit,
 		"branch", s.info.GitBranch)
@@ -124,8 +128,7 @@ func (s *appState) initConfig() error {
 
 	slog.Info("Configuration loaded",
 		"path", s.flags.ConfigPath,
-		"homeserver", cfg.Matrix.Homeserver,
-		"user_id", cfg.Matrix.UserID)
+		"matrix_enabled", cfg.Matrix.Enabled)
 
 	return nil
 }
@@ -230,14 +233,16 @@ func (s *appState) initServices() error {
 	}
 
 	svc.mcpManager = s.initMCPManager()
-	if svc.mcpManager != nil {
+	if svc.mcpManager != nil && svc.commandService != nil {
 		matrix.RegisterMCPCommands(svc.commandService, svc.mcpManager)
 	}
 
-	// 创建媒体服务
-	mautrixClient := svc.client.GetClient()
-	maxSizeBytes := int64(s.cfg.AI.Media.MaxSizeMB) * 1024 * 1024
-	svc.mediaService = matrix.NewMediaService(mautrixClient, maxSizeBytes)
+	// 媒体下载仅在 Matrix 接入时初始化。
+	if svc.client != nil {
+		mautrixClient := svc.client.GetClient()
+		maxSizeBytes := int64(s.cfg.AI.Media.MaxSizeMB) * 1024 * 1024
+		svc.mediaService = matrix.NewMediaService(mautrixClient, maxSizeBytes)
+	}
 
 	aiService, err := ai.NewService(&s.cfg.AI, svc.commandService, svc.mcpManager, svc.mediaService)
 	if err != nil {
@@ -253,6 +258,11 @@ func (s *appState) initServices() error {
 	slog.Info("AI服务初始化成功",
 		"provider", s.cfg.AI.Provider,
 		"default_model", s.cfg.AI.DefaultModel)
+
+	// 终端通过同步会话入口运行，不装配 Matrix 命令、主动聊天和投递队列。
+	if svc.client == nil {
+		return nil
+	}
 
 	// 初始化人格服务
 	s.initPersonaService()

@@ -25,7 +25,7 @@ docker pull python:3.13-slim
 docker image inspect python:3.13-slim
 ```
 
-编辑生成的配置：启用 `ai.enabled`，填写真实模型与 Matrix 账号；按下方示例增加 `execution`。把 `log_dir` 设置为当前用户目录下 `saber/state/execution` 的**绝对路径**，把工作区 `path` 设置为 `saber-work/project` 的绝对路径。将账号、测试群 ID、成员 ID 换成真实值，不要把 YAML 中的 `$HOME` 当成会自动展开的变量。E2EE 的数据库及密钥路径应放在私有 `saber/state` 中，不能放进工作区。运行用户必须可读写工作区并使用 Docker。
+编辑生成的配置：启用 `ai.enabled` 和 `matrix.enabled`，填写真实模型与 Matrix 账号；按下方示例增加 `execution`。把 `log_dir` 设置为当前用户目录下 `saber/state/execution` 的**绝对路径**，把工作区 `path` 设置为 `saber-work/project` 的绝对路径。将账号、测试群 ID、成员 ID 换成真实值，不要把 YAML 中的 `$HOME` 当成会自动展开的变量。E2EE 的数据库及密钥路径应放在私有 `saber/state` 中，不能放进工作区。运行用户必须可读写工作区并使用 Docker。
 
 ```sh
 cd "$HOME/saber/state"
@@ -34,7 +34,7 @@ exec "$HOME/saber/bin/saber" -c "$HOME/saber/state/config.yaml"
 
 保持同一配置目录、工作目录和执行日志目录；一个任务数据库只运行一个 Saber 进程。进程启动时执行 Docker 连接及残留容器清理检查，失败会明确拒绝启动执行器。升级前停止旧进程，替换二进制后再启动；同时备份私有状态目录中的任务数据库、WAL/SHM（如存在）、Matrix 会话/E2EE 密钥和执行日志。
 
-Linux 如需持续运行，可保存下面的用户服务为 `~/.config/systemd/user/saber.service`，再执行 `systemctl --user daemon-reload && systemctl --user enable --now saber`。服务使用的 PATH 和 Docker 连接必须与前台验证一致；Docker Desktop 等自定义 CLI 安装路径需补入 PATH。前台进程需先退出。
+以下后台服务用于已启用 Matrix 的部署；默认终端模式在标准输入 EOF 后正常退出。Linux 如需持续运行，可保存下面的用户服务为 `~/.config/systemd/user/saber.service`，再执行 `systemctl --user daemon-reload && systemctl --user enable --now saber`。服务使用的 PATH 和 Docker 连接必须与前台验证一致；Docker Desktop 等自定义 CLI 安装路径需补入 PATH。前台进程需先退出。
 
 ```ini
 [Unit]
