@@ -352,3 +352,26 @@ func validateArgs(tool string, args map[string]any) error {
 	}
 	return nil
 }
+
+// Logs 列出私有归档中的完整命令输出，不接受聊天提供的宿主路径。
+func (e *Executor) Logs(taskID int64) ([]Artifact, error) {
+	dir := filepath.Join(e.cfg.LogDir, "task-"+strconv.FormatInt(taskID, 10))
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var logs []Artifact
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), "output-") || !strings.HasSuffix(entry.Name(), ".log") {
+			continue
+		}
+		if !entry.Type().IsRegular() {
+			return nil, errors.New("invalid task log archive")
+		}
+		logs = append(logs, Artifact{Name: entry.Name(), Path: filepath.Join(dir, entry.Name())})
+	}
+	return logs, nil
+}

@@ -2,12 +2,9 @@ package ai
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 
-	"maunium.net/go/mautrix/event"
-	"maunium.net/go/mautrix/id"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/execution"
 	"rua.plus/saber/internal/task"
@@ -31,24 +28,7 @@ func (s *Service) deliverTask(ctx context.Context, adapter chat.Adapter, t task.
 			return messageID, err
 		}
 		key := "artifact:" + filepath.Base(artifact.Path)
-		_, err = s.tasks.DeliverPart(ctx, t.ID, key, func(ctx context.Context) ([]byte, error) {
-			data, err := os.ReadFile(artifact.Path)
-			if err != nil {
-				return nil, err
-			}
-			content, err := s.matrixService.UploadTaskFile(ctx, artifact.Name, data, id.EventID(t.Message.ID), id.EventID(t.Message.Session.Thread))
-			if err != nil {
-				return nil, err
-			}
-			return json.Marshal(content)
-		}, func(ctx context.Context, data []byte) (string, error) {
-			var content event.MessageEventContent
-			if err := json.Unmarshal(data, &content); err != nil {
-				return "", err
-			}
-			eventID, err := s.matrixService.SendUploadedTaskFile(ctx, id.RoomID(t.Message.Session.Conversation), &content, taskReply(t, key, "").TransactionID)
-			return string(eventID), err
-		})
+		_, err = s.deliverTaskFile(ctx, t, key, artifact.Name, func() ([]byte, error) { return os.ReadFile(artifact.Path) })
 		if err != nil {
 			return messageID, err
 		}

@@ -84,7 +84,7 @@ func (te *ToolExecutor) ExecuteToolCall(ctx context.Context, toolName string, ar
 			return nil, fmt.Errorf("task tool requires trusted identity")
 		}
 		action, _ := args["action"].(string)
-		if action != "list" && action != "status" && action != "cancel" {
+		if action != "list" && action != "status" && action != "cancel" && action != "logs" {
 			return nil, fmt.Errorf("invalid task action")
 		}
 		var taskID int64

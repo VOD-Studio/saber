@@ -98,7 +98,7 @@ func (s *Service) EnableTasks(path string) error {
 	}
 	s.tasks, s.taskDir = manager, dir
 	close(ready)
-	s.matrixService.RegisterCommandWithDesc("task", "后台任务：run <内容> | list | status <ID> | cancel <ID>", &taskCommand{service: s})
+	s.matrixService.RegisterCommandWithDesc("task", "后台任务：run <内容> | list | status <ID> | cancel <ID> | logs <ID>", &taskCommand{service: s})
 	s.matrixService.RegisterCommandWithDesc("schedule", "定时计划：once/every/weekdays <时间> <时区> <目标> | list | status/pause/delete <ID>", &scheduleCommand{service: s})
 	return nil
 }
@@ -169,7 +169,7 @@ func (c *taskCommand) Handle(ctx context.Context, userID id.UserID, roomID id.Ro
 	if len(args) == 1 && args[0] == "list" {
 		action = "list"
 	}
-	if len(args) == 2 && (args[0] == "status" || args[0] == "cancel") {
+	if len(args) == 2 && (args[0] == "status" || args[0] == "cancel" || args[0] == "logs") {
 		var err error
 		taskID, err = strconv.ParseInt(strings.TrimPrefix(args[1], "#"), 10, 64)
 		if err == nil && taskID > 0 {
@@ -255,6 +255,8 @@ func (s *Service) taskOperation(ctx context.Context, identity chat.Identity, act
 			text += "\n结果：\n" + t.Result.Content
 		}
 		return text, nil
+	case "logs":
+		return s.sendTaskLogs(ctx, identity, taskID)
 	case "cancel":
 		t, err := s.tasks.Cancel(ctx, identity, taskID)
 		if err != nil {
@@ -265,15 +267,15 @@ func (s *Service) taskOperation(ctx context.Context, identity chat.Identity, act
 		}
 		return task.Report(t), nil
 	default:
-		return "用法：!task run <内容> | !task list | !task status <ID> | !task cancel <ID>", nil
+		return "用法：!task run <内容> | !task list | !task status <ID> | !task cancel <ID> | !task logs <ID>", nil
 	}
 }
 
 func taskTool() openai.Tool {
 	return openai.Tool{Type: openai.ToolTypeFunction, Function: &openai.FunctionDefinition{
-		Name: "saber_task", Description: "查询本群任务列表或状态，或者取消当前用户自己发起或具备本群管理权限的指定任务。身份与群由系统提供，不得代其他用户操作。创建任务由聊天入口自动完成。",
+		Name: "saber_task", Description: "查询本群任务列表或状态，或者取消当前用户自己发起或具备本群管理权限的指定任务。身份与群由系统提供，不得代其他用户操作。下载完整执行日志仅限发起人或本群任务管理员。创建任务由聊天入口自动完成。",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{
-			"action": map[string]any{"type": "string", "enum": []string{"list", "status", "cancel"}},
+			"action": map[string]any{"type": "string", "enum": []string{"list", "status", "cancel", "logs"}},
 			"id":     map[string]any{"type": "integer", "minimum": 1},
 		}, "required": []string{"action"}, "additionalProperties": false},
 	}}
