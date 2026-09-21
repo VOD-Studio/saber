@@ -1,21 +1,31 @@
 version: "2"
 
-# 精简配置，减少内存占用
+# 说明：
+# - build-tags 必须与构建/测试一致（E2EE 需要 goolm），否则 lint 分析的代码与 make build 不同。
+# - 配置遵循 golangci-lint v2 schema：`golangci-lint config verify` 可校验；
+#   版本由 Makefile 的 GOLANGCI_LINT_VERSION 钉住，用 `make lint-install` 安装。
 run:
   timeout: 5m
+  tests: true
   build-tags:
     - goolm
 
-# 只启用必要的 linters
+# 只启用必要的 linters，控制内存与噪音
 linters:
-  disable-all: true
+  default: none
   enable:
-    - errcheck # 错误检查
-    - govet # vet 检查
+    - errcheck    # 错误检查
+    - govet       # vet 检查
     - ineffassign # 无效赋值
     - staticcheck # 静态分析
-    - unused # 未使用代码
+    - unused      # 未使用代码
+  settings:
+    staticcheck:
+      # 沿用项目原有排除项：包注释/命名规范由 docs/comments.md 约束
+      checks: ["all", "-ST1000", "-ST1003"]
 
-linters-settings:
-  staticcheck:
-    checks: ["-ST1000", "-ST1003"] # 排除部分检查
+# v2 中格式化器与 linter 分离：golangci-lint fmt 负责格式化，run 只报 linter 问题
+formatters:
+  enable:
+    - gofmt
+    - goimports
