@@ -1,4 +1,4 @@
-.PHONY: build build-all build-prod build-freebsd build-openbsd build-loong64 clean test fmt lint run help docker-build docker-buildx docker-push docker-load docker-run docker-clean
+.PHONY: build build-all build-prod build-freebsd build-openbsd build-loong64 clean test fmt fmt-check lint lint-fix lint-install check run deps deps-check deps-verify help docker-build docker-buildx docker-push docker-load docker-run docker-clean
 
 APP_NAME := saber
 VERSION := 0.0.5
@@ -9,6 +9,11 @@ GO_VERSION := $(shell go version | awk '{print $$3}')
 BUILD_PLATFORM := $(shell go env GOOS)/$(shell go env GOARCH)
 BUILD_DIR := bin
 MAIN_FILE := main.go
+
+# 工具版本：golangci-lint 只能用「不低于本机 Go」的版本构建，
+# 否则解析新版标准库时会 panic，所以这里钉住版本并用 make lint-install 安装。
+GOLANGCI_LINT_VERSION := 2.13.2
+GOLANGCI_LINT ?= golangci-lint
 
 # 生产构建标志
 LDFLAGS := -s -w -v \
@@ -90,11 +95,44 @@ test-cover-check: ## CI 覆盖率门禁检查（阈值 60%）
 fmt: ## 使用 goimports 格式化代码
 	goimports -w .
 
-lint: ## 运行 golangci-lint 检查
-	golangci-lint run --build-tags goolm --timeout 5m ./...
+fmt-check: ## 检查代码格式（与 CI 的 gofmt 门禁一致）
+	@test -z "$$(gofmt -l .)" || { echo "以下文件未格式化:"; gofmt -l .; exit 1; }
+
+lint: ## 运行 golangci-lint 检查（tags/timeout 统一由 .golangci.yml 提供）
+	@$(GOLANGCI_LINT) --version | grep -Eq 'version v?$(GOLANGCI_LINT_VERSION)([[:space:]]|$$)' || { \
+		echo "golangci-lint 版本不是 v$(GOLANGCI_LINT_VERSION)，请运行 make lint-install"; exit 1; }
+	$(GOLANGCI_LINT) run ./...
+
+lint-fix: ## 运行 golangci-lint 并自动修复可修复项
+	$(GOLANGCI_LINT) run --fix ./...
+
+lint-install: ## 用本机 Go 重新构建并安装 golangci-lint
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v$(GOLANGCI_LINT_VERSION)
+
+check: fmt-check lint test ## 提交前的本地门禁（格式 + lint + 测试）
 
 run: ## 运行应用程序
 	go run -tags goolm $(MAIN_FILE)
+
+# ============================================
+# 依赖管理
+# ============================================
+# 说明：go get / go mod tidy 会按 build constraints 决定依赖图，
+# 因此统一通过 GOFLAGS 带上 goolm 标签，避免 E2EE 相关依赖被漏掉。
+
+deps: ## 更新所有依赖（minor/patch）并整理 go.mod、go.sum
+	GOFLAGS="-tags=goolm" go get -u ./...
+	GOFLAGS="-tags=goolm" go mod tidy
+	@echo "依赖已更新，运行 make deps-verify 验证"
+
+deps-check: ## 检查哪些依赖有可用更新
+	@GOFLAGS="-tags=goolm" go list -m -u all | grep -E '\[[^]]*\]' || echo "所有依赖均为最新"
+
+deps-verify: ## 校验依赖：go.mod 是否 tidy + 编译 + 测试
+	@GOFLAGS="-tags=goolm" go mod tidy -diff
+	GOFLAGS="-tags=goolm" go mod verify
+	CGO_ENABLED=0 go build -tags goolm ./...
+	go test -tags goolm ./...
 
 # ============================================
 # Docker 构建命令
