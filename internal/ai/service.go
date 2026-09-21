@@ -17,6 +17,7 @@ import (
 	"rua.plus/saber/internal/conversation"
 	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/mcp"
+	"rua.plus/saber/internal/task"
 )
 
 // PromptProvider 定义提示词提供者接口。
@@ -45,6 +46,10 @@ type Service struct {
 	respHandler *ResponseHandler
 	// toolExecutor 是工具执行器。
 	toolExecutor *ToolExecutor
+	// tasks 在应用启动时绑定，接收聊天任务并负责后台生命周期。
+	tasks *task.Manager
+	// taskDir 是应用启动时的规范化工作目录，不执行全局 chdir。
+	taskDir string
 }
 
 // NewService 创建一个新的 AI 服务实例。
@@ -152,6 +157,11 @@ func (s *Service) GetModelRegistry() *ModelRegistry {
 // 必须在服务不再使用时调用，否则会导致 goroutine 泄漏。
 // 它会停止上下文管理器的后台清理 goroutine。
 func (s *Service) Stop() {
+	if s.tasks != nil {
+		if err := s.tasks.Close(); err != nil {
+			slog.Error("关闭任务服务失败", "error", err)
+		}
+	}
 	if s.contextManager != nil {
 		s.contextManager.Stop()
 		slog.Debug("AI 服务上下文管理器已停止")
@@ -361,8 +371,14 @@ func (s *Service) handleChat(ctx context.Context, message chat.Message, reply ch
 	if err := message.Validate(); err != nil {
 		return agent.Result{}, err
 	}
-	if err := s.core.WaitForRateLimit(ctx); err != nil {
-		return agent.Result{}, fmt.Errorf("AI请求速率限制: %w", err)
+	if s.tasks != nil {
+		if action, taskID, ok := naturalTaskCommand(message.Text); ok {
+			return agent.Result{}, s.replyTaskCommand(ctx, message, reply, action, taskID)
+		}
+	} else {
+		if err := s.core.WaitForRateLimit(ctx); err != nil {
+			return agent.Result{}, fmt.Errorf("AI请求速率限制: %w", err)
+		}
 	}
 	cfg := s.core.GetConfig()
 	if len(message.Attachments) > 0 && cfg.Media.Model != "" {
@@ -378,6 +394,9 @@ func (s *Service) handleChat(ctx context.Context, message chat.Message, reply ch
 		req.Messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleSystem, Content: prompt}}
 	}
 	req.Tools, _ = s.toolExecutor.PrepareTools()
+	if s.tasks != nil {
+		return agent.Result{}, s.submitTask(ctx, message, req, reply)
+	}
 	return s.chatProcessor.Handle(ctx, message, req, reply)
 }
 

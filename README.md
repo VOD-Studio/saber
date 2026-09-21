@@ -814,10 +814,11 @@ meme:
 
 ## 架构
 
-Saber 的聊天入口通过 `chat.Handler` 进入统一的 `conversation.Processor`，由 Agent Runtime 执行任务。
-Matrix 和内存 adapter 共用消息、会话和回复契约；核心 `agent`、`chat`、`conversation`、`model`、`mcp` 不依赖 Matrix SDK。
+Saber 的 Matrix 聊天入口通过 `chat.Handler` 接收并持久化任务，由 `task.Manager` 后台调用 Agent Runtime，结果单独投递。
+嵌入式调用可继续使用 `conversation.Processor` 的同步会话模式。Matrix 和内存 adapter 共用消息、会话和回复契约；核心 `task`、`agent`、`chat`、`conversation`、`model`、`mcp` 不依赖 Matrix SDK。
 当前应用启动与平台专用命令仍保留 Matrix 装配，其他实际平台的启动入口后续按需接入。
 接口、会话隔离及验收命令见 [通用聊天接入](docs/chat-adapters.md)。
+任务命令、恢复规则和验收命令见 [持久化任务](docs/tasks.md)。
 
 ```
 saber/
@@ -831,6 +832,7 @@ saber/
     chat/                          # 通用消息、会话、回复与展示能力契约
       memory/                      # 无网络聊天 adapter
     conversation/                  # 平台无关的历史、串行调度与回复交付
+    task/                          # SQLite 任务、执行日志、目录互斥和结果重试
     agent/
       runtime.go                   # 独立执行循环、预算、取消和工具错误回传
       types.go                     # 模型与工具接口、运行事件和每轮记录

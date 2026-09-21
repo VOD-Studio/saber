@@ -682,6 +682,10 @@ func (s *CommandService) SendFormattedReply(ctx context.Context, roomID id.RoomI
 // SendTextWithRelatesTo 向房间发送文本消息，并指定关系。
 // 返回发送的消息事件 ID 和错误。
 func (s *CommandService) SendTextWithRelatesTo(ctx context.Context, roomID id.RoomID, body string, relatesTo *event.RelatesTo) (id.EventID, error) {
+	return s.sendTextWithOptions(ctx, roomID, body, relatesTo)
+}
+
+func (s *CommandService) sendTextWithOptions(ctx context.Context, roomID id.RoomID, body string, relatesTo *event.RelatesTo, options ...mautrix.ReqSendEvent) (id.EventID, error) {
 	content := &event.MessageEventContent{
 		MsgType: event.MsgText,
 		Body:    body,
@@ -722,6 +726,7 @@ func (s *CommandService) SendTextWithRelatesTo(ctx context.Context, roomID id.Ro
 		roomID,
 		event.EventMessage,
 		content,
+		options...,
 	)
 	if err != nil {
 		slog.Error("Failed to send message with relatesTo",

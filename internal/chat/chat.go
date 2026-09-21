@@ -96,6 +96,8 @@ type Capabilities struct {
 
 // Reply 是发往原会话的文本回复。
 type Reply struct {
+	// TransactionID 在平台支持时用于幂等发送；为空时创建普通消息。
+	TransactionID string
 	// Session 是目标会话，必须由入站消息派生。
 	Session Session
 	// ReplyTo 是被回复的消息 ID。

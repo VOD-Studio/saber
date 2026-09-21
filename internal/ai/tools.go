@@ -5,9 +5,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 
 	"github.com/sashabaranov/go-openai"
 	"maunium.net/go/mautrix/id"
+	"rua.plus/saber/internal/chat"
 )
 
 // ToolExecutor 负责执行 AI 工具调用。
@@ -61,6 +63,25 @@ func (te *ToolExecutor) ExecuteToolCall(ctx context.Context, toolName string, ar
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if toolName == "saber_task" && te.service.tasks != nil {
+		identity, ok := chat.IdentityFromContext(ctx)
+		if !ok {
+			return nil, fmt.Errorf("task tool requires trusted identity")
+		}
+		action, _ := args["action"].(string)
+		if action != "list" && action != "status" && action != "cancel" {
+			return nil, fmt.Errorf("invalid task action")
+		}
+		var taskID int64
+		if action != "list" {
+			var err error
+			taskID, err = strconv.ParseInt(fmt.Sprint(args["id"]), 10, 64)
+			if err != nil || taskID <= 0 {
+				return nil, fmt.Errorf("task id must be a positive integer")
+			}
+		}
+		return te.service.taskOperation(ctx, identity, action, taskID)
+	}
 	if te.service.mcpManager == nil {
 		return nil, fmt.Errorf("MCP manager not initialized")
 	}
@@ -87,17 +108,23 @@ func (te *ToolExecutor) ExecuteToolCall(ctx context.Context, toolName string, ar
 //   - []openai.Tool: 可用的 OpenAI 工具列表
 //   - bool: 是否成功准备了工具
 func (te *ToolExecutor) PrepareTools() ([]openai.Tool, bool) {
+	var tools []openai.Tool
+	if te.service.tasks != nil {
+		tools = append(tools, taskTool())
+	}
 	if te.service.mcpManager == nil || !te.service.mcpManager.IsEnabled() {
-		return nil, false
+		return tools, len(tools) > 0
 	}
 
 	mcpTools := te.service.mcpManager.ListTools()
 	if len(mcpTools) == 0 {
-		return nil, false
+		return tools, len(tools) > 0
 	}
 
-	tools := make([]openai.Tool, 0, len(mcpTools))
 	for _, mcpTool := range mcpTools {
+		if te.service.tasks != nil && mcpTool.Name == "saber_task" {
+			continue
+		}
 		tools = append(tools, openai.Tool{
 			Type: "function",
 			Function: &openai.FunctionDefinition{

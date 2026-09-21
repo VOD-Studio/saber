@@ -1,6 +1,6 @@
 # 通用聊天接入
 
-Saber 的消息处理链路为：
+Saber 的同步消息处理链路为（未调用 `Service.EnableTasks` 的嵌入式场景）：
 
 ```text
 Matrix 命令/消息 ── ChatAdapter ──┐
@@ -11,7 +11,9 @@ Matrix 命令/消息 ── ChatAdapter ──┐
                                             原接入账号的回复 adapter
 ```
 
-`agent`、`chat`、`conversation`、`model`、`mcp` 均不依赖 Matrix 类型或 SDK，包括间接依赖。
+正式 Matrix 应用调用 `Service.EnableTasks`，将用户消息保存到 SQLite 后快速回复任务编号；后台执行和结果投递由 `task.Manager` 管理，详见 [持久化任务](tasks.md)。任务模式使用独立输入快照，不共享房间历史，也不调用同步 Presenter。
+
+`task`、`agent`、`chat`、`conversation`、`model`、`mcp` 均不依赖 Matrix 类型或 SDK，包括间接依赖。
 `ai.Service` 当前作为应用装配和 Matrix 专用命令兼容层：`HandleChat` 可由任意 adapter 调用，模型实际实现已迁到 `model`。
 已有 Matrix 命令、人格服务和主动聊天功能保留平台适配职责，不进入通用核心。
 当前二进制启动仍使用现有 Matrix 配置；终端及其他实际平台的启动入口属于下一阶段。

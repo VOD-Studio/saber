@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - SQLite 持久化任务队列：消息去重、独立请求与执行记录、工作目录串行执行、取消与重启中断恢复；结果投递独立重试，不重放已执行任务
+- Matrix 聊天任务立即回复编号，支持 `!task run/list/status/cancel`、常用中文任务操作和 `saber_task` 模型工具；结果引用原消息与话题，固定发送事务 ID 防止投递重试产生重复消息
 - 通用 `chat` 消息、会话、回复和能力契约，以及内存聊天 adapter；会话键包含平台、账号和线程
 - 独立 `conversation` 处理链路：统一历史组装、同会话串行调度、可取消排队、附件输入和按平台能力展示回复
 - 独立 `internal/agent` 运行时：统一模型与工具循环，记录每轮响应、请求尝试、工具参数和结果；支持轮数、总时长、工具输出长度限制及明确终态
@@ -17,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 应用启动时启用配置文件同目录下的 `tasks.db`；用户聊天转为后台任务，不读取或写入共享房间历史。工作目录固定为启动目录，重启后目录不匹配时拒绝执行
 - Matrix 通过 `ChatAdapter` 规范化消息、图片、引用和线程，与内存聊天 adapter 共用 `conversation.Processor`；回复能力决定是否显示增量，模型流式传输独立配置
 - 模型客户端、注册表、重试和流式解析迁移至 `internal/model`；旧 `ai` 名称通过兼容层引用，核心依赖检查禁止引入 Matrix SDK
 - 会话历史迁移至平台无关存储，按平台、账号、原生会话及线程隔离；读取前清理过期消息，图片输入只组装一次，历史仅保存文本和附件标记

@@ -249,6 +249,10 @@ func (s *appState) initServices() error {
 	// 初始化 Meme 服务
 	s.initMemeService()
 
+	if err := aiService.EnableTasks(filepath.Join(filepath.Dir(s.flags.ConfigPath), "tasks.db")); err != nil {
+		return fmt.Errorf("任务服务初始化失败: %w", err)
+	}
+
 	return nil
 }
 

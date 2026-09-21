@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
 	"rua.plus/saber/internal/agent"
@@ -91,7 +92,7 @@ func (a *ChatAdapter) Send(ctx context.Context, reply chat.Reply) (string, error
 		return "", err
 	}
 	relates := chatReplyRelation(reply)
-	messageID, err := a.service.SendTextWithRelatesTo(ctx, id.RoomID(reply.Session.Conversation), reply.Text, relates)
+	messageID, err := a.service.sendTextWithOptions(ctx, id.RoomID(reply.Session.Conversation), reply.Text, relates, mautrix.ReqSendEvent{TransactionID: reply.TransactionID})
 	return string(messageID), err
 }
 
