@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 加载配置时不再强制校验文件权限必须为 0600：移除 `checkFilePermissions` 与 `SABER_ALLOW_INSECURE_CONFIG` 逃生开关，权限管控交由部署环境负责
 
+### Removed
+
+#### QQ 机器人
+
+- 移除 QQ 频道机器人全部功能：`internal/qq` 包（适配器、API 客户端、事件处理、命令注册、上下文管理）
+- 移除 `qq` 配置节与 `QQConfig`（含 `Validate`、`DefaultQQConfig`），示例配置不再包含 QQ
+- 移除仅为 QQ 服务的 `ai.SimpleService` 简化对话服务
+- 移除依赖 `github.com/tencent-connect/botgo`
+
 ## [0.0.5] - 2026-03-26
 
 ### Added

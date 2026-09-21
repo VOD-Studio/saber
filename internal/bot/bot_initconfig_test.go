@@ -457,11 +457,6 @@ func TestInitConfig_DefaultConfigValues(t *testing.T) {
 		t.Error("Proactive should be disabled by default")
 	}
 
-	// QQ 默认应该禁用
-	if cfg.QQ.Enabled {
-		t.Error("QQ should be disabled by default")
-	}
-
 	// Meme 默认应该禁用
 	if cfg.Meme.Enabled {
 		t.Error("Meme should be disabled by default")

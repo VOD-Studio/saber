@@ -17,7 +17,6 @@ type Config struct {
 	AI       AIConfig       `yaml:"ai"`
 	MCP      MCPConfig      `yaml:"mcp"`
 	Meme     MemeConfig     `yaml:"meme"`
-	QQ       QQConfig       `yaml:"qq"`
 	Shutdown ShutdownConfig `yaml:"shutdown"`
 }
 
@@ -219,27 +218,6 @@ type MemeConfig struct {
 	TimeoutSeconds int    `yaml:"timeout_seconds"` // 请求超时时间（秒，默认 10）
 }
 
-// QQConfig 存储 QQ 机器人配置。
-type QQConfig struct {
-	// 基础配置
-	Enabled   bool   `yaml:"enabled"`    // 是否启用 QQ 机器人
-	AppID     string `yaml:"app_id"`     // QQ 机器人 AppID
-	AppSecret string `yaml:"app_secret"` // QQ 机器人 AppSecret
-	Sandbox   bool   `yaml:"sandbox"`    // 是否使用沙箱环境
-
-	// Webhook 配置
-	WebhookPort   int    `yaml:"webhook_port"`   // Webhook 服务器端口
-	WebhookPath   string `yaml:"webhook_path"`   // Webhook 回调路径
-	WebhookSecret string `yaml:"webhook_secret"` // Webhook 签名验证密钥
-
-	// 超时和重试
-	TimeoutSeconds int         `yaml:"timeout_seconds"` // API 调用超时时间（秒）
-	Retry          RetryConfig `yaml:"retry"`           // 重试配置
-
-	// 并发控制
-	MaxConcurrentEvents int `yaml:"max_concurrent_events"` // 最大并发事件数
-}
-
 // UseTokenAuth 检查是否使用 Token 认证
 func (m *MatrixConfig) UseTokenAuth() bool {
 	return m.AccessToken != ""
@@ -395,22 +373,6 @@ func DefaultMemeConfig() MemeConfig {
 		APIKey:         "",
 		MaxResults:     5,
 		TimeoutSeconds: 10,
-	}
-}
-
-// DefaultQQConfig 返回带有合理默认值的 QQ 机器人配置
-func DefaultQQConfig() QQConfig {
-	return QQConfig{
-		Enabled:             false,
-		AppID:               "",
-		AppSecret:           "",
-		Sandbox:             false,
-		WebhookPort:         8080,
-		WebhookPath:         "/qq/webhook",
-		WebhookSecret:       "",
-		TimeoutSeconds:      30,
-		Retry:               DefaultRetryConfig(),
-		MaxConcurrentEvents: 10,
 	}
 }
 
@@ -710,36 +672,6 @@ func (m *MemeConfig) Validate() error {
 	return nil
 }
 
-// Validate 验证 QQ 配置是否有效
-func (q *QQConfig) Validate() error {
-	if !q.Enabled {
-		return nil
-	}
-	if q.AppID == "" {
-		return fmt.Errorf("app_id is required when QQ is enabled")
-	}
-	if q.AppSecret == "" {
-		return fmt.Errorf("app_secret is required when QQ is enabled")
-	}
-	if q.WebhookPort <= 0 || q.WebhookPort > 65535 {
-		return fmt.Errorf("webhook_port must be between 1 and 65535")
-	}
-	if q.WebhookPath == "" {
-		return fmt.Errorf("webhook_path is required when QQ is enabled")
-	}
-	if q.TimeoutSeconds <= 0 {
-		return fmt.Errorf("timeout_seconds must be positive")
-	}
-	if q.MaxConcurrentEvents < 0 {
-		return fmt.Errorf("max_concurrent_events must be non-negative")
-	}
-	if q.MaxConcurrentEvents > 100 {
-		slog.Warn("max_concurrent_events is very high, this may cause resource issues",
-			"value", q.MaxConcurrentEvents)
-	}
-	return nil
-}
-
 // GetModelConfig 获取指定模型的配置。
 //
 // 支持多种格式：
@@ -906,7 +838,6 @@ func DefaultConfig() *Config {
 		AI:       DefaultAIConfig(),
 		MCP:      DefaultMCPConfig(),
 		Meme:     DefaultMemeConfig(),
-		QQ:       DefaultQQConfig(),
 		Shutdown: DefaultShutdownConfig(),
 	}
 }
@@ -1143,34 +1074,6 @@ meme:
   max_results: 5
   # 请求超时时间（秒，默认 10）
   timeout_seconds: 10
-
-# QQ 机器人配置
-qq:
-  # 是否启用 QQ 机器人
-  enabled: false
-  # QQ 机器人 AppID（从 QQ 开放平台获取）
-  app_id: ""
-  # QQ 机器人 AppSecret
-  app_secret: ""
-  # 是否使用沙箱环境（测试用）
-  sandbox: false
-  # Webhook 服务器端口
-  webhook_port: 8080
-  # Webhook 回调路径
-  webhook_path: "/qq/webhook"
-  # Webhook 签名验证密钥（可选）
-  webhook_secret: ""
-  # API 调用超时时间（秒）
-  timeout_seconds: 30
-  # 重试配置
-  retry:
-    enabled: true
-    max_retries: 3
-    initial_delay_ms: 1000
-    max_delay_ms: 30000
-    backoff_factor: 2.0
-  # 最大并发事件数
-  max_concurrent_events: 10
 
 # 关闭配置
 shutdown:

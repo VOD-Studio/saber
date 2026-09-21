@@ -111,51 +111,6 @@ func TestInitMemeService_InvalidConfig(t *testing.T) {
 	}
 }
 
-// TestInitQQAdapter_Disabled 测试 QQ 禁用。
-func TestInitQQAdapter_Disabled(t *testing.T) {
-	state := &appState{
-		cfg: &config.Config{
-			QQ: config.QQConfig{
-				Enabled: false,
-			},
-		},
-		services: &services{},
-		info:     matrix.BuildInfo{},
-	}
-
-	state.initQQAdapter()
-
-	if state.services.qqAdapter != nil {
-		t.Error("qqAdapter should be nil when QQ disabled")
-	}
-}
-
-// TestInitQQAdapter_InvalidConfig 测试无效 QQ 配置。
-func TestInitQQAdapter_InvalidConfig(t *testing.T) {
-	state := &appState{
-		cfg: &config.Config{
-			QQ: config.QQConfig{
-				Enabled:   true,
-				AppID:     "", // 无效：空 AppID
-				AppSecret: "",
-			},
-			AI: config.AIConfig{
-				Enabled: false,
-			},
-		},
-		services: &services{},
-		info:     matrix.BuildInfo{},
-	}
-
-	// initQQAdapter 应该优雅处理无效配置
-	state.initQQAdapter()
-
-	// 由于配置无效，qqAdapter 应该为 nil
-	if state.services.qqAdapter != nil {
-		t.Log("qqAdapter was initialized (unexpected)")
-	}
-}
-
 // TestRegisterAICommands_NilCommandService 测试 nil CommandService。
 // 注意：registerAICommands 需要 commandService，为 nil 时会 panic
 func TestRegisterAICommands_NilCommandService(t *testing.T) {
@@ -237,7 +192,6 @@ func TestShutdown_WithServices(t *testing.T) {
 			aiService:        nil,
 			mcpManager:       nil,
 			proactiveManager: nil,
-			qqAdapter:        nil,
 		},
 	}
 

@@ -75,106 +75,6 @@ func TestInitMemeService_EmptyAPIKey(t *testing.T) {
 	}
 }
 
-// TestInitQQAdapter_Enabled 测试启用的 QQ 适配器。
-func TestInitQQAdapter_Enabled(t *testing.T) {
-	state := &appState{
-		cfg: &config.Config{
-			QQ: config.QQConfig{
-				Enabled:       true,
-				AppID:         "test-app-id",
-				AppSecret:     "test-secret",
-				WebhookSecret: "test-secret",
-			},
-			AI: config.AIConfig{
-				Enabled: false, // AI 禁用
-			},
-		},
-		services: &services{},
-		info: matrix.BuildInfo{
-			Version: "test",
-		},
-	}
-
-	// initQQAdapter 会尝试创建适配器，但缺少完整配置可能失败
-	state.initQQAdapter()
-
-	// 由于没有真实的 QQ 配置，qqAdapter 可能为 nil
-	// 主要测试不会 panic
-}
-
-// TestInitQQAdapter_EnabledWithAI 测试启用 QQ 适配器并启用 AI。
-func TestInitQQAdapter_EnabledWithAI(t *testing.T) {
-	state := &appState{
-		cfg: &config.Config{
-			QQ: config.QQConfig{
-				Enabled:       true,
-				AppID:         "test-app-id",
-				AppSecret:     "test-secret",
-				WebhookSecret: "test-secret",
-			},
-			AI: config.AIConfig{
-				Enabled: false, // 简化测试，AI 仍然禁用
-			},
-		},
-		services: &services{},
-		info:     matrix.BuildInfo{},
-	}
-
-	state.initQQAdapter()
-}
-
-// TestInitQQAdapter_InvalidAppID 测试无效的 AppID。
-func TestInitQQAdapter_InvalidAppID(t *testing.T) {
-	state := &appState{
-		cfg: &config.Config{
-			QQ: config.QQConfig{
-				Enabled:       true,
-				AppID:         "", // 无效：空 AppID
-				AppSecret:     "test-secret",
-				WebhookSecret: "test-secret",
-			},
-			AI: config.AIConfig{
-				Enabled: false,
-			},
-		},
-		services: &services{},
-		info:     matrix.BuildInfo{},
-	}
-
-	state.initQQAdapter()
-
-	// 配置无效，qqAdapter 应该为 nil
-	if state.services.qqAdapter != nil {
-		t.Error("qqAdapter should be nil with invalid config")
-	}
-}
-
-// TestInitQQAdapter_SandboxMode 测试沙箱模式。
-func TestInitQQAdapter_SandboxMode(t *testing.T) {
-	state := &appState{
-		cfg: &config.Config{
-			QQ: config.QQConfig{
-				Enabled:       true,
-				AppID:         "test-app-id",
-				AppSecret:     "test-secret",
-				WebhookSecret: "test-token",
-				Sandbox:       true,
-			},
-			AI: config.AIConfig{
-				Enabled: false,
-			},
-		},
-		services: &services{},
-		info: matrix.BuildInfo{
-			Version: "test",
-		},
-	}
-
-	// 即使配置有效，缺少完整环境初始化可能失败
-	// 主要测试不会 panic
-	state.initQQAdapter()
-}
-
 // TestAutoJoinRooms_SingleRoom 测试单个房间自动加入。
 func TestAutoJoinRooms_SingleRoom(t *testing.T) {
 	state := &appState{
@@ -448,18 +348,11 @@ func TestStartSync_Config(t *testing.T) {
 				Enabled: true,
 			},
 		},
-		QQ: config.QQConfig{
-			Enabled: true,
-		},
 	}
 
 	// 验证配置
 	if !cfg.AI.Proactive.Enabled {
 		t.Error("Proactive should be enabled")
-	}
-
-	if !cfg.QQ.Enabled {
-		t.Error("QQ should be enabled")
 	}
 }
 
@@ -475,7 +368,6 @@ func TestShutdown_WithAllServicesNil(t *testing.T) {
 			aiService:        nil,
 			mcpManager:       nil,
 			proactiveManager: nil,
-			qqAdapter:        nil,
 		},
 	}
 
