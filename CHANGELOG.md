@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- 续接可跨过已取消但尚未执行的补充轮次，幂等保存已恢复上下文，避免丢失祖先任务目标或重复拼接轨迹
+
 - 增加 `!task logs <ID>` 和任务工具日志入口，发起人或本群管理员可取得失败、超时、取消及中断任务的完整执行记录与命令日志，逐文件加密并复用投递进度
 
 - 增加按平台、机器人账号和群精确配置的 `execution.task_admins`，允许管理员取消同群任务、暂停和删除计划，管理权限不隐含执行权限

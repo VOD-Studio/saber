@@ -92,6 +92,9 @@ func openStore(path string) (*store, error) {
   task_id INTEGER NOT NULL REFERENCES tasks(id), message_id TEXT NOT NULL,
   PRIMARY KEY(task_id, message_id)
  );
+ CREATE TABLE IF NOT EXISTS task_contexts (
+  task_id INTEGER PRIMARY KEY REFERENCES tasks(id)
+ );
  CREATE TABLE IF NOT EXISTS task_links (
   task_id INTEGER PRIMARY KEY REFERENCES tasks(id), parent_id INTEGER NOT NULL REFERENCES tasks(id)
  );` + scheduleSchema)
@@ -144,7 +147,7 @@ func (s *store) submit(ctx context.Context, message chat.Message, dir string, re
 		return Task{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	_, err = tx.ExecContext(ctx, `INSERT INTO tasks(platform, account, room, event, sender, work_dir, message, request, created_at)
+	inserted, err := tx.ExecContext(ctx, `INSERT INTO tasks(platform, account, room, event, sender, work_dir, message, request, created_at)
 		VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(platform,account,room,event) DO NOTHING`,
 		message.Session.Platform, message.Session.Account, message.Session.Conversation, message.ID, message.SenderID, dir, m, r, time.Now().UnixMilli())
 	if err != nil {
@@ -155,7 +158,11 @@ func (s *store) submit(ctx context.Context, message chat.Message, dir string, re
 	if err != nil {
 		return Task{}, err
 	}
-	if len(parent) > 0 && t.ID != parent[0] {
+	count, err := inserted.RowsAffected()
+	if err != nil {
+		return Task{}, err
+	}
+	if count > 0 && len(parent) > 0 && t.ID != parent[0] {
 		if _, err = tx.ExecContext(ctx, `INSERT INTO task_links(task_id,parent_id) VALUES(?,?) ON CONFLICT(task_id) DO NOTHING`, t.ID, parent[0]); err != nil {
 			return Task{}, err
 		}

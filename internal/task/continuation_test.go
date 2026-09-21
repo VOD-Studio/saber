@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/require"
 	"rua.plus/saber/internal/agent"
+	"rua.plus/saber/internal/chat"
 )
 
 func TestManager_ContinuationWaitsAndSurvivesRestart(t *testing.T) {
@@ -58,4 +60,40 @@ func TestManager_ContinuationWaitsAndSurvivesRestart(t *testing.T) {
 	wrong.ID = "wrong-dir"
 	_, err = m.Continue(ctx, wrong, t.TempDir(), request("steal"))
 	require.Error(t, err)
+}
+
+func TestManager_ContinuationThroughCancelledQueuedRound(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	s, err := openStore(filepath.Join(t.TempDir(), "tasks.db"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, s.db.Close()) }()
+	m := &Manager{store: s, ctx: ctx}
+	parent, err := m.Submit(ctx, message("source", "alice"), dir, request("original goal and constraints"))
+	require.NoError(t, err)
+	follow := message("follow", "alice")
+	follow.ReplyTo = "source"
+	child, err := m.Continue(ctx, follow, dir, request("additional constraint"))
+	require.NoError(t, err)
+	_, err = m.Cancel(ctx, chat.Identity{Session: follow.Session, SenderID: "alice"}, child.ID)
+	require.NoError(t, err)
+	latest := message("latest", "alice")
+	latest.ReplyTo = "source"
+	grandchild, err := m.Continue(ctx, latest, dir, request("continue"))
+	require.NoError(t, err)
+	req, err := m.continuationRequest(ctx, grandchild)
+	require.NoError(t, err)
+	require.Equal(t, "original goal and constraints", req.Messages[0].Content)
+	require.Contains(t, fmt.Sprint(req.Messages), "additional constraint")
+	stored, err := m.Get(ctx, latest.Session, grandchild.ID)
+	require.NoError(t, err)
+	again, err := m.continuationRequest(ctx, stored)
+	require.NoError(t, err)
+	require.Equal(t, req, again)
+	duplicate, err := m.Continue(ctx, follow, dir, request("changed"))
+	require.NoError(t, err)
+	require.Equal(t, child.ID, duplicate.ID)
+	var parentID int64
+	require.NoError(t, s.db.QueryRow(`SELECT parent_id FROM task_links WHERE task_id=?`, child.ID).Scan(&parentID))
+	require.Equal(t, parent.ID, parentID)
 }

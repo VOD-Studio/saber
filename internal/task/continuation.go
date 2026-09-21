@@ -58,6 +58,13 @@ func (m *Manager) Continue(ctx context.Context, message chat.Message, dir string
 }
 
 func (m *Manager) continuationRequest(ctx context.Context, t Task) (agent.Request, error) {
+	var ready bool
+	if err := m.store.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM task_contexts WHERE task_id=?)`, t.ID).Scan(&ready); err != nil {
+		return t.Request, err
+	}
+	if ready {
+		return t.Request, nil
+	}
 	var parentID int64
 	err := m.store.db.QueryRowContext(ctx, `SELECT parent_id FROM task_links WHERE task_id=?`, t.ID).Scan(&parentID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -70,7 +77,11 @@ func (m *Manager) continuationRequest(ctx context.Context, t Task) (agent.Reques
 	if err != nil {
 		return t.Request, err
 	}
-	messages := append([]openai.ChatCompletionMessage(nil), parent.Request.Messages...)
+	parentReq, err := m.continuationRequest(ctx, parent)
+	if err != nil {
+		return t.Request, err
+	}
+	messages := append([]openai.ChatCompletionMessage(nil), parentReq.Messages...)
 	rounds := parent.Result.Rounds
 	// 硬退出可能来不及保存 Result，使用已落盘的模型和工具完成事件恢复轨迹。
 	if len(rounds) == 0 {
@@ -128,6 +139,16 @@ func (m *Manager) continuationRequest(ctx context.Context, t Task) (agent.Reques
 	if err != nil {
 		return req, err
 	}
-	_, err = m.store.db.ExecContext(ctx, `UPDATE tasks SET request=? WHERE id=?`, data, t.ID)
-	return req, err
+	tx, err := m.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return req, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx, `UPDATE tasks SET request=? WHERE id=?`, data, t.ID); err != nil {
+		return req, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO task_contexts(task_id) VALUES(?) ON CONFLICT DO NOTHING`, t.ID); err != nil {
+		return req, err
+	}
+	return req, tx.Commit()
 }
