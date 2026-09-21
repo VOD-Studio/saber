@@ -2,7 +2,9 @@ name: CI / CD
 
 on:
   push:
-    branches: [ "master", "main", "develop" ]
+    # 推送到任意分支都运行（含 develop/feature/* 等），标签推送用于触发 Release
+    branches:
+      - '**'
     tags:
       - 'v*'
   pull_request:
