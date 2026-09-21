@@ -833,32 +833,11 @@ func DefaultConfigPath() string {
 	return filepath.Join(".", "config.yaml")
 }
 
-// checkFilePermissions 检查配置文件权限是否安全（仅允许 0600）
-func checkFilePermissions(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil // 文件不存在时不检查
-	}
-	perm := info.Mode().Perm()
-	if perm != 0o600 {
-		return fmt.Errorf("当前权限为 %o，期望为 0600", perm)
-	}
-	return nil
-}
-
 // Load 读取并解析指定路径的配置文件
 // 如果路径为空，则使用默认路径 (./config.yaml)
 func Load(path string) (*Config, error) {
 	if path == "" {
 		path = DefaultConfigPath()
-	}
-
-	// 检查文件权限
-	if err := checkFilePermissions(path); err != nil {
-		if os.Getenv("SABER_ALLOW_INSECURE_CONFIG") != "true" {
-			return nil, fmt.Errorf("配置文件权限不安全，拒绝加载: %w", err)
-		}
-		slog.Warn("配置文件权限过宽", "error", err)
 	}
 
 	data, err := os.ReadFile(path)
