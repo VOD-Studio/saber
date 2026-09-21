@@ -1,5 +1,5 @@
-// Package ai 提供 AI 服务相关功能。
-package ai
+// Package model 提供 AI 服务相关功能。
+package model
 
 import (
 	"fmt"

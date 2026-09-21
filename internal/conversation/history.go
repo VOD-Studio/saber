@@ -15,9 +15,12 @@ import (
 type MessageRole string
 
 const (
-	RoleUser      MessageRole = "user"
+	// RoleUser 表示入站用户消息。
+	RoleUser MessageRole = "user"
+	// RoleAssistant 表示 Agent 的最终回答。
 	RoleAssistant MessageRole = "assistant"
-	RoleSystem    MessageRole = "system"
+	// RoleSystem 表示系统提示。
+	RoleSystem MessageRole = "system"
 )
 
 // ChatMessage 表示存储在上下文中的单个聊天消息。
@@ -26,9 +29,9 @@ type ChatMessage struct {
 	Role MessageRole
 	// Content 表示消息文本内容。
 	Content string
-	// UserID 表示发送消息的 接入账号内的用户 ID。
+	// UserID 表示发送消息的接入账号内用户 ID。
 	UserID string
-	// RoomID 表示消息所在的 带平台和账号作用域的会话键。
+	// RoomID 表示消息所在的带平台和账号作用域的会话键。
 	RoomID chat.SessionID
 	// Timestamp 表示消息发送时间。
 	Timestamp time.Time

@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"maunium.net/go/mautrix/id"
+	"rua.plus/saber/internal/chat"
+	"rua.plus/saber/internal/matrix"
 )
 
 // AICommand 处理默认的 AI 聊天命令。
@@ -104,7 +106,10 @@ func (c *ClearContextCommand) Handle(ctx context.Context, userID id.UserID, room
 		return c.service.matrixService.SendText(ctx, roomID, "上下文管理未启用")
 	}
 
-	c.service.contextManager.ClearContext(roomID)
+	session := chat.Session{Platform: "matrix", Account: c.service.contextManager.account, Conversation: string(roomID), Thread: string(matrix.GetThreadID(ctx))}
+	if err := c.service.chatProcessor.Clear(ctx, session); err != nil {
+		return err
+	}
 
 	html := "<strong>✅ 对话上下文已清除</strong>"
 	plain := "✅ 对话上下文已清除"
@@ -142,7 +147,8 @@ func (c *ContextInfoCommand) Handle(ctx context.Context, userID id.UserID, roomI
 		return c.service.matrixService.SendText(ctx, roomID, "上下文管理未启用")
 	}
 
-	msgCount, tokenCount := c.service.contextManager.GetContextSize(roomID)
+	session := chat.Session{Platform: "matrix", Account: c.service.contextManager.account, Conversation: string(roomID), Thread: string(matrix.GetThreadID(ctx))}
+	msgCount, tokenCount := c.service.contextManager.history.GetContextSize(session.Key())
 
 	html := `<table>
 <thead><tr><th colspan="2">📊 对话上下文信息</th></tr></thead>

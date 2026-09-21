@@ -934,13 +934,11 @@ func TestGenerateWelcomeMessage_IsDirect(t *testing.T) {
 	}
 
 	// 创建一个带有 core 的 Service，Enabled=false 表示 AI 未启用
-	aiService := &Service{
-		core: &Core{
-			globalConfig: &config.AIConfig{
-				Enabled: false,
-			},
-		},
+	core, coreErr := NewCore(&config.AIConfig{Enabled: false})
+	if coreErr != nil {
+		t.Fatal(coreErr)
 	}
+	aiService := &Service{core: core}
 	roomService := &matrix.RoomService{}
 	globalAIConfig := &config.AIConfig{}
 

@@ -1,5 +1,5 @@
-// Package ai_test 包含 AI 客户端的单元测试。
-package ai
+// Package model_test 包含 AI 客户端的单元测试。
+package model
 
 import (
 	"context"

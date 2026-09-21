@@ -814,6 +814,11 @@ meme:
 
 ## 架构
 
+Saber 的聊天入口通过 `chat.Handler` 进入统一的 `conversation.Processor`，由 Agent Runtime 执行任务。
+Matrix 和内存 adapter 共用消息、会话和回复契约；核心 `agent`、`chat`、`conversation`、`model`、`mcp` 不依赖 Matrix SDK。
+当前应用启动与平台专用命令仍保留 Matrix 装配，其他实际平台的启动入口后续按需接入。
+接口、会话隔离及验收命令见 [通用聊天接入](docs/chat-adapters.md)。
+
 ```
 saber/
   main.go                          # 入口点
@@ -846,6 +851,7 @@ saber/
       client.go                    # Matrix 客户端封装
       crypto.go                    # E2EE 支持
       handlers.go                  # 事件处理和命令分发
+      chat_adapter.go              # 通用消息、媒体和回复契约适配
       presence.go                  # 在线状态管理
       rooms.go                     # 房间操作
       context.go                   # 上下文工具
@@ -859,20 +865,23 @@ saber/
         version.go                 # !version 命令
         ai.go                      # AI 命令处理
         meme.go                    # Meme 命令
-    ai/
-      service.go                   # AI 服务编排
-      agent.go                     # Agent 模型/MCP 适配与 Matrix 事件展示
-      core.go                      # 核心逻辑（客户端缓存、速率限制）
+    model/                         # 不依赖聊天平台的模型核心
+      core.go                      # 客户端缓存和请求限流
       client.go                    # OpenAI 兼容客户端
-      strategy.go                  # AI 提供商策略模式
-      model_registry.go            # 多模型注册管理
-      commands.go                  # AI 命令路由
-      context_manager.go           # 对话上下文管理
-      stream_handler.go            # 流式响应处理
-      stream_editor.go             # 流式消息编辑
-      stream_tool_handler.go       # 模型增量拼接与运行事件（无 Matrix 操作）
+      strategy.go                  # 提供商策略
+      model_registry.go            # 模型注册与选择
+      agent.go                     # Runtime 模型接口适配
+      stream_tool_handler.go       # 模型增量拼接
       retry_handler.go             # 重试逻辑和退避
-      circuit_breaker.go           # 熔断器模式
+      circuit_breaker.go           # 熔断器
+    ai/                            # 应用装配与旧 Matrix 命令兼容层
+      service.go                   # 装配通用聊天处理器
+      agent.go                     # 模型/MCP 装配与旧回复入口兼容
+      model_compat.go              # 旧模型名称兼容，不包含重复实现
+      commands.go                  # Matrix AI 命令路由
+      context_manager.go           # Matrix 历史命令适配通用存储
+      stream_handler.go            # 旧流式处理入口
+      stream_editor.go             # 旧 Matrix 编辑器
       proactive.go                 # 主动聊天管理器
       proactive_triggers.go        # 触发器实现（静默/定时）
       proactive_state.go           # 房间状态跟踪

@@ -4,8 +4,6 @@ package mcp
 import (
 	"log/slog"
 	"time"
-
-	"maunium.net/go/mautrix/id"
 )
 
 // debugMode 控制是否启用详细日志记录。
@@ -21,7 +19,7 @@ func SetDebugMode(enabled bool) {
 //
 // 记录工具名称、服务器名称、用户 ID、房间 ID 等基本信息。
 // 在调试模式下，还会记录经过脱敏处理的参数。
-func LogToolCall(serverName, toolName string, userID id.UserID, roomID id.RoomID, args map[string]any) {
+func LogToolCall(serverName, toolName string, userID string, roomID string, args map[string]any) {
 	slog.Info("MCP tool call",
 		"server", serverName,
 		"tool", toolName,

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"maunium.net/go/mautrix/id"
+	"rua.plus/saber/internal/chat"
 )
 
 // WithUserContext 将用户 ID 和房间 ID 添加到上下文中。
@@ -24,6 +25,10 @@ import (
 //	ctx := WithUserContext(context.Background(), userID, roomID)
 //	userID, ok := GetUserFromContext(ctx)
 func WithUserContext(ctx context.Context, userID id.UserID, roomID id.RoomID) context.Context {
+	// 兼容仍使用旧 Matrix 上下文的调用方；新聊天链路会提供完整账号作用域。
+	if _, ok := chat.IdentityFromContext(ctx); !ok {
+		ctx = chat.WithIdentity(ctx, chat.Identity{Session: chat.Session{Platform: "matrix", Account: "legacy", Conversation: string(roomID)}, SenderID: string(userID)})
+	}
 	ctx = WithValue(ctx, UserIDKey, userID)
 	return WithValue(ctx, RoomIDKey, roomID)
 }

@@ -164,3 +164,22 @@ func contextStatus(err error) agent.Status {
 	}
 	return agent.Cancelled
 }
+
+// Clear 在当前会话运行结束后清除历史，防止未完成的回答在清空后重新写回。
+func (p *Processor) Clear(ctx context.Context, session chat.Session) error {
+	if err := session.Validate(); err != nil {
+		return err
+	}
+	release, err := p.acquire(ctx, session.Key())
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if p.History != nil {
+		p.History.ClearContext(session.Key())
+	}
+	return nil
+}

@@ -1,5 +1,5 @@
-// Package ai_test 包含上下文管理器的单元测试。
-package ai
+// Package conversation 包含上下文管理器的单元测试。
+package conversation
 
 import (
 	"fmt"
@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"maunium.net/go/mautrix/id"
+	"rua.plus/saber/internal/chat"
 
 	"rua.plus/saber/internal/config"
 )
@@ -77,8 +77,8 @@ func TestNewContextManager(t *testing.T) {
 //   - 消息数量限制
 //   - 不同角色的消息
 func TestContextManager_AddMessage(t *testing.T) {
-	roomID := id.RoomID("!test:example.com")
-	userID := id.UserID("@user:example.com")
+	roomID := chat.SessionID("!test:example.com")
+	userID := string("@user:example.com")
 
 	tests := []struct {
 		name     string
@@ -195,10 +195,10 @@ func TestContextManager_AddMessage(t *testing.T) {
 func TestContextManager_AddMessage_MultipleRooms(t *testing.T) {
 	cm := NewContextManager(config.ContextConfig{MaxMessages: 10, MaxTokens: 0, ExpiryMinutes: 0})
 
-	room1 := id.RoomID("!room1:example.com")
-	room2 := id.RoomID("!room2:example.com")
-	room3 := id.RoomID("!room3:example.com")
-	userID := id.UserID("@user:example.com")
+	room1 := chat.SessionID("!room1:example.com")
+	room2 := chat.SessionID("!room2:example.com")
+	room3 := chat.SessionID("!room3:example.com")
+	userID := string("@user:example.com")
 
 	// 向不同房间添加消息
 	cm.AddMessage(room1, RoleUser, "Room 1 message 1", userID)
@@ -233,13 +233,13 @@ func TestContextManager_AddMessage_MultipleRooms(t *testing.T) {
 //   - 获取不存在的房间上下文
 //   - OpenAI 消息格式转换
 func TestContextManager_GetContext(t *testing.T) {
-	roomID := id.RoomID("!test:example.com")
-	userID := id.UserID("@user:example.com")
+	roomID := chat.SessionID("!test:example.com")
+	userID := string("@user:example.com")
 
 	tests := []struct {
 		name        string
 		setup       func(*ContextManager)
-		roomID      id.RoomID
+		roomID      chat.SessionID
 		wantLen     int
 		wantRoles   []string
 		wantContent []string
@@ -306,13 +306,13 @@ func TestContextManager_GetContext(t *testing.T) {
 //   - 清除不存在的房间上下文
 //   - 清除后再次添加消息
 func TestContextManager_ClearContext(t *testing.T) {
-	roomID := id.RoomID("!test:example.com")
-	userID := id.UserID("@user:example.com")
+	roomID := chat.SessionID("!test:example.com")
+	userID := string("@user:example.com")
 
 	tests := []struct {
 		name    string
 		setup   func(*ContextManager)
-		clearID id.RoomID
+		clearID chat.SessionID
 		wantLen int
 	}{
 		{
@@ -371,8 +371,8 @@ func TestContextManager_ClearContext(t *testing.T) {
 //   - 正确计算消息数量
 //   - 正确估算令牌数量
 func TestContextManager_GetContextSize(t *testing.T) {
-	roomID := id.RoomID("!test:example.com")
-	userID := id.UserID("@user:example.com")
+	roomID := chat.SessionID("!test:example.com")
+	userID := string("@user:example.com")
 
 	tests := []struct {
 		name      string
@@ -437,7 +437,7 @@ func TestContextManager_GetContextSize(t *testing.T) {
 //   - 多个房间正确返回
 //   - 清除房间后列表更新
 func TestContextManager_ListActiveRooms(t *testing.T) {
-	userID := id.UserID("@user:example.com")
+	userID := string("@user:example.com")
 
 	tests := []struct {
 		name    string
@@ -468,7 +468,7 @@ func TestContextManager_ListActiveRooms(t *testing.T) {
 		{
 			name: "清除后",
 			setup: func(cm *ContextManager) {
-				roomID := id.RoomID("!room1:example.com")
+				roomID := chat.SessionID("!room1:example.com")
 				cm.AddMessage(roomID, RoleUser, "Hello", userID)
 				cm.AddMessage("!room2:example.com", RoleUser, "World", userID)
 				cm.ClearContext(roomID)
@@ -497,8 +497,8 @@ func TestContextManager_ListActiveRooms(t *testing.T) {
 //   - 消息从开头移除
 //   - 零值 MaxTokens 不截断
 func TestContextManager_TokenTruncation(t *testing.T) {
-	roomID := id.RoomID("!test:example.com")
-	userID := id.UserID("@user:example.com")
+	roomID := chat.SessionID("!test:example.com")
+	userID := string("@user:example.com")
 
 	// 每个 "test message" 约 14 个字符 = ~18 tokens
 	// 我们创建多个消息来测试截断
@@ -555,8 +555,8 @@ func TestContextManager_TokenTruncation(t *testing.T) {
 //   - 两个限制同时生效
 //   - 更严格的限制优先
 func TestContextManager_MessageAndTokenLimit(t *testing.T) {
-	roomID := id.RoomID("!test:example.com")
-	userID := id.UserID("@user:example.com")
+	roomID := chat.SessionID("!test:example.com")
+	userID := string("@user:example.com")
 
 	tests := []struct {
 		name        string
@@ -615,8 +615,8 @@ func TestContextManager_MessageAndTokenLimit(t *testing.T) {
 //   - 消息正确过期
 //   - 部分消息过期
 func TestContextManager_ExpiryCleanup(t *testing.T) {
-	roomID := id.RoomID("!test:example.com")
-	userID := id.UserID("@user:example.com")
+	roomID := chat.SessionID("!test:example.com")
+	userID := string("@user:example.com")
 
 	t.Run("no expiry when ExpiryMinutes is zero", func(t *testing.T) {
 		cm := NewContextManager(config.ContextConfig{
@@ -729,7 +729,7 @@ func TestContextManager_ExpiryCleanup(t *testing.T) {
 		})
 
 		oldTime := time.Now().Add(-5 * time.Minute)
-		room2 := id.RoomID("!room2:example.com")
+		room2 := chat.SessionID("!room2:example.com")
 
 		cm.mu.Lock()
 		cm.contexts[roomID] = []ChatMessage{
@@ -754,8 +754,14 @@ func TestContextManager_ExpiryCleanup(t *testing.T) {
 
 		cm.AddMessage(room2, RoleUser, "New message in room2", userID)
 
-		if len(cm.GetContext(roomID)) != 1 {
-			t.Error("Room 1 should not be cleaned up (lazy cleanup only cleans current room)")
+		cm.mu.RLock()
+		untouched := len(cm.contexts[roomID])
+		cm.mu.RUnlock()
+		if untouched != 1 {
+			t.Error("adding to another session should not scan this session")
+		}
+		if len(cm.GetContext(roomID)) != 0 {
+			t.Error("reading history must discard expired messages before model assembly")
 		}
 		if len(cm.GetContext(room2)) != 1 {
 			t.Error("Room 2 should have 1 message (old expired, new kept)")
@@ -776,9 +782,9 @@ func TestContextManager_ExpiryCleanup(t *testing.T) {
 //   - 活跃房间不受影响
 //   - 清理后 lastActivity 记录也被删除
 func TestContextManager_InactiveRoomCleanup(t *testing.T) {
-	roomID := id.RoomID("!inactive:example.com")
-	activeRoomID := id.RoomID("!active:example.com")
-	userID := id.UserID("@user:example.com")
+	roomID := chat.SessionID("!inactive:example.com")
+	activeRoomID := chat.SessionID("!active:example.com")
+	userID := string("@user:example.com")
 
 	t.Run("no cleanup when InactiveRoomHours is zero", func(t *testing.T) {
 		cm := NewContextManager(config.ContextConfig{
@@ -953,8 +959,8 @@ func TestContextManager_Concurrency(t *testing.T) {
 				errChan <- nil
 			}()
 
-			roomID := id.RoomID(fmt.Sprintf("!room%d:example.com", idx%10))
-			userID := id.UserID("@user:example.com")
+			roomID := chat.SessionID(fmt.Sprintf("!room%d:example.com", idx%10))
+			userID := string("@user:example.com")
 
 			for j := range messagesPerGoroutine {
 				cm.AddMessage(roomID, RoleUser, fmt.Sprintf("Message %d-%d", idx, j), userID)
@@ -973,7 +979,7 @@ func TestContextManager_Concurrency(t *testing.T) {
 				errChan <- nil
 			}()
 
-			roomID := id.RoomID("!room0:example.com")
+			roomID := chat.SessionID("!room0:example.com")
 			_ = cm.GetContext(roomID)
 		}()
 	}
@@ -989,7 +995,7 @@ func TestContextManager_Concurrency(t *testing.T) {
 				errChan <- nil
 			}()
 
-			roomID := id.RoomID("!room0:example.com")
+			roomID := chat.SessionID("!room0:example.com")
 			_, _ = cm.GetContextSize(roomID)
 		}()
 	}
@@ -1033,8 +1039,8 @@ func TestContextManager_Concurrency_SameRoom(t *testing.T) {
 	const goroutines = 100
 	const messagesPerGoroutine = 10
 
-	roomID := id.RoomID("!test:example.com")
-	userID := id.UserID("@user:example.com")
+	roomID := chat.SessionID("!test:example.com")
+	userID := string("@user:example.com")
 
 	cm := NewContextManager(config.ContextConfig{
 		MaxMessages:   goroutines * messagesPerGoroutine, // 足够大以容纳所有消息
@@ -1072,8 +1078,8 @@ func TestContextManager_Concurrency_SameRoom(t *testing.T) {
 //   - Unicode 字符处理
 //   - 特殊字符处理
 func TestContextManager_BoundaryCases(t *testing.T) {
-	roomID := id.RoomID("!test:example.com")
-	userID := id.UserID("@user:example.com")
+	roomID := chat.SessionID("!test:example.com")
+	userID := string("@user:example.com")
 
 	tests := []struct {
 		name    string
@@ -1158,8 +1164,8 @@ func TestContextManager_BoundaryCases(t *testing.T) {
 //
 // 该测试使用竞态检测器验证并发安全性。
 func TestContextManager_RaceCondition(t *testing.T) {
-	roomID := id.RoomID("!test:example.com")
-	userID := id.UserID("@user:example.com")
+	roomID := chat.SessionID("!test:example.com")
+	userID := string("@user:example.com")
 
 	cm := NewContextManager(config.ContextConfig{
 		MaxMessages:   100,
@@ -1211,8 +1217,8 @@ func TestContextManager_RaceCondition(t *testing.T) {
 //
 // 该测试验证令牌估算公式是否正确应用。
 func TestContextManager_TokenEstimationAccuracy(t *testing.T) {
-	roomID := id.RoomID("!test:example.com")
-	userID := id.UserID("@user:example.com")
+	roomID := chat.SessionID("!test:example.com")
+	userID := string("@user:example.com")
 
 	tests := []struct {
 		name      string
@@ -1264,8 +1270,8 @@ func TestContextManager_TokenEstimationAccuracy(t *testing.T) {
 //   - 消息按添加顺序存储
 //   - 截断后保留最新消息
 func TestContextManager_MessageOrder(t *testing.T) {
-	roomID := id.RoomID("!test:example.com")
-	userID := id.UserID("@user:example.com")
+	roomID := chat.SessionID("!test:example.com")
+	userID := string("@user:example.com")
 
 	t.Run("message order preserved", func(t *testing.T) {
 		cm := NewContextManager(config.ContextConfig{
@@ -1315,8 +1321,8 @@ func TestContextManager_MessageOrder(t *testing.T) {
 //   - 所有配置为零值时正确工作
 //   - 不应用任何限制
 func TestContextManager_ZeroConfig(t *testing.T) {
-	roomID := id.RoomID("!test:example.com")
-	userID := id.UserID("@user:example.com")
+	roomID := chat.SessionID("!test:example.com")
+	userID := string("@user:example.com")
 
 	cm := NewContextManager(config.ContextConfig{
 		Enabled:       false,
@@ -1339,8 +1345,8 @@ func TestContextManager_ZeroConfig(t *testing.T) {
 
 // TestContextManager_ClearMultipleTimes 测试多次清除同一房间。
 func TestContextManager_ClearMultipleTimes(t *testing.T) {
-	roomID := id.RoomID("!test:example.com")
-	userID := id.UserID("@user:example.com")
+	roomID := chat.SessionID("!test:example.com")
+	userID := string("@user:example.com")
 
 	cm := NewContextManager(config.ContextConfig{})
 
@@ -1358,7 +1364,7 @@ func TestContextManager_ClearMultipleTimes(t *testing.T) {
 
 // TestContextManager_NilUserID 测试空 UserID 处理。
 func TestContextManager_NilUserID(t *testing.T) {
-	roomID := id.RoomID("!test:example.com")
+	roomID := chat.SessionID("!test:example.com")
 
 	cm := NewContextManager(config.ContextConfig{
 		MaxMessages:   10,

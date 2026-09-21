@@ -19,7 +19,7 @@ result, err := runtime.Run(ctx, request, emit)
 Runtime 检查工具是否在本次请求提供的工具列表中，并解析 JSON 对象参数；具体参数 schema 和执行授权仍由工具实现检查。
 
 `ai.Service.RunAgent` 接入现有模型客户端和 MCP，返回完整轨迹，可以在 Matrix 为 nil 时调用。
-调用真实 MCP 仍要求现有身份上下文，后续通用聊天接入阶段再调整这一契约。
+调用真实 MCP 使用 `chat.WithIdentity` 设置平台、账号、会话和发送者；通用聊天处理器会自动注入。
 普通聊天入口通过同一个 Runtime，主动聊天的简单生成接口暂保留现有行为。
 
 ## 限制与终态
@@ -49,7 +49,7 @@ Run 串行发送事件：`run_started`、`model_started`、`attempt_started`、`
 
 事件回调可为 nil；非空时不得修改事件内引用的数据，必须及时返回。
 模型 adapter 只能在当前请求内串行发送模型事件，返回后不得继续发送。
-Matrix adapter 复用编辑器的阈值和节流，在重试开始时重置当前尝试的文本缓冲；最终发送错误不会重跑 Agent。
+通用 Presenter 按 adapter 能力处理阈值和节流，在重试开始时重置当前尝试的文本缓冲；最终发送错误不会重跑 Agent。
 
 取消在每次模型请求及每个工具派发前后检查，包括重试等待。运行时不通过遗留后台 goroutine 模拟取消；不遵守 context 的工具必须在其 adapter 内修复。
 
@@ -65,7 +65,10 @@ go test -race -tags goolm ./internal/agent
 真实客户端的本地 HTTP/MCP 协议与展示 adapter 回归（仅 httptest，本地模拟服务）：
 
 ```sh
-go test -v -tags goolm ./internal/ai -run 'TestAgent|TestService_RunAgent'
+go test -v -tags goolm ./internal/model -run TestAgentModel
+go test -v -tags goolm ./internal/ai -run 'TestService_RunAgent|TestService_HandleChat'
 ```
 
 覆盖工具失败后修正参数、流式与非流式一致性、取消后不派发第二个工具、超时与轮数预算、输出截断、模型重试不重放工具、MCP 协议失败和展示失败不重跑任务。
+
+通用消息与平台接入契约见 [聊天 adapter](chat-adapters.md)。

@@ -175,13 +175,13 @@ func TestRateLimiter_Basic(t *testing.T) {
 
 	// 前 10 次应该允许
 	for i := range 10 {
-		if !limiter.Allow(userID, roomID) {
+		if !limiter.Allow(string(userID), string(roomID)) {
 			t.Errorf("request %d should be allowed", i+1)
 		}
 	}
 
 	// 第 11 次应该被拒绝
-	if limiter.Allow(userID, roomID) {
+	if limiter.Allow(string(userID), string(roomID)) {
 		t.Error("request 11 should be denied")
 	}
 }

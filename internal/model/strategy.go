@@ -1,4 +1,4 @@
-package ai
+package model
 
 import (
 	"github.com/sashabaranov/go-openai"

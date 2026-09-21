@@ -1,33 +1,20 @@
-// Package ai 提供 AI 服务相关功能，包括对话管理、流式响应和工具调用。
-//
-// 该包封装了 OpenAI 兼容的 API 客户端，支持：
-//   - 流式和非流式对话
-//   - 上下文管理（每个房间独立的持久化对话历史）
-//   - MCP 工具调用（让 AI 执行实际操作）
-//   - 主动聊天功能（AI 驱动的主动消息）
-//
-// 主要组件：
-//   - Service: AI 服务编排器，协调所有 AI 相关操作
-//   - Client: OpenAI 兼容的 API 客户端
-//   - ContextManager: 对话上下文管理器
-//   - StreamHandler: 流式响应处理器
-//   - ProactiveManager: 主动聊天管理器
-//   - MessageBuilder: 消息构建器
-//   - ResponseHandler: 响应处理器
-//   - ToolExecutor: 工具执行器
+// Package ai 保留应用装配和 Matrix 专用命令、人格及主动聊天的兼容入口。
+// 模型核心位于 model，消息处理与历史位于 conversation，平台协议位于 matrix。
 package ai
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
+	"time"
 
 	"github.com/sashabaranov/go-openai"
 	"maunium.net/go/mautrix/id"
 
+	"rua.plus/saber/internal/agent"
+	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
-	appcontext "rua.plus/saber/internal/context"
+	"rua.plus/saber/internal/conversation"
 	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/mcp"
 )
@@ -38,7 +25,7 @@ type PromptProvider interface {
 	GetSystemPrompt(roomID id.RoomID, basePrompt string) string
 }
 
-// Service 是 AI 服务的核心结构体。
+// Service 装配模型、通用聊天处理器以及旧 Matrix 命令兼容入口。
 type Service struct {
 	// core 是共享核心逻辑。
 	core *Core
@@ -52,8 +39,8 @@ type Service struct {
 	mediaService *matrix.MediaService
 	// promptProvider 是提示词提供者（可选字段）。
 	promptProvider PromptProvider
-	// msgBuilder 是消息构建器。
-	msgBuilder *MessageBuilder
+	// chatProcessor 是所有聊天平台共享的消息处理链路。
+	chatProcessor *conversation.Processor
 	// respHandler 是响应处理器。
 	respHandler *ResponseHandler
 	// toolExecutor 是工具执行器。
@@ -97,13 +84,23 @@ func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpM
 		contextManager: contextManager,
 		mcpManager:     mcpManager,
 		mediaService:   mediaService,
-		msgBuilder:     NewMessageBuilder(),
 		respHandler:    NewResponseHandler(nil), // 将在下面重新初始化
 		toolExecutor:   NewToolExecutor(nil),    // 将在下面重新初始化
 	}
 
 	// 重新初始化处理器（需要 Service 实例）
 	service.respHandler = NewResponseHandler(service)
+	var history *conversation.ContextManager
+	if contextManager != nil {
+		if matrixService != nil {
+			contextManager.account = string(matrixService.BotID())
+		}
+		history = contextManager.history
+	}
+	service.chatProcessor = &conversation.Processor{
+		Run: service.RunAgent, History: history, Timeout: time.Duration(cfg.ToolCalling.TimeoutSeconds) * time.Second,
+		Display: displayConfig(cfg.StreamEdit),
+	}
 	service.toolExecutor = NewToolExecutor(service)
 
 	slog.Info("AI服务初始化完成",
@@ -343,112 +340,50 @@ func (s *Service) GenerateStreamingSimpleResponse(ctx context.Context, modelName
 	return resp.Content, nil
 }
 
-// handleAICommand 处理 AI 命令的核心逻辑。
+// handleAICommand 保留 Matrix 命令入口，消息规范化和媒体下载由 Matrix adapter 完成。
 func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID id.RoomID, modelName string, args []string) error {
-	ctx = appcontext.WithUserContext(ctx, userID, roomID)
-
-	if !s.IsEnabled() {
-		return fmt.Errorf("AI功能未启用")
-	}
-
-	if err := s.core.WaitForRateLimit(ctx); err != nil {
-		return fmt.Errorf("AI请求速率限制: %w", err)
-	}
-
-	userInput := strings.Join(args, " ")
-	if userInput == "" {
-		return fmt.Errorf("请输入要发送给AI的消息")
-	}
-
-	if s.contextManager != nil {
-		s.contextManager.AddMessage(roomID, RoleUser, userInput, userID)
-	}
-
-	// 检查是否有媒体信息（当前消息的图片）
-	mediaInfo := matrix.GetMediaInfo(ctx)
-	// 检查是否有引用消息的媒体信息（引用消息中的图片）
-	referencedMediaInfo := matrix.GetReferencedMediaInfo(ctx)
-
-	var messages []openai.ChatCompletionMessage
-	hasImage := false
-
-	// 收集所有需要下载的图片
-	var imageDataList []string
-	imageCount := 0
-
 	cfg := s.core.GetConfig()
+	adapter := matrix.NewChatAdapter(s.matrixService, s.mediaService, cfg.Media, cfg.StreamEdit.Enabled, func(ctx context.Context, message chat.Message, reply chat.Adapter) (agent.Result, error) {
+		return s.handleChat(ctx, message, reply, modelName)
+	})
+	return adapter.Handle(ctx, userID, roomID, args)
+}
 
-	// 处理当前消息的图片
-	if mediaInfo != nil && mediaInfo.Type == "image" && s.mediaService != nil && cfg.Media.Enabled {
-		imageData, err := s.mediaService.DownloadImage(ctx, mediaInfo)
-		if err != nil {
-			slog.Warn("下载当前消息图片失败", "error", err)
-		} else {
-			imageDataList = append(imageDataList, imageData)
-			imageCount++
-			slog.Debug("下载当前消息图片成功", "image_count", imageCount)
-		}
+// HandleChat 是内存或其他聊天 adapter 可复用的统一消息入口。
+func (s *Service) HandleChat(ctx context.Context, message chat.Message, reply chat.Adapter) (agent.Result, error) {
+	return s.handleChat(ctx, message, reply, s.GetModelRegistry().GetDefault())
+}
+
+func (s *Service) handleChat(ctx context.Context, message chat.Message, reply chat.Adapter, modelName string) (agent.Result, error) {
+	if !s.IsEnabled() {
+		return agent.Result{}, fmt.Errorf("AI功能未启用")
 	}
-
-	// 处理引用消息的图片
-	if referencedMediaInfo != nil && referencedMediaInfo.Type == "image" && s.mediaService != nil && cfg.Media.Enabled {
-		imageData, err := s.mediaService.DownloadImage(ctx, referencedMediaInfo)
-		if err != nil {
-			slog.Warn("下载引用消息图片失败", "error", err)
-		} else {
-			imageDataList = append(imageDataList, imageData)
-			imageCount++
-			slog.Debug("下载引用消息图片成功", "image_count", imageCount)
-		}
+	if err := message.Validate(); err != nil {
+		return agent.Result{}, err
 	}
-
-	// 根据图片数量构建消息
-	if imageCount > 0 {
-		hasImage = true
-		if imageCount == 1 {
-			// 单图片情况
-			messages = s.msgBuilder.BuildMultimodalMessages(s, ctx, roomID, userInput, imageDataList[0])
-		} else {
-			// 多图片情况
-			messages = s.msgBuilder.BuildMultiImageMessages(s, ctx, roomID, userInput, imageDataList)
-		}
-		slog.Debug("构建多模态消息", "has_image", true, "image_count", imageCount)
-	} else {
-		messages = s.msgBuilder.BuildTextMessages(s, roomID, userInput)
+	if err := s.core.WaitForRateLimit(ctx); err != nil {
+		return agent.Result{}, fmt.Errorf("AI请求速率限制: %w", err)
 	}
-
-	// 如果有图片且配置了专用模型，使用专用模型
-	actualModel := modelName
-	if hasImage && cfg.Media.Model != "" {
-		actualModel = cfg.Media.Model
-		slog.Debug("使用图片识别专用模型", "media_model", actualModel, "default_model", modelName)
+	cfg := s.core.GetConfig()
+	if len(message.Attachments) > 0 && cfg.Media.Model != "" {
+		modelName = cfg.Media.Model
 	}
-
-	req := ChatCompletionRequest{
-		Messages:    messages,
-		Stream:      cfg.StreamEnabled,
-		MaxTokens:   cfg.MaxTokens,
-		Temperature: cfg.Temperature,
-		Model:       actualModel,
+	prompt := cfg.SystemPrompt
+	// 人格服务仍是 Matrix 账号的适配能力，不将 Matrix 房间含义扩散到其他平台。
+	if message.Session.Platform == "matrix" && s.promptProvider != nil {
+		prompt = s.promptProvider.GetSystemPrompt(id.RoomID(message.Session.Conversation), prompt)
 	}
-
-	slog.Debug("AI请求准备完成",
-		"model", actualModel,
-		"messages_count", len(messages),
-		"stream", cfg.StreamEnabled,
-		"max_tokens", cfg.MaxTokens,
-		"temperature", cfg.Temperature)
-
-	tools, _ := s.toolExecutor.PrepareTools()
-	req.Tools = tools
-	req.Stream = cfg.StreamEnabled && cfg.StreamEdit.Enabled
-	_, err := s.runAgentReply(ctx, req, roomID, nil)
-
-	if err != nil {
-		slog.Error("AI命令执行失败", "error", err)
-	} else {
-		slog.Debug("AI命令执行成功")
+	req := agent.Request{Model: modelName, Stream: cfg.StreamEnabled, MaxTokens: cfg.MaxTokens, Temperature: cfg.Temperature}
+	if prompt != "" {
+		req.Messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleSystem, Content: prompt}}
 	}
+	req.Tools, _ = s.toolExecutor.PrepareTools()
+	return s.chatProcessor.Handle(ctx, message, req, reply)
+}
 
-	return err
+func displayConfig(cfg config.StreamEditConfig) chat.Display {
+	return chat.Display{
+		CharThreshold: cfg.CharThreshold, TimeThreshold: time.Duration(cfg.TimeThresholdMs) * time.Millisecond,
+		EditInterval: time.Duration(cfg.EditIntervalMs) * time.Millisecond, MaxEdits: cfg.MaxEdits,
+	}
 }

@@ -5,8 +5,6 @@ package mcp
 import (
 	"testing"
 	"time"
-
-	"maunium.net/go/mautrix/id"
 )
 
 func TestSetDebugMode(t *testing.T) {
@@ -28,8 +26,8 @@ func TestLogToolCall(t *testing.T) {
 	LogToolCall(
 		"test_server",
 		"test_tool",
-		id.UserID("@user:example.com"),
-		id.RoomID("!room:example.com"),
+		string("@user:example.com"),
+		string("!room:example.com"),
 		map[string]any{"url": "https://example.com"},
 	)
 }
@@ -38,8 +36,8 @@ func TestLogToolCall_NilArgs(t *testing.T) {
 	LogToolCall(
 		"test_server",
 		"test_tool",
-		id.UserID("@user:example.com"),
-		id.RoomID("!room:example.com"),
+		string("@user:example.com"),
+		string("!room:example.com"),
 		nil,
 	)
 }

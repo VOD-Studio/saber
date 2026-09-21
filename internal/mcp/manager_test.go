@@ -8,6 +8,7 @@ import (
 
 	"maunium.net/go/mautrix/id"
 
+	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
 	appcontext "rua.plus/saber/internal/context"
 )
@@ -350,24 +351,9 @@ func TestNewTestMCPServerWithFixtures(t *testing.T) {
 }
 
 func TestNewTestUserContext(t *testing.T) {
-	ctx := NewTestUserContext(1, 2)
-
-	userID, ok := appcontext.GetUserFromContext(ctx)
-	if !ok {
-		t.Error("GetUserFromContext should return ok=true")
-	}
-	expectedUser := id.UserID("@user1:example.com")
-	if userID != expectedUser {
-		t.Errorf("userID = %q, want %q", userID, expectedUser)
-	}
-
-	roomID, ok := appcontext.GetRoomFromContext(ctx)
-	if !ok {
-		t.Error("GetRoomFromContext should return ok=true")
-	}
-	expectedRoom := id.RoomID("!room2:example.com")
-	if roomID != expectedRoom {
-		t.Errorf("roomID = %q, want %q", roomID, expectedRoom)
+	identity, ok := chat.IdentityFromContext(NewTestUserContext(1, 2))
+	if !ok || identity.SenderID != "@user1:example.com" || identity.Session.Conversation != "!room2:example.com" || identity.Session.Platform != "memory" {
+		t.Fatalf("invalid identity: %+v", identity)
 	}
 }
 

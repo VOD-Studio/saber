@@ -135,10 +135,10 @@ func TestProcessor_QueueCancellationAndIndependentSessions(t *testing.T) {
 	firstDone := make(chan error, 1)
 	go func() { _, err := adapter.Receive(firstCtx, message("room", "first")); firstDone <- err }()
 	<-started
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
 	result, err := adapter.Receive(ctx, message("room", "cancelled"))
-	if !errors.Is(err, context.Canceled) || result.Status != agent.Cancelled {
+	if !errors.Is(err, context.DeadlineExceeded) || result.Status != agent.TimedOut {
 		t.Fatalf("%+v %v", result, err)
 	}
 	otherCtx, otherCancel := context.WithTimeout(context.Background(), time.Second)
@@ -192,4 +192,38 @@ func (failingAdapter) Edit(context.Context, string, chat.Reply) error {
 }
 func (failingAdapter) SetTyping(context.Context, chat.Session, bool) error {
 	return errors.New("unexpected typing")
+}
+
+func TestProcessor_ClearWaitsForCurrentRun(t *testing.T) {
+	h := history(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	processor := &conversation.Processor{History: h, Run: func(_ context.Context, _ agent.Request, _ func(agent.Event)) (agent.Result, error) {
+		close(started)
+		<-release
+		return agent.Result{Status: agent.Completed, Content: "answer"}, nil
+	}}
+	adapter := memory.New("a", chat.Capabilities{}, func(ctx context.Context, m chat.Message, a chat.Adapter) (agent.Result, error) {
+		return processor.Handle(ctx, m, agent.Request{}, a)
+	})
+	done := make(chan error, 1)
+	go func() { _, err := adapter.Receive(context.Background(), message("room", "hi")); done <- err }()
+	<-started
+	session := chat.Session{Platform: "memory", Account: "a", Conversation: "room"}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := processor.Clear(ctx, session)
+	close(release)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("clear bypassed running turn: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := processor.Clear(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.GetContext(session.Key()); len(got) != 0 {
+		t.Fatalf("completed answer survived clear: %+v", got)
+	}
 }

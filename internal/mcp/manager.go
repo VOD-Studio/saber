@@ -9,8 +9,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
-	appcontext "rua.plus/saber/internal/context"
 	"rua.plus/saber/internal/mcp/servers"
 )
 
@@ -248,19 +248,16 @@ func (m *Manager) CallTool(ctx context.Context, serverName, toolName string, arg
 		return nil, fmt.Errorf("MCP 功能未启用")
 	}
 
-	// 提取用户上下文
-	userID, ok := appcontext.GetUserFromContext(ctx)
-	if !ok {
-		return nil, fmt.Errorf("缺少用户上下文：userID 必须通过 WithUserContext 设置")
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	roomID, ok := appcontext.GetRoomFromContext(ctx)
+	identity, ok := chat.IdentityFromContext(ctx)
 	if !ok {
-		return nil, fmt.Errorf("缺少用户上下文：roomID 必须通过 WithUserContext 设置")
+		return nil, fmt.Errorf("缺少有效调用身份：需要平台、账号、会话和发送者")
 	}
-
-	// 检查速率限制
-	if !m.rateLimiter.Allow(userID, roomID) {
-		return nil, fmt.Errorf("速率限制超过：用户 %s 在房间 %s", userID, roomID)
+	// 用户桶跨同账号会话共享，会话桶包含线程；不同平台或账号独立限流。
+	if !m.rateLimiter.Allow(identity.UserKey(), string(identity.Session.Key())) {
+		return nil, fmt.Errorf("速率限制超过：用户 %s 在会话 %s", identity.SenderID, identity.Session.Key())
 	}
 
 	// 获取会话

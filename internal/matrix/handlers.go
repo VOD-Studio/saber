@@ -492,6 +492,7 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 
 	// 注入 EventID 到上下文，用于回复消息功能
 	ctx = WithEventID(ctx, evt.ID)
+	ctx = WithMessageRelations(ctx, content.RelatesTo.GetReplyTo(), content.RelatesTo.GetThreadParent())
 
 	if content.MsgType.IsMedia() {
 		mediaInfo := ExtractMediaInfo(content)

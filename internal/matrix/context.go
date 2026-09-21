@@ -100,3 +100,24 @@ func GetReferencedMediaInfo(ctx context.Context) *MediaInfo {
 	}
 	return nil
 }
+
+var replyToIDKey = &contextKey{"reply_to_id"}
+var threadIDKey = &contextKey{"thread_id"}
+
+// WithMessageRelations 保留入站消息的引用和线程，供聊天 adapter 规范化。
+func WithMessageRelations(ctx context.Context, replyTo, thread id.EventID) context.Context {
+	ctx = context.WithValue(ctx, replyToIDKey, replyTo)
+	return context.WithValue(ctx, threadIDKey, thread)
+}
+
+// GetReplyToID 返回入站消息引用的事件 ID。
+func GetReplyToID(ctx context.Context) id.EventID {
+	value, _ := ctx.Value(replyToIDKey).(id.EventID)
+	return value
+}
+
+// GetThreadID 返回入站消息所属线程根事件 ID。
+func GetThreadID(ctx context.Context) id.EventID {
+	value, _ := ctx.Value(threadIDKey).(id.EventID)
+	return value
+}

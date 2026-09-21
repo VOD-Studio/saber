@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Matrix 通过 `ChatAdapter` 规范化消息、图片、引用和线程，与内存聊天 adapter 共用 `conversation.Processor`；回复能力决定是否显示增量，模型流式传输独立配置
+- 模型客户端、注册表、重试和流式解析迁移至 `internal/model`；旧 `ai` 名称通过兼容层引用，核心依赖检查禁止引入 Matrix SDK
+- 会话历史迁移至平台无关存储，按平台、账号、原生会话及线程隔离；读取前清理过期消息，图片输入只组装一次，历史仅保存文本和附件标记
+- MCP 调用改用通用来源身份，限流按平台与账号隔离；Matrix 历史清理命令等待当前会话运行结束，编辑后的回复保留原引用及线程关系
 - 流式和非流式聊天入口共用 Agent Runtime，Matrix 展示通过运行事件更新；最终回答统一写入会话历史一次
 - 模型重试与备用模型切换缩小到单次请求，避免失败后重放已执行工具；流式工具调用按索引排序，并拒绝未完整结束的响应
 - 工具请求保留 `max_tokens`、`temperature` 等设置；MCP `IsError` 与序列化错误统一反馈给模型
