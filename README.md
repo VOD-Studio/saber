@@ -817,6 +817,9 @@ saber/
   docker-bake.hcl                  # Docker 多架构构建配置
   config.example.yaml              # 示例配置文件
   internal/
+    agent/
+      runtime.go                   # 独立执行循环、预算、取消和工具错误回传
+      types.go                     # 模型与工具接口、运行事件和每轮记录
     bot/
       bot.go                       # 机器人初始化和生命周期
       errors.go                    # 错误定义

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 独立 `internal/agent` 运行时：统一模型与工具循环，记录每轮响应、请求尝试、工具参数和结果；支持轮数、总时长、工具输出长度限制及明确终态
+- 无聊天平台、无网络的 Agent 验收测试：工具失败反馈与参数纠正、流式/非流式一致性、取消后停止派发、超时和预算耗尽
+
 ### Changed
 
 #### 配置文件
@@ -286,4 +291,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.0.3]: https://github.com/your-username/saber/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/your-username/saber/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/your-username/saber/releases/tag/v0.0.1
-
