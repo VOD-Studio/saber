@@ -59,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- TUI 统一画布背景与消息左边距，收紧会话列表，模型短名称和用量移至回答末尾，输入区集中展示当前模型与情境快捷键
+
 - 配置按 `ai`、`agent`、`matrix` 分工重整，移除旧单提供商迁移及旧字段；严格拒绝未知字段，默认生成精简服务端配置，Matrix/MCP/执行器均默认关闭，不预置空密钥模型
 
 - 示例配置不再预填 Matrix 用户和伪令牌，默认输出上限改为 8192 tokens；旧 Matrix 部署需添加 `matrix.enabled: true`，未启用 AI 时本机服务仍提供配置状态

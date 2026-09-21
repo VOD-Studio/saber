@@ -51,7 +51,11 @@ func TestModel_ResponsiveViews(t *testing.T) {
 				}
 				if size[0] >= 36 && size[1] >= 14 {
 					require.Contains(t, clean(view.Content), "SABER")
-					require.Contains(t, clean(view.Content), "发送")
+					if m.menu == "" {
+						require.Contains(t, clean(view.Content), "发送")
+					} else {
+						require.Contains(t, clean(view.Content), "返回")
+					}
 				}
 				if dir := os.Getenv("SABER_TUI_SNAPSHOT_DIR"); dir != "" && (state == "welcome" || state == "chat" || state == "models") {
 					require.NoError(t, os.MkdirAll(dir, 0700))
@@ -60,6 +64,29 @@ func TestModel_ResponsiveViews(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestModel_VisualHierarchy(t *testing.T) {
+	m := previewModel()
+	m.resize(100, 32)
+	m.turns = []server.Turn{{ID: 1, Input: "你好", Content: "你好！", Model: m.selectedModel, Status: "completed", Tokens: 477, Duration: 2 * time.Second}}
+	m.refresh()
+	view := m.View().Content
+	require.NotContains(t, clean(view), m.selectedModel)
+	require.Contains(t, clean(view), "GPT 5.6 Sol")
+	require.Contains(t, clean(view), "477 tokens")
+	require.Equal(t, 1, strings.Count(clean(view), "›"))
+	canvas := lipgloss.NewCanvas(m.width, m.height).Compose(lipgloss.NewLayer(view))
+	for y := range m.height {
+		for x := range m.width {
+			cell := canvas.CellAt(x, y)
+			if cell != nil && cell.Width > 0 {
+				require.NotNil(t, cell.Style.Bg, "missing background at %d,%d", x, y)
+			}
+		}
+	}
+	m.turns[0].Status = "running"
+	require.Contains(t, clean(m.composer()), "Ctrl+C 停止")
 }
 
 func TestModel_EventsRetryAndStaleSession(t *testing.T) {

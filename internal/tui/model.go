@@ -92,11 +92,16 @@ func Run(ctx context.Context, client *server.Client, session string) error {
 
 func newModel(ctx context.Context, client *server.Client, session string) *model {
 	input := textarea.New()
-	input.Placeholder = "说说你想做什么…  / 查看命令"
-	input.Prompt = "› "
+	input.Placeholder = "说说你想做什么…"
+	input.SetPromptFunc(2, func(info textarea.PromptInfo) string {
+		if info.LineNumber == 0 {
+			return "› "
+		}
+		return "  "
+	})
 	input.ShowLineNumbers = false
 	input.CharLimit = 100000
-	input.SetHeight(3)
+	input.SetHeight(1)
 	input.SetWidth(70)
 	input.SetVirtualCursor(true)
 	input.KeyMap.InsertNewline.SetKeys("alt+enter", "shift+enter", "ctrl+j")
