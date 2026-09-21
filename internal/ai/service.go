@@ -206,7 +206,7 @@ func (s *Service) GenerateSimpleResponse(ctx context.Context, systemPrompt, user
 		return "", fmt.Errorf("获取AI客户端失败: %w", err)
 	}
 
-	cfg := s.core.GetConfig()
+	cfg, _ := s.core.GetConfig().GetModelConfig(modelName)
 
 	messages := []openai.ChatCompletionMessage{
 		{Role: string(RoleSystem), Content: systemPrompt},
@@ -255,14 +255,13 @@ func (s *Service) GenerateSimpleResponseWithModel(ctx context.Context, modelName
 		return "", fmt.Errorf("AI请求速率限制: %w", err)
 	}
 
-	cfg := s.core.GetConfig()
-
 	// 使用指定的模型或默认模型
 	if modelName == "" {
 		modelName = s.core.GetModelRegistry().GetDefault()
 	}
 
-	// 使用指定的温度或全局默认值
+	cfg, _ := s.core.GetConfig().GetModelConfig(modelName)
+	// 使用指定的温度或模型默认值
 	if temperature == 0 {
 		temperature = cfg.Temperature
 	}
@@ -320,12 +319,11 @@ func (s *Service) GenerateStreamingSimpleResponse(ctx context.Context, modelName
 		return "", fmt.Errorf("AI请求速率限制: %w", err)
 	}
 
-	cfg := s.core.GetConfig()
-
 	if modelName == "" {
 		modelName = s.core.GetModelRegistry().GetDefault()
 	}
 
+	cfg, _ := s.core.GetConfig().GetModelConfig(modelName)
 	if temperature == 0 {
 		temperature = cfg.Temperature
 	}
@@ -420,7 +418,8 @@ func (s *Service) taskRequest(message chat.Message, modelName string) agent.Requ
 	if message.Session.Platform == "matrix" && s.promptProvider != nil {
 		prompt = s.promptProvider.GetSystemPrompt(id.RoomID(message.Session.Conversation), prompt)
 	}
-	req := agent.Request{Model: modelName, Stream: cfg.StreamEnabled, MaxTokens: cfg.MaxTokens, Temperature: cfg.Temperature}
+	modelCfg, _ := cfg.GetModelConfig(modelName)
+	req := agent.Request{Model: modelName, Stream: cfg.StreamEnabled, MaxTokens: modelCfg.MaxTokens, Temperature: modelCfg.Temperature}
 	if prompt != "" {
 		req.Messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleSystem, Content: prompt}}
 	}

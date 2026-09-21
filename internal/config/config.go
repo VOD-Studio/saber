@@ -163,8 +163,9 @@ type ServerConfig struct {
 
 // ModelConfig 存储特定模型配置
 type ModelConfig struct {
-	API             string `yaml:"api,omitempty"`              // 协议（覆盖提供商）；空值沿用原有 Chat Completions。
-	ReasoningEffort string `yaml:"reasoning_effort,omitempty"` // 思考等级；空值继承提供商或全局设置。
+	RequestTimeoutSeconds int    `yaml:"request_timeout_seconds,omitempty"` // 单次模型请求总时限，包含流式读取；零值继承全局。
+	API                   string `yaml:"api,omitempty"`                     // 协议（覆盖提供商）；空值沿用原有 Chat Completions。
+	ReasoningEffort       string `yaml:"reasoning_effort,omitempty"`        // 思考等级；空值继承提供商或全局设置。
 
 	Model       string  `yaml:"model"`       // 模型标识符
 	Provider    string  `yaml:"provider"`    // 提供商（覆盖全局）
@@ -745,6 +746,9 @@ func (a *AIConfig) GetModelConfig(modelID string) (ModelConfig, bool) {
 
 // mergeProviderConfig 合并提供商配置到模型配置。
 func (a *AIConfig) mergeProviderConfig(cfg ModelConfig, providerCfg ProviderConfig) ModelConfig {
+	if cfg.RequestTimeoutSeconds == 0 {
+		cfg.RequestTimeoutSeconds = a.TimeoutSeconds
+	}
 	// Model 字段由调用方设置，这里不处理
 	if cfg.API == "" {
 		cfg.API = providerCfg.API
@@ -776,6 +780,9 @@ func (a *AIConfig) mergeProviderConfig(cfg ModelConfig, providerCfg ProviderConf
 
 // mergeGlobalConfig 使用旧的全局配置合并模型配置（向后兼容）。
 func (a *AIConfig) mergeGlobalConfig(cfg ModelConfig) ModelConfig {
+	if cfg.RequestTimeoutSeconds == 0 {
+		cfg.RequestTimeoutSeconds = a.TimeoutSeconds
+	}
 	if cfg.ReasoningEffort == "" {
 		cfg.ReasoningEffort = a.ReasoningEffort
 	}

@@ -50,7 +50,6 @@ func (s *Service) SubmitChatTask(ctx context.Context, message chat.Message, mode
 		return task.Task{}, errors.New("无效思考等级")
 	}
 	req := s.taskRequest(message, model)
-	req.Stream = true
 	req.ReasoningEffort = effort
 	req.Messages = append(req.Messages, taskInput(message))
 	dir := s.taskDir

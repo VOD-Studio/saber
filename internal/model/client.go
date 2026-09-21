@@ -28,7 +28,6 @@ var sharedTransport = &http.Transport{
 	MaxIdleConnsPerHost:   10,
 	IdleConnTimeout:       90 * time.Second,
 	TLSHandshakeTimeout:   10 * time.Second,
-	ResponseHeaderTimeout: 10 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,
 	// 强制 TLS 1.2 或更高版本
 	TLSClientConfig: &tls.Config{
@@ -115,8 +114,12 @@ func NewClientWithModel(cfg *config.ModelConfig) (*Client, error) {
 		return nil, err
 	}
 
+	timeout := cfg.RequestTimeoutSeconds
+	if timeout == 0 {
+		timeout = 120
+	}
 	httpClient := &http.Client{
-		Timeout:   30 * time.Second,
+		Timeout:   time.Duration(timeout) * time.Second,
 		Transport: sharedTransport,
 	}
 
