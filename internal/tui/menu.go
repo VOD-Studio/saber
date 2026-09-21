@@ -28,12 +28,20 @@ func (m *model) choices() (string, []choice) {
 	case "reasoning":
 		return "思考等级", []choice{{"继承模型配置", "", "使用服务端为此模型配置的默认值"}, {"None", "none", "不启用额外推理"}, {"Low", "low", "较低"}, {"Medium", "medium", "中等"}, {"High", "high", "较高"}, {"XHigh", "xhigh", "更高"}, {"Max", "max", "最高"}}
 	default:
-		return "快捷操作", []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}, {"/sidebar", "sidebar", "收起或展开侧栏 · Ctrl+B"}, {"/tools", "tools", "展开工具详情 · Ctrl+T"}, {"F5", "reconnect", "刷新连接与会话"}, {"/quit", "quit", "离开界面 · Ctrl+Q"}}
+		title := "快捷操作"
+		if m.menu == "commands" {
+			title = "命令"
+		}
+		return title, []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}, {"/sidebar", "sidebar", "收起或展开侧栏 · Ctrl+B"}, {"/tools", "tools", "展开工具详情 · Ctrl+T"}, {"F5", "reconnect", "刷新连接与会话"}, {"/quit", "quit", "离开界面 · Ctrl+Q"}}
 	}
 }
 func (m *model) openMenu(menu string) tea.Cmd {
 	m.menu, m.menuIndex = menu, 0
 	m.filter.Reset()
+	m.filter.Prompt, m.filter.Placeholder = "› ", "输入以筛选…"
+	if menu == "commands" {
+		m.filter.Prompt, m.filter.Placeholder = "/ ", "输入命令或搜索…"
+	}
 	if menu == "" {
 		m.filter.Blur()
 		return m.input.Focus()
@@ -59,14 +67,28 @@ func (m *model) filteredChoices() (string, []choice) {
 
 func (m *model) menuKey(msg tea.KeyPressMsg) tea.Cmd {
 	_, items := m.filteredChoices()
+	if m.menu == "commands" && msg.String() == "backspace" && m.filter.Value() == "" {
+		return m.openMenu("")
+	}
 	switch msg.String() {
 	case "esc":
+		if m.menu == "commands" {
+			m.input.SetValue("/" + strings.TrimPrefix(m.filter.Value(), "/"))
+		}
 		return m.openMenu("")
 	case "up":
 		m.menuIndex = max(0, m.menuIndex-1)
 	case "down":
 		m.menuIndex = min(max(0, len(items)-1), m.menuIndex+1)
 	case "enter":
+		if m.menu == "commands" {
+			text := "/" + strings.TrimPrefix(strings.TrimSpace(m.filter.Value()), "/")
+			// 带参数命令继续使用原解析入口，避免即时菜单截断手动输入。
+			if len(strings.Fields(text)) > 1 || text == "/help" || text == "/exit" {
+				focus := m.openMenu("")
+				return tea.Batch(focus, m.command(text))
+			}
+		}
 		if len(items) == 0 {
 			return nil
 		}

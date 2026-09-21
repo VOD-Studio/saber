@@ -421,6 +421,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.menuKey(msg)
 		}
 		switch key {
+		case "/":
+			if m.input.Value() == "" {
+				return m, m.openMenu("commands")
+			}
 		case "ctrl+b":
 			m.sidebarHidden = !m.sidebarHidden
 			return m, nil

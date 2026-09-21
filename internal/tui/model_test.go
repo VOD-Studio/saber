@@ -31,7 +31,7 @@ func previewModel() *model {
 
 func TestModel_ResponsiveViews(t *testing.T) {
 	for _, size := range [][2]int{{200, 50}, {132, 40}, {108, 32}, {108, 14}, {107, 32}, {100, 32}, {80, 24}, {64, 20}, {44, 18}, {36, 14}, {24, 10}} {
-		for _, state := range []string{"welcome", "chat", "short-chat", "running", "queued", "error", "disconnected", "tools", "multiline", "long-model", "models", "reasoning", "sessions", "help"} {
+		for _, state := range []string{"welcome", "chat", "short-chat", "running", "queued", "error", "disconnected", "tools", "multiline", "long-model", "models", "reasoning", "sessions", "help", "commands"} {
 			t.Run(fmt.Sprintf("%dx%d/%s", size[0], size[1], state), func(t *testing.T) {
 				m := previewModel()
 				turn := server.Turn{ID: 1, Session: "design", Input: "将任务执行与结果投递拆开，让 TUI 和 Matrix 各自接收结果。", Content: "可以。任务会在服务端独立运行。\n\n### 一套执行，两种入口\n\n- TUI 实时展示进度与回答。\n- Matrix 按原会话投递结果。\n- 关闭界面后，任务继续执行。\n\n```go\nmanager.RegisterDelivery(\"matrix\", deliver)\n```", Model: m.selectedModel, Status: "completed", Tokens: 1842, Duration: 3400 * time.Millisecond, CreatedAt: time.Date(2026, 9, 21, 16, 30, 0, 0, time.Local), Tools: []agent.ToolRecord{{Call: openai.ToolCall{ID: "read", Function: openai.FunctionCall{Name: "read_file", Arguments: `{"path":"internal/task/manager.go"}`}}, Content: "已读取任务执行入口", Duration: 10 * time.Millisecond}}}
@@ -59,7 +59,7 @@ func TestModel_ResponsiveViews(t *testing.T) {
 				case "long-model":
 					m.selectedModel = strings.Repeat("very-long-model-", 10)
 					m.turns[0].Model = m.selectedModel
-				case "models", "reasoning", "sessions", "help":
+				case "models", "reasoning", "sessions", "help", "commands":
 					m.openMenu(state)
 				}
 				if len(m.turns) > 0 {
@@ -194,6 +194,71 @@ func TestModel_MenuSearchPreservesDraftAndHistory(t *testing.T) {
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	require.Empty(t, m.menu)
 	require.True(t, m.input.Focused())
+}
+
+func TestModel_SlashCommandMenu(t *testing.T) {
+	m := previewModel()
+	m.turns = []server.Turn{{ID: 1, Status: "completed", Content: strings.Repeat("历史内容\n\n", 50)}}
+	m.resize(100, 32)
+	m.viewport.SetYOffset(8)
+	slash := tea.KeyPressMsg{Code: '/', Text: "/"}
+	m.Update(slash)
+	require.Equal(t, "commands", m.menu, "slash opens the menu without Enter")
+	require.True(t, m.filter.Focused())
+	require.False(t, m.input.Focused())
+	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	require.Zero(t, m.menuIndex)
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	_, items := m.filteredChoices()
+	require.Equal(t, "sessions", items[m.menuIndex].value)
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, "sessions", m.menu)
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Empty(t, m.input.Value(), "executed commands must not remain in the draft")
+	require.Equal(t, 8, m.viewport.YOffset())
+	require.True(t, m.input.Focused())
+
+	m.Update(slash)
+	m.Update(tea.PasteMsg{Content: "tools"})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.True(t, m.details)
+	require.Empty(t, m.menu)
+	m.Update(slash)
+	m.Update(tea.PasteMsg{Content: "reasoning high"})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, "high", m.effort)
+	require.Empty(t, m.input.Value())
+	m.Update(slash)
+	m.Update(tea.PasteMsg{Content: "reasoning low"})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Equal(t, "/reasoning low", m.input.Value(), "Esc restores the typed command for editing")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, "low", m.effort)
+	m.Update(slash)
+	m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	require.Empty(t, m.menu)
+	require.Empty(t, m.input.Value())
+	require.True(t, m.input.Focused())
+}
+
+func TestModel_SlashInsideTextAndPaste(t *testing.T) {
+	for _, draft := range []string{"https:/", "查看 internal", "第一行\n"} {
+		t.Run(draft, func(t *testing.T) {
+			m := previewModel()
+			m.input.SetValue(draft)
+			m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+			require.Empty(t, m.menu)
+			require.Equal(t, draft+"/", m.input.Value())
+		})
+	}
+	m := previewModel()
+	m.Update(tea.PasteMsg{Content: "/reasoning high"})
+	require.Empty(t, m.menu, "pasting must preserve the complete command")
+	require.Equal(t, "/reasoning high", m.input.Value())
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, "high", m.effort)
 }
 
 func TestModel_NewContentWhileReading(t *testing.T) {
