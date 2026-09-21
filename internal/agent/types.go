@@ -31,6 +31,8 @@ var ErrBudgetExhausted = errors.New("agent round budget exhausted")
 
 // Request 保留现有模型协议，供流式和非流式 adapter 共用。
 type Request struct {
+	// ReasoningEffort 非空时覆盖当前模型的默认思考等级，不修改共享客户端配置。
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// ResponsesHistory 按首个工具调用 ID 保存原始输出，保留加密推理和消息 phase。
 	ResponsesHistory map[string][]json.RawMessage `json:"responses_history,omitempty"`
 

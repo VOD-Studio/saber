@@ -16,6 +16,10 @@ import (
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 
+	"errors"
+	"flag"
+	"net/http"
+
 	"rua.plus/saber/internal/ai"
 	"rua.plus/saber/internal/cli"
 	"rua.plus/saber/internal/config"
@@ -24,6 +28,7 @@ import (
 	"rua.plus/saber/internal/mcp"
 	"rua.plus/saber/internal/meme"
 	"rua.plus/saber/internal/persona"
+	"rua.plus/saber/internal/server"
 )
 
 // services 持有所有需要管理的服务实例。
@@ -50,36 +55,46 @@ type appState struct {
 
 // Run 初始化并运行机器人。
 //
-// 它处理 CLI 标志与配置，默认运行终端对话，显式启用时运行 Matrix。
+// 它处理 CLI 标志与配置，默认运行本机服务，显式启用时接入 Matrix。
 // 返回错误而非直接调用 os.Exit，支持测试和优雅关闭。
 func Run(info matrix.BuildInfo) error {
+	return run(context.Background(), info)
+}
+
+func run(parent context.Context, info matrix.BuildInfo) error {
 	state := &appState{info: info}
 
 	if err := state.initConfig(); err != nil {
 		return err
 	}
 
-	if !state.cfg.Matrix.Enabled {
-		return state.runTerminal()
+	ctx, cancel := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+	state.services = &services{}
+	defer state.shutdown(cancel)
+	if state.cfg.Matrix.Enabled {
+		svc, err := state.initMatrixClient()
+		if err != nil {
+			return err
+		}
+		state.services = svc
 	}
-
-	services, err := state.initMatrixClient()
-	if err != nil {
-		return err
-	}
-	state.services = services
-
 	if err := state.initServices(); err != nil {
 		return err
 	}
-
-	state.setupEventHandlers()
-
-	ctx, cancel := state.setupSignalHandler()
-	defer cancel()
-
-	state.startSync(ctx)
-	return state.waitForShutdown(ctx, cancel)
+	if state.services.client != nil {
+		state.setupEventHandlers()
+		state.startSync(ctx)
+	}
+	if err := state.cfg.Server.Validate(); err != nil {
+		return err
+	}
+	token, err := server.Token(state.cfg.Server.TokenPath(state.flags.ConfigPath), true)
+	if err != nil {
+		return err
+	}
+	slog.Info("Saber 服务已就绪", "listen", state.cfg.Server.Listen, "chat", "saber chat")
+	return server.Serve(ctx, &http.Server{Addr: state.cfg.Server.Listen, Handler: server.New(state.services.aiService, token), ReadHeaderTimeout: 5 * time.Second})
 }
 
 // initConfig 处理配置初始化。
@@ -87,6 +102,12 @@ func Run(info matrix.BuildInfo) error {
 // 返回错误而非调用 os.Exit，支持测试和优雅关闭。
 func (s *appState) initConfig() error {
 	s.flags = cli.Parse()
+	if s.flags.ParseError != nil {
+		if errors.Is(s.flags.ParseError, flag.ErrHelp) {
+			return ExitSuccess()
+		}
+		return ExitError(2, s.flags.ParseError)
+	}
 
 	if s.flags.ShowVersion {
 		fmt.Printf("Saber v%s\n", s.info.Version)
@@ -250,7 +271,7 @@ func (s *appState) initServices() error {
 	}
 	svc.aiService = aiService
 	configDir := filepath.Dir(s.flags.ConfigPath)
-	protected := []string{s.flags.ConfigPath, s.flags.ConfigPath + ".session", s.cfg.Matrix.E2EESessionPath, s.cfg.Matrix.E2EESessionPath + ".key", s.cfg.Matrix.PickleKeyPath, filepath.Join(configDir, "tasks.db"), filepath.Join(configDir, "persona.db")}
+	protected := []string{s.cfg.Server.TokenPath(s.flags.ConfigPath), s.flags.ConfigPath, s.flags.ConfigPath + ".session", s.cfg.Matrix.E2EESessionPath, s.cfg.Matrix.E2EESessionPath + ".key", s.cfg.Matrix.PickleKeyPath, filepath.Join(configDir, "tasks.db"), filepath.Join(configDir, "persona.db")}
 	if err := aiService.ConfigureExecution(s.cfg.Execution, protected, secrets); err != nil {
 		return fmt.Errorf("执行权限初始化失败: %w", err)
 	}
@@ -259,7 +280,11 @@ func (s *appState) initServices() error {
 		"provider", s.cfg.AI.Provider,
 		"default_model", s.cfg.AI.DefaultModel)
 
-	// 终端通过同步会话入口运行，不装配 Matrix 命令、主动聊天和投递队列。
+	// 任务运行独立于入口，Matrix 只注册自己的投递器。
+	if err := aiService.EnableTasks(filepath.Join(configDir, "tasks.db")); err != nil {
+		return fmt.Errorf("任务服务初始化失败: %w", err)
+	}
+	// 可选的 Matrix 功能只在启用该入口时装配。
 	if svc.client == nil {
 		return nil
 	}
@@ -279,10 +304,6 @@ func (s *appState) initServices() error {
 
 	// 初始化 Meme 服务
 	s.initMemeService()
-
-	if err := aiService.EnableTasks(filepath.Join(filepath.Dir(s.flags.ConfigPath), "tasks.db")); err != nil {
-		return fmt.Errorf("任务服务初始化失败: %w", err)
-	}
 
 	return nil
 }
@@ -487,18 +508,7 @@ func (s *appState) autoJoinRooms() {
 //
 // 返回 context 和 cancel 函数。
 func (s *appState) setupSignalHandler() (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		sig := <-sigChan
-		slog.Info("Shutdown signal received", "signal", sig.String())
-		cancel()
-	}()
-
-	return ctx, cancel
+	return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 }
 
 // startSync 启动 Matrix 同步。

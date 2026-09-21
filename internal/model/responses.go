@@ -96,11 +96,11 @@ func (c *Client) responseRequest(req ChatCompletionRequest) (openai.CreateRespon
 		converted.Parameters["strict"] = tool.Function.Strict
 		result.Tools = append(result.Tools, converted)
 	}
-	if c.config.ReasoningEffort != "" {
-		result.Reasoning = &openai.ResponseReasoning{Effort: c.config.ReasoningEffort}
+	if c.reasoningEffort(req) != "" {
+		result.Reasoning = &openai.ResponseReasoning{Effort: c.reasoningEffort(req)}
 	}
 	// 推理模型常拒绝 temperature；仅显式关闭推理时发送采样参数。
-	if c.config.ReasoningEffort == "none" {
+	if c.reasoningEffort(req) == "none" {
 		temperature := float32(req.Temperature)
 		result.Temperature = &temperature
 	}

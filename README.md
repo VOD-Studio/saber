@@ -1,6 +1,6 @@
 # Saber
 
-一个使用 Go 构建的 AI Agent，默认提供终端对话，可选接入 Matrix。
+一个使用 Go 构建的 AI Agent，默认运行本机聊天服务，可选接入 Matrix。
 
 ## 功能特性
 
@@ -60,7 +60,7 @@ make build
 
 ```yaml
 matrix:
-  enabled: false  # 默认终端对话；接入 Matrix 时设为 true
+  enabled: false  # 可选聊天入口；接入 Matrix 时设为 true
   homeserver: "https://matrix.org"
   user_id: "@your-bot:matrix.org"
   device_id: "saber-bot"
@@ -90,9 +90,9 @@ ai:
 ./bin/saber -v
 ```
 
-默认进入终端对话，每行发送一条消息，历史保留在当前进程中；输出每轮完整回答。输入 `/exit`、`/quit` 或 EOF（Ctrl+D）退出，Ctrl+C 取消当前请求并退出。模型、提示词、上下文和工具授权复用现有 AI 配置；终端不启动 Matrix 同步、主动聊天或后台任务投递。
+直接运行 `./bin/saber` 或 `./bin/saber serve` 启动常驻服务，默认监听 `127.0.0.1:8320`。首次启动在配置目录创建 `.saber-token`（0600）；HTTP 接口使用 Bearer 令牌认证。会话、任务和增量事件保存到 `tasks.db`，订阅断开不取消任务。Matrix 是独立的可选聊天入口。
 
-Matrix 仅在 `matrix.enabled: true` 时校验账号并连接服务器。升级旧配置时，已有 Matrix 用户也需要显式添加该开关。AI 与 Matrix 都未启用时，程序提示配置方法并正常退出。
+Matrix 仅在 `matrix.enabled: true` 时校验账号并连接服务器。升级旧配置时，已有 Matrix 用户也需要显式添加该开关。AI 未启用时服务继续运行，聊天入口提示完成模型配置。
 
 ### CLI 标志
 
@@ -619,7 +619,7 @@ meme:
 
 | 字段                    | 必填          | 描述                                                      |
 |-------------------------|---------------|-----------------------------------------------------------|
-| `enabled`               | 否            | 是否启用 Matrix，默认 `false`；关闭时使用终端入口 |
+| `enabled`               | 否            | 是否启用 Matrix，默认 `false`；关闭时本机服务仍正常运行 |
 | `homeserver`            | 启用 Matrix 时 | Matrix 服务器 URL                                         |
 | `user_id`               | 启用 Matrix 时 | 机器人的 Matrix ID（如 `@bot:matrix.org`）                |
 | `device_id`             | 否            | 设备标识符                                                |
@@ -847,7 +847,7 @@ ai:
 
 Saber 的 Matrix 聊天入口通过 `chat.Handler` 接收并持久化任务，由 `task.Manager` 后台调用 Agent Runtime，结果单独投递。
 嵌入式调用可继续使用 `conversation.Processor` 的同步会话模式。Matrix 和内存 adapter 共用消息、会话和回复契约；核心 `task`、`agent`、`chat`、`conversation`、`model`、`mcp` 不依赖 Matrix SDK。
-应用默认装配终端同步会话入口，仅显式启用 Matrix 时装配其专用命令、同步和任务投递。
+应用默认运行本机 HTTP/SSE 服务，统一管理 Agent 与持久化任务。聊天入口读取事件或注册终态投递器；Matrix 的同步和投递仅在启用时装配。
 接口、会话隔离及验收命令见 [通用聊天接入](docs/chat-adapters.md)。
 任务命令、恢复规则和验收命令见 [持久化任务](docs/tasks.md)。
 自主命令/文件工具、容器隔离和成员授权见 [执行权限配置](docs/execution.md)。
@@ -872,8 +872,8 @@ saber/
       types.go                     # 模型与工具接口、运行事件和每轮记录
     bot/
       bot.go                       # 机器人初始化和生命周期
-      terminal.go                  # 无 Matrix 的终端服务装配
       errors.go                    # 错误定义
+    server/                        # 本机会话接口、令牌认证和持久化事件流
     cli/
       flags.go                     # 命令行标志解析
       terminal.go                  # 终端输入与完整回答展示

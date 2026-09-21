@@ -173,7 +173,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 			ctx,
 			openai.ChatCompletionRequest{
 				Model:           c.getModelName(req.Model),
-				ReasoningEffort: c.config.ReasoningEffort,
+				ReasoningEffort: c.reasoningEffort(req),
 				Messages:        req.Messages,
 				//nolint:staticcheck // 有意保留 max_tokens：Ollama 等 OpenAI 兼容端点不支持 max_completion_tokens
 				MaxTokens:   req.MaxTokens,
@@ -213,7 +213,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 		ctx,
 		openai.ChatCompletionRequest{
 			Model:           c.getModelName(req.Model),
-			ReasoningEffort: c.config.ReasoningEffort,
+			ReasoningEffort: c.reasoningEffort(req),
 			Messages:        req.Messages,
 			//nolint:staticcheck // 有意保留 max_tokens：Ollama 等 OpenAI 兼容端点不支持 max_completion_tokens
 			MaxTokens:   req.MaxTokens,
@@ -311,7 +311,7 @@ func (c *Client) CreateStreamingChatCompletion(
 		ctx,
 		openai.ChatCompletionRequest{
 			Model:           c.getModelName(req.Model),
-			ReasoningEffort: c.config.ReasoningEffort,
+			ReasoningEffort: c.reasoningEffort(req),
 			Messages:        req.Messages,
 			//nolint:staticcheck // 有意保留 max_tokens：Ollama 等 OpenAI 兼容端点不支持 max_completion_tokens
 			MaxTokens:   req.MaxTokens,
@@ -406,7 +406,7 @@ func (c *Client) CreateStreamingChatCompletionWithTools(
 		ctx,
 		openai.ChatCompletionRequest{
 			Model:           c.getModelName(req.Model),
-			ReasoningEffort: c.config.ReasoningEffort,
+			ReasoningEffort: c.reasoningEffort(req),
 			Messages:        req.Messages,
 			//nolint:staticcheck // 有意保留 max_tokens：Ollama 等 OpenAI 兼容端点不支持 max_completion_tokens
 			MaxTokens:   req.MaxTokens,
@@ -506,4 +506,11 @@ func (c *Client) getModelName(reqModel string) string {
 		return c.config.Model
 	}
 	return reqModel
+}
+
+func (c *Client) reasoningEffort(req ChatCompletionRequest) string {
+	if req.ReasoningEffort != "" {
+		return req.ReasoningEffort
+	}
+	return c.config.ReasoningEffort
 }

@@ -13,12 +13,13 @@ import (
 
 // Config 存储从 YAML 配置文件加载的应用程序配置
 type Config struct {
-	Execution ExecutionConfig `yaml:"execution"`
-	Matrix    MatrixConfig    `yaml:"matrix"`
-	AI        AIConfig        `yaml:"ai"`
-	MCP       MCPConfig       `yaml:"mcp"`
-	Meme      MemeConfig      `yaml:"meme"`
-	Shutdown  ShutdownConfig  `yaml:"shutdown"`
+	Server    HTTPServerConfig `yaml:"server"`
+	Execution ExecutionConfig  `yaml:"execution"`
+	Matrix    MatrixConfig     `yaml:"matrix"`
+	AI        AIConfig         `yaml:"ai"`
+	MCP       MCPConfig        `yaml:"mcp"`
+	Meme      MemeConfig       `yaml:"meme"`
+	Shutdown  ShutdownConfig   `yaml:"shutdown"`
 }
 
 // ShutdownConfig 存储关闭配置
@@ -28,7 +29,7 @@ type ShutdownConfig struct {
 
 // MatrixConfig 存储 Matrix 连接配置
 type MatrixConfig struct {
-	Enabled                bool     `yaml:"enabled"` // 显式启用 Matrix 入口；默认关闭，改用终端对话。
+	Enabled                bool     `yaml:"enabled"` // 显式启用 Matrix 入口；默认关闭，独立于本机聊天服务。
 	Homeserver             string   `yaml:"homeserver"`
 	UserID                 string   `yaml:"user_id"`                   // 完整的 Matrix ID，如 @user:matrix.org
 	DeviceID               string   `yaml:"device_id"`                 // 设备标识符
@@ -870,6 +871,7 @@ func DefaultMCPConfig() MCPConfig {
 // DefaultConfig 返回带有合理默认值的配置
 func DefaultConfig() *Config {
 	return &Config{
+		Server:   HTTPServerConfig{Listen: "127.0.0.1:8320"},
 		Matrix:   DefaultMatrixConfig(),
 		AI:       DefaultAIConfig(),
 		MCP:      DefaultMCPConfig(),
@@ -880,8 +882,14 @@ func DefaultConfig() *Config {
 
 // ExampleConfig 返回示例配置内容。
 func ExampleConfig() string {
-	return `matrix:
-  # 可选入口；默认使用终端对话。接入 Matrix 时改为 true 并填写账号。
+	return `server:
+  # 默认常驻本机服务，使用 saber chat 打开 TUI。
+  listen: "127.0.0.1:8320"
+  # 首次启动自动创建 0600 令牌文件，相对于配置文件目录。
+  token_file: ".saber-token"
+
+matrix:
+  # 可选聊天入口；接入时改为 true 并填写账号。
   enabled: false
   # Matrix 服务器地址
   homeserver: "https://matrix.org"

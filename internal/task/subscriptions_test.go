@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"rua.plus/saber/internal/agent"
+	"rua.plus/saber/internal/chat"
 )
 
 func TestManager_ExecutionWithoutDeliveryAndReplay(t *testing.T) {
@@ -78,4 +79,36 @@ func TestManager_UnsubscribedResultsDoNotStarveDelivery(t *testing.T) {
 	item, err := m.Submit(ctx, message("matrix", "user"), dir, request("input"))
 	require.NoError(t, err)
 	waitTask(t, m, item, func(t Task) bool { return t.DeliveryID == "matrix-reply" })
+}
+
+func TestManager_ChatTurnDedupBusyAndCancel(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	started := make(chan struct{})
+	m, err := Open(filepath.Join(dir, "tasks.db"), func(ctx context.Context, _ agent.Request, _ func(agent.Event)) (agent.Result, error) {
+		close(started)
+		<-ctx.Done()
+		return agent.Result{Status: agent.Cancelled}, ctx.Err()
+	}, nil)
+	require.NoError(t, err)
+	defer closeManager(t, m)
+	msg := message("first", "local")
+	item, err := m.SubmitTurn(ctx, msg, dir, request("one"))
+	require.NoError(t, err)
+	<-started
+	duplicate, err := m.SubmitTurn(ctx, msg, dir, request("one"))
+	require.NoError(t, err)
+	require.Equal(t, item.ID, duplicate.ID)
+	msg.ID = "second"
+	_, err = m.SubmitTurn(ctx, msg, dir, request("two"))
+	require.ErrorIs(t, err, ErrBusy)
+	_, err = m.Cancel(ctx, chat.Identity{Session: msg.Session, SenderID: msg.SenderID}, item.ID)
+	require.NoError(t, err)
+	waitTask(t, m, item, func(t Task) bool { return t.Status == "cancelled" })
+	sessions, err := m.Conversations(ctx, msg.Session.Platform, msg.Session.Account)
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+	history, err := m.History(ctx, msg.Session)
+	require.NoError(t, err)
+	require.Len(t, history, 1)
 }

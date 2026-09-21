@@ -51,3 +51,5 @@ config.yaml
 .claude/worktrees/
 data/
 coverage.html
+# 本机聊天服务令牌
+.saber-token

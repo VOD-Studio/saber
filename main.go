@@ -1,6 +1,6 @@
 // Package main 是 Saber 的入口点。
 //
-// Saber 默认提供终端 AI 对话，也支持可选的 Matrix 入口、端到端加密和自动重连。
+// Saber 默认提供常驻聊天服务，也支持独立终端界面和可选的 Matrix 入口。
 // 本文件负责启动机器人并传递构建时的版本信息。
 package main
 

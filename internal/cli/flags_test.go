@@ -181,3 +181,17 @@ func TestParseReturnsNonNil(t *testing.T) {
 		t.Error("Parse 应返回非 nil Flags 指针")
 	}
 }
+
+func TestParseArgs_Subcommands(t *testing.T) {
+	for _, args := range [][]string{nil, {"serve"}, {"serve", "-c", "private.yaml"}, {"-c", "private.yaml", "serve"}} {
+		flags, err := ParseArgs(args)
+		if err != nil || flags.Command != "serve" {
+			t.Fatalf("%v: %+v %v", args, flags, err)
+		}
+	}
+	for _, args := range [][]string{{"unknown"}, {"serve", "extra"}, {"--unknown"}} {
+		if _, err := ParseArgs(args); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
+}

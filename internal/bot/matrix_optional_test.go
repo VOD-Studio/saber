@@ -1,18 +1,11 @@
 package bot
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"flag"
-	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"rua.plus/saber/internal/cli"
@@ -20,61 +13,43 @@ import (
 	"rua.plus/saber/internal/matrix"
 )
 
-// TestRun_MatrixOptional 覆盖真实启动分支，关闭入口时不应尝试创建 Matrix 客户端。
+// TestRun_MatrixOptional 覆盖无 Matrix 的常驻服务启动与正常取消。
 func TestRun_MatrixOptional(t *testing.T) {
-	for _, body := range []string{"{}", "matrix:\n  enabled: false\n  homeserver: invalid\n  enable_e2ee: true\n  e2ee_session_path: ''\n"} {
+	for _, body := range []string{"server:\n  listen: 127.0.0.1:0\n", "server:\n  listen: 127.0.0.1:0\nmatrix:\n  enabled: false\n  homeserver: invalid\n"} {
 		t.Run(body, func(t *testing.T) {
-			args, flags := os.Args, flag.CommandLine
-			t.Cleanup(func() { os.Args, flag.CommandLine = args, flags })
+			args := os.Args
+			t.Cleanup(func() { os.Args = args })
 			path := createTestConfigFile(t, body)
 			os.Args = []string{"saber", "-c", path}
-			flag.CommandLine = flag.NewFlagSet("saber", flag.ContinueOnError)
-			require.NoError(t, Run(matrix.BuildInfo{Version: "test"}))
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- run(ctx, matrix.BuildInfo{Version: "test"}) }()
+			require.Eventually(t, func() bool { _, err := os.Stat(filepath.Join(filepath.Dir(path), ".saber-token")); return err == nil }, time.Second, 10*time.Millisecond)
+			select {
+			case err := <-done:
+				t.Fatalf("服务提前退出: %v", err)
+			default:
+			}
+			cancel()
+			require.NoError(t, <-done)
 		})
 	}
 }
 
-func TestTerminal_SharedServiceAndHistory(t *testing.T) {
-	requests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/v1/responses", r.URL.Path)
-		var req struct {
-			Input []map[string]any `json:"input"`
-		}
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
-		requests++
-		if requests == 1 {
-			require.Len(t, req.Input, 1)
-		} else {
-			require.Len(t, req.Input, 3)
-			require.Equal(t, "first", req.Input[0]["content"])
-			require.Equal(t, "remembered", req.Input[1]["content"])
-			require.Equal(t, "second", req.Input[2]["content"])
-		}
-		_, err := fmt.Fprint(w, `{"status":"completed","model":"test","output":[{"type":"message","content":[{"type":"output_text","text":"remembered"}]}]}`)
-		require.NoError(t, err)
-	}))
-	defer server.Close()
+func TestServer_SharedServicesWithoutMatrix(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.AI.Enabled = true
-	cfg.AI.StreamEnabled = false
-	cfg.AI.DefaultModel = "test.model"
-	cfg.AI.Providers = map[string]config.ProviderConfig{"test": {API: "openai-responses", BaseURL: server.URL + "/v1", Models: map[string]config.ModelConfig{"model": {Model: "test"}}}}
+	cfg.AI.Enabled, cfg.AI.Provider, cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.DefaultModel = true, "openai", "http://127.0.0.1:1/v1", "test", "local"
 	cfg.MCP.Enabled = false
 	state := &appState{cfg: cfg, flags: &cli.Flags{ConfigPath: filepath.Join(t.TempDir(), "config.yaml")}, services: &services{}}
 	defer state.shutdown(func() {})
 	require.NoError(t, state.initServices())
 	require.Nil(t, state.services.client)
-	require.Nil(t, state.services.mediaService)
 	require.Nil(t, state.services.commandService)
-	require.Nil(t, state.services.proactiveManager)
-	var out bytes.Buffer
-	require.NoError(t, cli.RunTerminal(context.Background(), io.NopCloser(strings.NewReader("first\nsecond\n/exit\n")), &out, state.services.aiService.HandleChat, cfg.AI.DefaultModel))
-	require.Equal(t, 2, requests)
-	require.Equal(t, 2, strings.Count(out.String(), "Saber> remembered"))
+	require.NotNil(t, state.services.aiService.Tasks())
 }
 
-func TestExampleConfig_DefaultsToTerminal(t *testing.T) {
+func TestExampleConfig_DefaultsToServer(t *testing.T) {
 	path := createTestConfigFile(t, config.ExampleConfig())
 	cfg, err := config.Load(path)
 	require.NoError(t, err)

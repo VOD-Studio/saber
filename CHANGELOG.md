@@ -9,11 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 默认启动本机常驻服务（`saber serve`），提供认证的会话接口与 SSE 事件续读；持久化会话续接、消息去重、取消及每轮模型/思考等级覆盖
+
 - 任务执行独立于聊天入口：可按平台注册结果投递，并通过持久化游标续读文本与工具事件，未启用 Matrix 时同样可运行任务
 
 - 思考等级 `reasoning_effort` 支持 AI 全局、提供商、模型/别名逐级覆盖；同时传递到 Responses 和 Chat Completions 的全部流式及非流式入口，空值保留上游默认
 
-- 默认提供终端 AI 对话，复用共享会话历史与工具权限；支持逐行输入、EOF、`/exit` 和 Ctrl+C 退出，Matrix 通过默认关闭的 `matrix.enabled` 显式启用
+- Matrix 通过默认关闭的 `matrix.enabled` 显式启用，与本机服务共用 Agent 和任务能力
 
 - 新增 `openai-responses` 协议：支持 go-openai 非流式/流式请求、文本与图片、现有 Agent 工具循环和流式编辑；保留工具续轮及任务恢复所需的加密推理输出，明确拒绝断流和截断响应，并提供 Podlink Responses 模型配置示例
 
@@ -50,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- 示例配置不再预填 Matrix 用户和伪令牌，默认输出上限改为 8192 tokens；旧 Matrix 部署需添加 `matrix.enabled: true`，未启用任何入口时提示配置并正常退出
+- 示例配置不再预填 Matrix 用户和伪令牌，默认输出上限改为 8192 tokens；旧 Matrix 部署需添加 `matrix.enabled: true`，未启用 AI 时本机服务仍提供配置状态
 
 - MCP 工具改为默认拒绝，内置与外部服务器均需要管理员显式授权；发布、部署、跨目录能力独立声明，stdio 进程不再继承 Saber 环境变量（安全敏感变更）
 - 应用启动时启用配置文件同目录下的 `tasks.db`；用户聊天转为后台任务，不读取或写入共享房间历史。工作目录固定为启动目录，重启后目录不匹配时拒绝执行

@@ -84,10 +84,12 @@ models:
 	require.Equal(t, false, tool["strict"])
 	require.Equal(t, "lookup", tool["name"])
 	require.NotContains(t, tool, "function")
-	cfg.ReasoningEffort = "none"
+	req.ReasoningEffort = "none"
 	request, err = client.responseRequest(req)
 	require.NoError(t, err)
 	require.Equal(t, float32(.7), *request.Temperature)
+	require.Equal(t, "none", request.Reasoning.Effort)
+	require.Equal(t, "medium", cfg.ReasoningEffort)
 	for _, api := range []string{"anthropic-messages", "typo"} {
 		cfg.API = api
 		_, err = NewClientWithModel(&cfg)
