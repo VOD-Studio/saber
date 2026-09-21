@@ -100,7 +100,9 @@ ai:
 
 ### Docker 部署
 
-项目提供完整的 Docker 支持，使用多阶段构建和 Distroless 镜像。
+项目的多阶段 Distroless 镜像用于普通聊天和不需要本地执行器的部署。它不包含 Docker CLI，也没有 daemon 连接及宿主工作区挂载配置，必须保持 `execution.enabled: false`。
+
+需要 Agent 命令执行和文件工具时，使用 [宿主二进制部署步骤](docs/execution.md#宿主二进制部署)。Saber 在宿主上调用 Docker CLI，任务命令仍在受限容器中执行。
 
 #### 构建镜像
 

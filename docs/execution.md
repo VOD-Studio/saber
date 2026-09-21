@@ -4,6 +4,57 @@
 
 默认不开放执行权限，也不自动授权已有 MCP 工具。未授权成员可以继续进行无工具的聊天。
 
+## 宿主二进制部署
+
+本轮支持的执行器部署方式是：Saber 二进制和 Docker CLI 运行在同一宿主用户下，连接本机 Docker daemon；任务工作目录也是该 daemon 可以直接挂载的宿主路径。Linux Docker Engine 与 macOS Docker Desktop 均应先在实际运行 Saber 的用户会话中验证连接。不要使用远端 daemon：本程序检查的是本机路径，远端同名路径不能保证是同一个工作区。
+
+现有 `Dockerfile` 的 Distroless 运行镜像只适用于 `execution.enabled: false`，缺少 Docker CLI 和工作区路径映射。仅挂载 Docker socket 不能补齐部署条件。本轮采用宿主二进制方案，不提供嵌套容器部署。
+
+在仓库中构建并安装到当前非 root 用户的目录：
+
+```sh
+make build
+install -d -m 700 "$HOME/saber/bin" "$HOME/saber/state" "$HOME/saber-work/project"
+install -m 755 bin/saber "$HOME/saber/bin/saber"
+# 首次部署生成配置；已有配置直接编辑，不覆盖现有凭据。
+"$HOME/saber/bin/saber" -generate-config -o "$HOME/saber/state/config.yaml"
+chmod 600 "$HOME/saber/state/config.yaml"
+
+docker info
+docker pull python:3.13-slim
+docker image inspect python:3.13-slim
+```
+
+编辑生成的配置：启用 `ai.enabled`，填写真实模型与 Matrix 账号；按下方示例增加 `execution`。把 `log_dir` 设置为当前用户目录下 `saber/state/execution` 的**绝对路径**，把工作区 `path` 设置为 `saber-work/project` 的绝对路径。将账号、测试群 ID、成员 ID 换成真实值，不要把 YAML 中的 `$HOME` 当成会自动展开的变量。E2EE 的数据库及密钥路径应放在私有 `saber/state` 中，不能放进工作区。运行用户必须可读写工作区并使用 Docker。
+
+```sh
+cd "$HOME/saber/state"
+exec "$HOME/saber/bin/saber" -c "$HOME/saber/state/config.yaml"
+```
+
+保持同一配置目录、工作目录和执行日志目录；一个任务数据库只运行一个 Saber 进程。进程启动时执行 Docker 连接及残留容器清理检查，失败会明确拒绝启动执行器。升级前停止旧进程，替换二进制后再启动；同时备份私有状态目录中的任务数据库、WAL/SHM（如存在）、Matrix 会话/E2EE 密钥和执行日志。
+
+Linux 如需持续运行，可保存下面的用户服务为 `~/.config/systemd/user/saber.service`，再执行 `systemctl --user daemon-reload && systemctl --user enable --now saber`。服务使用的 PATH 和 Docker 连接必须与前台验证一致；Docker Desktop 等自定义 CLI 安装路径需补入 PATH。前台进程需先退出。
+
+```ini
+[Unit]
+Description=Saber Matrix Agent
+
+[Service]
+WorkingDirectory=%h/saber/state
+ExecStart=%h/saber/bin/saber -c %h/saber/state/config.yaml
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+
+[Install]
+WantedBy=default.target
+```
+
+上线前在专用测试群依次验收：交办生成文件 → 回复回执补充要求 → 回复回执取消运行中的任务 → 下载失败任务日志 → 创建一次性计划并等待无人发消息时汇报 → 停止、重启进程后查询旧任务和续接 → 开启 E2EE 验证附件解密。用 `!task status` 检查执行与投递状态，用 `!schedule status` 检查下次执行及触发记录。真实模型、Matrix 群和 E2EE 需要单独完成在线验收；本地模拟测试通过不代表该步骤已完成。
+
 ## 配置
 
 Docker daemon 必须可用。管理员预先安装包含 `/usr/bin/env`、Python 3 和 `/bin/sh` 的可信镜像，例如 `docker pull python:3.13-slim`；程序使用 `--pull=never`，不自动拉取模型指定的镜像。开发工具链应预装在镜像中，生产环境建议使用固定镜像 digest。

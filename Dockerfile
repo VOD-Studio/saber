@@ -38,7 +38,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -gcflags="-l=4" \
     -o saber .
 
-# 阶段2: 运行（Distroless 镜像）
+# 阶段2: 普通聊天运行镜像；不含 Docker CLI，execution.enabled 必须为 false。
+# Agent 执行器请使用 docs/execution.md 中的宿主二进制部署。
 # static-debian12 已包含 CA 证书、时区数据、非 root 用户
 # 使用 m.daocloud.io 镜像加速
 FROM m.daocloud.io/gcr.io/distroless/static-debian12:latest
