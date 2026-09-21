@@ -31,7 +31,7 @@ type Authorization struct {
 type Manager struct {
 	store      *store
 	run        RunFunc
-	send       SendFunc
+	deliveries map[string]SendFunc
 	ctx        context.Context
 	cancel     context.CancelFunc
 	wake       chan struct{}
@@ -48,8 +48,8 @@ type Manager struct {
 
 // Open 打开数据库，标记中断任务，并启动队列和结果投递。
 func Open(path string, run RunFunc, send SendFunc, authorization ...Authorization) (*Manager, error) {
-	if run == nil || send == nil {
-		return nil, errors.New("task manager requires runner and sender")
+	if run == nil {
+		return nil, errors.New("task manager requires runner")
 	}
 	s, err := openStore(path)
 	if err != nil {
@@ -60,10 +60,13 @@ func Open(path string, run RunFunc, send SendFunc, authorization ...Authorizatio
 		cancel()
 		return nil, errors.Join(err, s.db.Close())
 	}
-	m := &Manager{store: s, run: run, send: send, ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), done: make(chan struct{}), active: make(map[int64]context.CancelFunc)}
+	m := &Manager{store: s, run: run, deliveries: make(map[string]SendFunc), ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), done: make(chan struct{}), active: make(map[int64]context.CancelFunc)}
 	if len(authorization) > 0 {
 		m.authorize = authorization[0].Schedule
 		m.manage = authorization[0].Manage
+	}
+	if send != nil {
+		m.deliveries["*"] = send
 	}
 	go m.loop()
 	return m, nil
@@ -222,34 +225,6 @@ func (m *Manager) execute(ctx context.Context, cancel context.CancelFunc, t Task
 	if err := m.store.finish(context.Background(), t, result, runErr, m.ctx.Err() != nil); err != nil {
 		// 保持 running 以锁住目录；重启后转 interrupted，绝不重跑。
 		slog.Error("保存任务终态失败，需要人工核查", "error", taskError(t.ID, err))
-	}
-}
-
-func (m *Manager) deliverLoop() {
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-m.ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		tasks, err := m.store.query(m.ctx, `status NOT IN ('queued','running') AND delivery='pending' AND next_delivery<=? ORDER BY next_delivery,id LIMIT 20`, time.Now().UnixMilli())
-		if err != nil {
-			if m.ctx.Err() == nil {
-				slog.Error("读取待投递任务失败", "error", err)
-			}
-			continue
-		}
-		for _, t := range tasks {
-			if m.ctx.Err() != nil {
-				return
-			}
-			messageID, sendErr := m.send(m.ctx, t)
-			if err := m.store.delivered(context.Background(), t.ID, messageID, sendErr, t.DeliveryAttempts); err != nil {
-				slog.Error("保存任务投递状态失败", "error", taskError(t.ID, err))
-			}
-		}
 	}
 }
 

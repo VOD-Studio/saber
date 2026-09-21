@@ -48,9 +48,6 @@ func (s *Service) EnableTasks(path string) error {
 	if s.tasks != nil {
 		return errors.New("task service already enabled")
 	}
-	if s.matrixService == nil {
-		return errors.New("task delivery requires Matrix adapter")
-	}
 	dir, err := os.Getwd()
 	if err != nil {
 		return err
@@ -59,8 +56,6 @@ func (s *Service) EnableTasks(path string) error {
 	if err != nil {
 		return err
 	}
-	cfg := s.core.GetConfig()
-	adapter := matrix.NewChatAdapter(s.matrixService, s.mediaService, cfg.Media, false, nil)
 	ready := make(chan struct{})
 	manager, err := task.Open(path, func(ctx context.Context, req agent.Request, emit func(agent.Event)) (agent.Result, error) {
 		select {
@@ -85,21 +80,23 @@ func (s *Service) EnableTasks(path string) error {
 			return agent.Result{}, err
 		}
 		return s.RunAgent(ctx, req, emit)
-	}, func(ctx context.Context, t task.Task) (string, error) {
-		select {
-		case <-ready:
-		case <-ctx.Done():
-			return "", ctx.Err()
-		}
-		return s.deliverTask(ctx, adapter, t)
-	}, task.Authorization{Schedule: s.authorizeSchedule, Manage: func(identity chat.Identity) bool { return s.executor != nil && s.executor.IsTaskAdmin(identity) }})
+	}, nil, task.Authorization{Schedule: s.authorizeSchedule, Manage: func(identity chat.Identity) bool { return s.executor != nil && s.executor.IsTaskAdmin(identity) }})
 	if err != nil {
 		return err
 	}
 	s.tasks, s.taskDir = manager, dir
 	close(ready)
-	s.matrixService.RegisterCommandWithDesc("task", "后台任务：run <内容> | list | status <ID> | cancel <ID> | logs <ID>", &taskCommand{service: s})
-	s.matrixService.RegisterCommandWithDesc("schedule", "定时计划：once/every/weekdays <时间> <时区> <目标> | list | status/pause/delete <ID>", &scheduleCommand{service: s})
+	if s.matrixService != nil {
+		cfg := s.core.GetConfig()
+		adapter := matrix.NewChatAdapter(s.matrixService, s.mediaService, cfg.Media, false, nil)
+		if err := manager.RegisterDelivery("matrix", func(ctx context.Context, t task.Task) (string, error) {
+			return s.deliverTask(ctx, adapter, t)
+		}); err != nil {
+			return err
+		}
+		s.matrixService.RegisterCommandWithDesc("task", "后台任务：run <内容> | list | status <ID> | cancel <ID> | logs <ID>", &taskCommand{service: s})
+		s.matrixService.RegisterCommandWithDesc("schedule", "定时计划：once/every/weekdays <时间> <时区> <目标> | list | status/pause/delete <ID>", &scheduleCommand{service: s})
+	}
 	return nil
 }
 

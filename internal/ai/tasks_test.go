@@ -324,3 +324,14 @@ func TestTasks_MatrixReplyKeepsQuoteUnlessContinuingTask(t *testing.T) {
 		})
 	}
 }
+
+func TestService_EnableTasksWithoutMatrix(t *testing.T) {
+	cfg := config.DefaultAIConfig()
+	cfg.Enabled, cfg.Provider, cfg.APIKey, cfg.DefaultModel = true, "openai", "test", "local"
+	cfg.BaseURL = "http://127.0.0.1:1/v1"
+	service, err := NewService(&cfg, nil, nil, nil)
+	require.NoError(t, err)
+	defer service.Stop()
+	require.NoError(t, service.EnableTasks(filepath.Join(t.TempDir(), "tasks.db")))
+	require.NotNil(t, service.tasks)
+}

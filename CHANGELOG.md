@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 任务执行独立于聊天入口：可按平台注册结果投递，并通过持久化游标续读文本与工具事件，未启用 Matrix 时同样可运行任务
+
 - 思考等级 `reasoning_effort` 支持 AI 全局、提供商、模型/别名逐级覆盖；同时传递到 Responses 和 Chat Completions 的全部流式及非流式入口，空值保留上游默认
 
 - 默认提供终端 AI 对话，复用共享会话历史与工具权限；支持逐行输入、EOF、`/exit` 和 Ctrl+C 退出，Matrix 通过默认关闭的 `matrix.enabled` 显式启用

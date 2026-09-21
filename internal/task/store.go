@@ -216,10 +216,7 @@ func (s *store) claim(ctx context.Context) (Task, error) {
 }
 
 func (s *store) record(ctx context.Context, taskID int64, event agent.Event) error {
-	// 文本增量不单独落盘；完整模型响应及工具开始/结束事件足以核查副作用。
-	if event.Kind == agent.TextDelta {
-		return nil
-	}
+	// 增量与执行记录共用持久化游标，订阅断开不影响执行，也不会丢失文本。
 	data, err := json.Marshal(event)
 	if err != nil {
 		return err
