@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- 回复任务消息可恢复原始目标、约束和工具轨迹，补充要求按持久化前序依赖排队；续接和消息关联支持重启恢复，并复查当前发言人的工作区权限
+
 - 回复任务回执时使用原始正文识别取消等控制指令，显式命令先去除 Matrix 引用回退文本，避免控制操作排入执行队列
 
 ### Changed

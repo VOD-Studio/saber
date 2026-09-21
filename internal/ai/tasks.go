@@ -156,13 +156,19 @@ func (s *Service) submitTask(ctx context.Context, message chat.Message, req agen
 			dir = granted
 		}
 	}
-	t, err := s.tasks.Submit(ctx, message, dir, req)
+	t, err := s.tasks.Continue(ctx, message, dir, req)
+	if errors.Is(err, sql.ErrNoRows) {
+		t, err = s.tasks.Submit(ctx, message, dir, req)
+	}
 	if err != nil {
 		return err
 	}
 	ackCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	_, err = reply.Send(ackCtx, taskReply(t, "received", fmt.Sprintf("已接收，任务 #%d", t.ID)))
+	messageID, err := reply.Send(ackCtx, taskReply(t, "received", fmt.Sprintf("已接收，任务 #%d", t.ID)))
+	if err == nil {
+		err = s.tasks.RememberMessage(ackCtx, t.ID, messageID)
+	}
 	// 接收回执失败不会撤销已持久化任务；再次送达仍返回同一编号。
 	return err
 }

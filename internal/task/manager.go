@@ -192,16 +192,20 @@ func (m *Manager) execute(ctx context.Context, cancel context.CancelFunc, t Task
 		return
 	}
 	var journalErr error
-	result, runErr := m.run(ctx, t.Request, func(event agent.Event) {
-		if journalErr != nil {
-			return
-		}
-		journalErr = m.store.record(context.WithoutCancel(ctx), t.ID, event)
-		// ToolStarted 持久化失败时取消，Runtime 在派发工具前再次检查 ctx。
-		if journalErr != nil {
-			cancel()
-		}
-	})
+	req, resumeErr := m.continuationRequest(ctx, t)
+	result, runErr := agent.Result{}, resumeErr
+	if resumeErr == nil {
+		result, runErr = m.run(ctx, req, func(event agent.Event) {
+			if journalErr != nil {
+				return
+			}
+			journalErr = m.store.record(context.WithoutCancel(ctx), t.ID, event)
+			// ToolStarted 持久化失败时取消，Runtime 在派发工具前再次检查 ctx。
+			if journalErr != nil {
+				cancel()
+			}
+		})
+	}
 	if journalErr != nil {
 		runErr = errors.Join(runErr, journalErr)
 	}

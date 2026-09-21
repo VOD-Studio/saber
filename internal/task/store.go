@@ -83,7 +83,14 @@ func openStore(path string) (*store, error) {
 	CREATE TABLE IF NOT EXISTS task_events (
 		id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL REFERENCES tasks(id),
 		created_at INTEGER NOT NULL, record BLOB NOT NULL
-	);` + scheduleSchema)
+	);
+ CREATE TABLE IF NOT EXISTS task_messages (
+  task_id INTEGER NOT NULL REFERENCES tasks(id), message_id TEXT NOT NULL,
+  PRIMARY KEY(task_id, message_id)
+ );
+ CREATE TABLE IF NOT EXISTS task_links (
+  task_id INTEGER PRIMARY KEY REFERENCES tasks(id), parent_id INTEGER NOT NULL REFERENCES tasks(id)
+ );` + scheduleSchema)
 	if err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
@@ -109,7 +116,7 @@ func canonicalDir(dir string) (string, error) {
 	return abs, nil
 }
 
-func (s *store) submit(ctx context.Context, message chat.Message, dir string, req agent.Request) (Task, error) {
+func (s *store) submit(ctx context.Context, message chat.Message, dir string, req agent.Request, parent ...int64) (Task, error) {
 	if err := message.Validate(); err != nil {
 		return Task{}, err
 	}
@@ -128,14 +135,28 @@ func (s *store) submit(ctx context.Context, message chat.Message, dir string, re
 	if err != nil {
 		return Task{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO tasks(platform, account, room, event, sender, work_dir, message, request, created_at)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Task{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(ctx, `INSERT INTO tasks(platform, account, room, event, sender, work_dir, message, request, created_at)
 		VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(platform,account,room,event) DO NOTHING`,
 		message.Session.Platform, message.Session.Account, message.Session.Conversation, message.ID, message.SenderID, dir, m, r, time.Now().UnixMilli())
 	if err != nil {
 		return Task{}, err
 	}
-	return scanTask(s.db.QueryRowContext(ctx, `SELECT `+taskColumns+` FROM tasks WHERE platform=? AND account=? AND room=? AND event=?`,
+	t, err := scanTask(tx.QueryRowContext(ctx, `SELECT `+taskColumns+` FROM tasks WHERE platform=? AND account=? AND room=? AND event=?`,
 		message.Session.Platform, message.Session.Account, message.Session.Conversation, message.ID))
+	if err != nil {
+		return Task{}, err
+	}
+	if len(parent) > 0 && t.ID != parent[0] {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO task_links(task_id,parent_id) VALUES(?,?) ON CONFLICT(task_id) DO NOTHING`, t.ID, parent[0]); err != nil {
+			return Task{}, err
+		}
+	}
+	return t, tx.Commit()
 }
 
 const taskColumns = `id,message,work_dir,request,status,result,error,cancel_requested,delivery,delivery_attempts,delivery_error,delivery_id,created_at,event`
@@ -176,6 +197,8 @@ func (s *store) recover(ctx context.Context) error {
 func (s *store) claim(ctx context.Context) (Task, error) {
 	return scanTask(s.db.QueryRowContext(ctx, `UPDATE tasks SET status='running' WHERE id=(
 		SELECT id FROM tasks q WHERE status='queued' AND NOT EXISTS (
+   SELECT 1 FROM task_links l JOIN tasks p ON p.id=l.parent_id WHERE l.task_id=q.id AND p.status IN ('queued','running')
+  ) AND NOT EXISTS (
 			SELECT 1 FROM tasks r WHERE r.status='running' AND r.work_dir=q.work_dir
 		) ORDER BY id LIMIT 1
 	) RETURNING `+taskColumns))

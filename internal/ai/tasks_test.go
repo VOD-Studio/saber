@@ -182,6 +182,19 @@ func TestTasks_MatrixReceiptIsolationCommandsAndRetry(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, status, "completed")
 	require.Contains(t, status, "https://matrix.to/#/!room:test/$alice")
+	followCtx := matrix.WithMessageRelations(matrix.WithEventID(context.Background(), "$follow"), "$alice", "$thread")
+	require.NoError(t, service2.handleAICommand(followCtx, "@alice:test", "!room:test", service2.GetModelRegistry().GetDefault(), []string{"再检查一下"}))
+	release <- struct{}{}
+	require.Eventually(t, func() bool {
+		ts, err := service2.tasks.List(context.Background(), session)
+		return err == nil && len(ts) == 3 && ts[0].Status == "completed"
+	}, 3*time.Second, 10*time.Millisecond)
+	mu.Lock()
+	require.Len(t, requests, 2)
+	require.Equal(t, "alice private input", requests[1].Messages[1].Content)
+	require.Equal(t, "finished alice private input", requests[1].Messages[2].Content)
+	require.Equal(t, "再检查一下", requests[1].Messages[len(requests[1].Messages)-1].Content)
+	mu.Unlock()
 }
 
 func TestNaturalTaskCommand(t *testing.T) {
