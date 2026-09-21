@@ -748,7 +748,13 @@ meme:
 
 | 字段             | 默认值 | 描述                 |
 |------------------|--------|----------------------|
-| `max_iterations` | `5`    | 最大工具调用迭代次数 |
+| `max_iterations` | `5`    | 最大模型轮数，包含首次请求和最终回答；最后一轮不派发工具 |
+| `timeout_seconds` | `120` | 整次运行上限，包含请求、重试等待和工具执行；0 使用默认值 |
+| `max_tool_output_bytes` | `32768` | 单条工具结果最大字节数，包含截断标记；0 使用默认值，非零至少 128 |
+
+流式和非流式对话共用独立 Agent Runtime；重试只作用于当前模型请求，保留已有工具结果。
+工具失败原因会交回模型，运行轨迹由返回值和事件提供，不自动持久化。
+详细接口、状态与离线验收见 [Agent Runtime](docs/agent-runtime.md)。
 
 ### MCP 设置
 
@@ -852,6 +858,7 @@ saber/
         meme.go                    # Meme 命令
     ai/
       service.go                   # AI 服务编排
+      agent.go                     # Agent 模型/MCP 适配与 Matrix 事件展示
       core.go                      # 核心逻辑（客户端缓存、速率限制）
       client.go                    # OpenAI 兼容客户端
       strategy.go                  # AI 提供商策略模式
@@ -860,7 +867,7 @@ saber/
       context_manager.go           # 对话上下文管理
       stream_handler.go            # 流式响应处理
       stream_editor.go             # 流式消息编辑
-      stream_tool_handler.go       # 工具调用流处理
+      stream_tool_handler.go       # 模型增量拼接与运行事件（无 Matrix 操作）
       retry_handler.go             # 重试逻辑和退避
       circuit_breaker.go           # 熔断器模式
       proactive.go                 # 主动聊天管理器

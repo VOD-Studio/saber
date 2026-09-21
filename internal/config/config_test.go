@@ -1059,3 +1059,20 @@ func TestMemeConfigValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestToolCallingConfig_RuntimeLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		timeout, output int
+		invalid         bool
+	}{
+		{"legacy", 0, 0, false}, {"configured", 120, 32768, false}, {"negative_timeout", -1, 0, true}, {"negative_output", 0, -1, true}, {"too_small_output", 0, 127, true}, {"minimum_output", 0, 128, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := ToolCallingConfig{MaxIterations: 5, TimeoutSeconds: tc.timeout, MaxToolOutputBytes: tc.output}
+			if err := cfg.Validate(); (err != nil) != tc.invalid {
+				t.Fatalf("Validate()=%v", err)
+			}
+		})
+	}
+}

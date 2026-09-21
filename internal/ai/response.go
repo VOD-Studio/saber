@@ -205,54 +205,8 @@ func (rh *ResponseHandler) ExecuteStreamingResponse(
 	return nil
 }
 
-// ExecuteDirectResponseWithTools 执行带工具调用的直接响应。
-//
-// 参数:
-//   - ctx: 上下文
-//   - client: AI 客户端（未使用，仅为接口兼容性）
-//   - req: 聊天完成请求（未使用，仅为接口兼容性）
-//   - respCtx: 响应上下文
-//
-// 返回值:
-//   - *ChatCompletionResponse: 响应结果
-//   - error: 错误信息
-func (rh *ResponseHandler) ExecuteDirectResponseWithTools(
-	ctx context.Context,
-	_ *Client,
-	_ ChatCompletionRequest,
-	respCtx *ResponseContext,
-) (*ChatCompletionResponse, error) {
-	roomID := respCtx.RoomID
-
-	if err := rh.service.matrixService.StartTyping(ctx, roomID, 30000); err != nil {
-		slog.Warn("无法启动 typing indicator", "error", err)
-	}
-
-	toolExecutor := NewToolExecutor(rh.service)
-	finalContent, chatErr := toolExecutor.ExecuteToolCallingLoop(ctx, respCtx.Messages, respCtx.Model, respCtx.Tools)
-
-	if stopErr := rh.service.matrixService.StopTyping(ctx, roomID); stopErr != nil {
-		slog.Warn("无法停止 typing indicator", "error", stopErr)
-	}
-
-	if chatErr != nil {
-		slog.Error("AI请求失败", "model", respCtx.Model, "error", chatErr)
-		return nil, chatErr
-	}
-
-	slog.Info("AI 响应", "model", respCtx.Model, "content_length", len(finalContent))
-
-	if err := rh.SendResponse(ctx, roomID, finalContent); err != nil {
-		slog.Error("发送 AI 响应失败", "error", err)
-		return nil, fmt.Errorf("发送响应失败：%w", err)
-	}
-
-	if rh.service.contextManager != nil {
-		rh.service.contextManager.AddMessage(roomID, RoleAssistant, finalContent, rh.service.matrixService.BotID())
-	}
-
-	return &ChatCompletionResponse{
-		Content: finalContent,
-		Model:   respCtx.Model,
-	}, nil
+// ExecuteDirectResponseWithTools 通过 Runtime 执行工具对话并展示最终结果。
+func (rh *ResponseHandler) ExecuteDirectResponseWithTools(ctx context.Context, client *Client, req ChatCompletionRequest, respCtx *ResponseContext) (*ChatCompletionResponse, error) {
+	req.Messages, req.Tools, req.Model, req.Stream = respCtx.Messages, respCtx.Tools, respCtx.Model, false
+	return rh.service.runAgentReply(ctx, req, respCtx.RoomID, client)
 }

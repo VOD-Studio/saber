@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 流式和非流式聊天入口共用 Agent Runtime，Matrix 展示通过运行事件更新；最终回答统一写入会话历史一次
+- 模型重试与备用模型切换缩小到单次请求，避免失败后重放已执行工具；流式工具调用按索引排序，并拒绝未完整结束的响应
+- 工具请求保留 `max_tokens`、`temperature` 等设置；MCP `IsError` 与序列化错误统一反馈给模型
+- `ai.tool_calling` 新增 `timeout_seconds`、`max_tool_output_bytes`；旧配置可省略，默认 120 秒、32 KiB；最大轮数包含最终回答，最后一轮不再派发工具
+
 #### 配置文件
 
 - 加载配置时不再强制校验文件权限必须为 0600：移除 `checkFilePermissions` 与 `SABER_ALLOW_INSECURE_CONFIG` 逃生开关，权限管控交由部署环境负责

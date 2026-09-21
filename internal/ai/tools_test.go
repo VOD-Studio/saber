@@ -3,6 +3,7 @@ package ai
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/sashabaranov/go-openai"
@@ -226,8 +227,10 @@ func TestToolExecutor_CancelledContext(t *testing.T) {
 
 	// 使用已取消的上下文
 	_, err = executor.ExecuteToolCallingLoop(ctx, messages, "gpt-4", nil)
-	// 应该返回上下文相关的错误
-	_ = err
+	// 取消必须保留标准错误，不能被模型重试包装成普通失败。
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation, got %v", err)
+	}
 }
 
 // TestToolExecutor_DefaultMaxIterations 测试默认最大迭代次数。

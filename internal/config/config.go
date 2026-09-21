@@ -108,7 +108,12 @@ type RetryConfig struct {
 
 // ToolCallingConfig 存储工具调用配置
 type ToolCallingConfig struct {
-	MaxIterations int `yaml:"max_iterations"` // 最大工具调用迭代次数（默认 5）
+	// MaxIterations 限制模型轮数，包含最终回答，默认 5。
+	MaxIterations int `yaml:"max_iterations"`
+	// TimeoutSeconds 限制整次 Agent 运行，零值使用 120 秒。
+	TimeoutSeconds int `yaml:"timeout_seconds"`
+	// MaxToolOutputBytes 限制每条工具结果，零值使用 32 KiB。
+	MaxToolOutputBytes int `yaml:"max_tool_output_bytes"`
 }
 
 // MCPConfig 存储 MCP (Model Context Protocol) 集成配置
@@ -304,7 +309,9 @@ func DefaultRetryConfig() RetryConfig {
 // DefaultToolCallingConfig 返回带有合理默认值的工具调用配置
 func DefaultToolCallingConfig() ToolCallingConfig {
 	return ToolCallingConfig{
-		MaxIterations: 5,
+		MaxIterations:      5,
+		TimeoutSeconds:     120,
+		MaxToolOutputBytes: 32768,
 	}
 }
 
@@ -546,6 +553,13 @@ func (a *AIConfig) migrateFromOldFormat() {
 
 // Validate 验证工具调用配置是否有效
 func (t *ToolCallingConfig) Validate() error {
+	// 防止秒数转换为 time.Duration 纳秒时溢出。
+	if t.TimeoutSeconds < 0 || int64(t.TimeoutSeconds) > 9223372036 {
+		return fmt.Errorf("timeout_seconds must be between 0 and 9223372036")
+	}
+	if t.MaxToolOutputBytes < 0 || t.MaxToolOutputBytes > 0 && t.MaxToolOutputBytes < 128 {
+		return fmt.Errorf("max_tool_output_bytes must be 0 or at least 128")
+	}
 	if t.MaxIterations < 1 {
 		return fmt.Errorf("max_iterations must be at least 1")
 	}
@@ -956,8 +970,12 @@ ai:
     reset_timeout: 30
   # 工具调用配置
   tool_calling:
-    # 最大工具调用迭代次数（默认 5）
+    # 最大模型轮数，包含首次请求和最终回答；最后一轮不再执行工具
     max_iterations: 5
+    # 总运行时长，包含请求、重试等待和工具执行
+    timeout_seconds: 120
+    # 每条工具结果最大字节数，包含截断标记
+    max_tool_output_bytes: 32768
   # 多模型配置示例
   models: {}
     # fast:

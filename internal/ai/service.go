@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/sashabaranov/go-openai"
 	"maunium.net/go/mautrix/id"
@@ -440,74 +439,10 @@ func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID 
 		"max_tokens", cfg.MaxTokens,
 		"temperature", cfg.Temperature)
 
-	retryConfig := &RetryConfigWrapper{
-		MaxRetries:     cfg.Retry.MaxRetries,
-		InitialDelay:   time.Duration(cfg.Retry.InitialDelayMs) * time.Millisecond,
-		MaxDelay:       time.Duration(cfg.Retry.MaxDelayMs) * time.Millisecond,
-		BackoffFactor:  cfg.Retry.BackoffFactor,
-		FallbackModels: cfg.Retry.FallbackModels,
-	}
-
-	// 如果启用了熔断器，创建熔断器实例
-	if cfg.CircuitBreaker.Enabled {
-		retryConfig.CircuitBreaker = NewCircuitBreaker(
-			cfg.CircuitBreaker.FailureThreshold,
-			time.Duration(cfg.CircuitBreaker.ResetTimeout)*time.Second,
-		)
-		slog.Debug("熔断器已启用",
-			"failure_threshold", cfg.CircuitBreaker.FailureThreshold,
-			"reset_timeout", cfg.CircuitBreaker.ResetTimeout)
-	}
-
-	fallbackHandler := &FallbackModelHandler{
-		MainModel:   actualModel,
-		RetryConfig: retryConfig,
-	}
-
-	_, err := fallbackHandler.TryWithFallback(ctx, func(model string) (any, error) {
-		client, clientErr := s.getClient(model)
-		if clientErr != nil {
-			slog.Error("创建AI客户端失败", "model", model, "error", clientErr)
-			return nil, clientErr
-		}
-
-		req.Model = model
-		slog.Debug("发送AI请求", "model", model, "base_url", cfg.BaseURL)
-
-		tools, useToolCalling := s.toolExecutor.PrepareTools()
-		if useToolCalling {
-			req.Tools = tools
-		}
-
-		respCtx := &ResponseContext{
-			UserID:      userID,
-			RoomID:      roomID,
-			Messages:    messages,
-			Model:       model,
-			UseToolCall: useToolCalling,
-			Tools:       tools,
-		}
-
-		mode := s.respHandler.DetermineResponseMode(cfg.StreamEnabled, cfg.StreamEdit.Enabled, useToolCalling)
-		slog.Debug("响应模式", "mode", mode, "model", model)
-
-		switch mode {
-		case ResponseModeStreamingWithTools:
-			return s.toolExecutor.ExecuteStreamingWithToolCalling(ctx, client, req, roomID, messages, tools, model)
-
-		case ResponseModeStreaming:
-			if err := s.respHandler.ExecuteStreamingResponse(ctx, client, req, respCtx); err != nil {
-				return nil, err
-			}
-			return nil, nil
-
-		case ResponseModeToolCalling:
-			return s.respHandler.ExecuteDirectResponseWithTools(ctx, client, req, respCtx)
-
-		default:
-			return s.respHandler.ExecuteDirectResponse(ctx, client, req, respCtx)
-		}
-	})
+	tools, _ := s.toolExecutor.PrepareTools()
+	req.Tools = tools
+	req.Stream = cfg.StreamEnabled && cfg.StreamEdit.Enabled
+	_, err := s.runAgentReply(ctx, req, roomID, nil)
 
 	if err != nil {
 		slog.Error("AI命令执行失败", "error", err)
