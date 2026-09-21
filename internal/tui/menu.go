@@ -32,7 +32,7 @@ func (m *model) choices() (string, []choice) {
 		if m.menu == "commands" {
 			title = "命令"
 		}
-		return title, []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}, {"/sidebar", "sidebar", "收起或展开侧栏 · Ctrl+B"}, {"/tools", "tools", "展开工具详情 · Ctrl+T"}, {"F5", "reconnect", "刷新连接与会话"}, {"/quit", "quit", "离开界面 · Ctrl+Q"}}
+		return title, []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}, {"/sidebar", "sidebar", "收起或展开侧栏 · Ctrl+B"}, {"/tools", "tools", "展开工具详情 · Ctrl+T"}, {"F5", "reconnect", "刷新连接与会话"}, {"/quit", "quit", "离开界面 · 空输入时 Ctrl+C"}}
 	}
 }
 func (m *model) openMenu(menu string) tea.Cmd {
@@ -232,7 +232,7 @@ func (m *model) menuView() string {
 	}
 	lines = append(lines, "")
 	if helpRows > 0 {
-		lines = append(lines, quiet.Render(clipped("Enter 发送 · Alt+Enter 换行 · Ctrl+C 清空", width-4)))
+		lines = append(lines, quiet.Render(clipped("Enter 发送 · Alt+Enter 换行 · Ctrl+C 清空/退出", width-4)))
 	}
 	lines = append(lines, quiet.Render(clipped(hint, width-4)))
 	view := lipgloss.NewStyle().Background(panel).Padding(1, 2).Width(width).Render(strings.Join(lines, "\n"))

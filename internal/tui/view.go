@@ -419,7 +419,7 @@ func (m *model) welcome() string {
 }
 func (m *model) View() tea.View {
 	if m.width < 36 || m.height < 14 {
-		v := tea.NewView(lipgloss.NewStyle().Width(m.width).MaxHeight(m.height).Render("Saber · 请扩大窗口至 36×14\nCtrl+Q 退出"))
+		v := tea.NewView(lipgloss.NewStyle().Width(m.width).MaxHeight(m.height).Render("Saber · 请扩大窗口至 36×14\nCtrl+C 清空/退出"))
 		v.AltScreen = true
 		return v
 	}

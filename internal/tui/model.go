@@ -399,6 +399,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if key == "ctrl+c" {
+			if m.input.Value() == "" && m.menu == "" {
+				m.stopStream()
+				return m, tea.Quit
+			}
 			m.input.Reset()
 			if m.menu != "" {
 				return m, m.openMenu("")

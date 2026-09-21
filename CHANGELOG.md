@@ -61,7 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- TUI 快捷键调整：Esc 停止当前会话正在执行或排队的任务，菜单内优先返回；Ctrl+C 清空输入并关闭菜单，退出统一使用 Ctrl+Q 或 `/quit`
+- TUI 快捷键调整：Esc 停止当前会话正在执行或排队的任务，菜单内优先返回；Ctrl+C 有输入时清空、菜单内先清空并关闭菜单、空输入时退出，保留 Ctrl+Q 和 `/quit`；退出不取消服务端任务
 
 - TUI 参考 Crush 重绘视觉：深紫灰面板、渐变字标和欢迎页、带状态的会话列表；移除输入区与选择器的整圈边框，将多行底栏收敛为输入区内的模型信息和简短操作提示，并修复嵌套 ANSI 样式造成的面板底色断层
 

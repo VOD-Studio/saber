@@ -167,7 +167,7 @@ func TestModel_ResizePreservesReadingPosition(t *testing.T) {
 	require.True(t, m.viewport.AtBottom())
 }
 
-func TestModel_ControlCClearsInput(t *testing.T) {
+func TestModel_ControlCClearsThenQuits(t *testing.T) {
 	for _, status := range []string{"completed", "running", "queued"} {
 		for _, menu := range []string{"", "models", "commands"} {
 			t.Run(status+"/"+menu, func(t *testing.T) {
@@ -189,8 +189,17 @@ func TestModel_ControlCClearsInput(t *testing.T) {
 				require.Equal(t, status, m.turns[0].Status)
 				require.NoError(t, streamCtx.Err(), "clearing a draft must keep the event stream open")
 				require.Empty(t, m.notice, "Ctrl+C must not request cancellation")
+				if menu != "" {
+					m.openMenu(menu)
+					m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+					require.Empty(t, m.menu)
+					require.NoError(t, streamCtx.Err(), "an open menu must close before quitting")
+				}
 				_, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
-				require.Nil(t, cmd, "Ctrl+C on an empty input must neither quit nor cancel")
+				require.NotNil(t, cmd)
+				require.IsType(t, tea.QuitMsg{}, cmd())
+				require.ErrorIs(t, streamCtx.Err(), context.Canceled)
+				require.Equal(t, status, m.turns[0].Status, "quitting must not cancel the server task")
 			})
 		}
 	}
