@@ -20,6 +20,8 @@ import (
 type Task struct {
 	// ID 是数据库生成的稳定编号。
 	ID int64
+	// EventKey 是持久化去重键；定时发生与真实来源消息 ID 分开保存。
+	EventKey string
 	// Message 保留发起人、群、原消息、引用及话题。
 	Message chat.Message
 	// WorkDir 是规范化的工作目录，也是互斥执行键。
@@ -81,7 +83,7 @@ func openStore(path string) (*store, error) {
 	CREATE TABLE IF NOT EXISTS task_events (
 		id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL REFERENCES tasks(id),
 		created_at INTEGER NOT NULL, record BLOB NOT NULL
-	);`)
+	);` + scheduleSchema)
 	if err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
@@ -136,13 +138,13 @@ func (s *store) submit(ctx context.Context, message chat.Message, dir string, re
 		message.Session.Platform, message.Session.Account, message.Session.Conversation, message.ID))
 }
 
-const taskColumns = `id,message,work_dir,request,status,result,error,cancel_requested,delivery,delivery_attempts,delivery_error,delivery_id,created_at`
+const taskColumns = `id,message,work_dir,request,status,result,error,cancel_requested,delivery,delivery_attempts,delivery_error,delivery_id,created_at,event`
 
 func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
 	var m, req, result []byte
 	var created int64
-	err := row.Scan(&t.ID, &m, &t.WorkDir, &req, &t.Status, &result, &t.Error, &t.CancelRequested, &t.Delivery, &t.DeliveryAttempts, &t.DeliveryError, &t.DeliveryID, &created)
+	err := row.Scan(&t.ID, &m, &t.WorkDir, &req, &t.Status, &result, &t.Error, &t.CancelRequested, &t.Delivery, &t.DeliveryAttempts, &t.DeliveryError, &t.DeliveryID, &created, &t.EventKey)
 	if err != nil {
 		return t, err
 	}

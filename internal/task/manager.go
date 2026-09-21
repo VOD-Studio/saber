@@ -21,22 +21,24 @@ type SendFunc func(context.Context, Task) (string, error)
 
 // Manager 管理单个机器人进程的队列；同一数据库只允许一个 Manager 实例。
 type Manager struct {
-	store     *store
-	run       RunFunc
-	send      SendFunc
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wake      chan struct{}
-	done      chan struct{}
-	mu        sync.Mutex
-	active    map[int64]context.CancelFunc
-	workers   sync.WaitGroup
-	closeOnce sync.Once
-	closeErr  error
+	store      *store
+	run        RunFunc
+	send       SendFunc
+	ctx        context.Context
+	cancel     context.CancelFunc
+	wake       chan struct{}
+	done       chan struct{}
+	mu         sync.Mutex
+	active     map[int64]context.CancelFunc
+	workers    sync.WaitGroup
+	closeOnce  sync.Once
+	closeErr   error
+	scheduleMu sync.Mutex
+	authorize  ScheduleAuthorize
 }
 
 // Open 打开数据库，标记中断任务，并启动队列和结果投递。
-func Open(path string, run RunFunc, send SendFunc) (*Manager, error) {
+func Open(path string, run RunFunc, send SendFunc, authorize ...ScheduleAuthorize) (*Manager, error) {
 	if run == nil || send == nil {
 		return nil, errors.New("task manager requires runner and sender")
 	}
@@ -50,6 +52,9 @@ func Open(path string, run RunFunc, send SendFunc) (*Manager, error) {
 		return nil, errors.Join(err, s.db.Close())
 	}
 	m := &Manager{store: s, run: run, send: send, ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), done: make(chan struct{}), active: make(map[int64]context.CancelFunc)}
+	if len(authorize) > 0 {
+		m.authorize = authorize[0]
+	}
 	go m.loop()
 	return m, nil
 }
@@ -141,6 +146,9 @@ func (m *Manager) loop() {
 		if m.ctx.Err() != nil {
 			return
 		}
+		if err := m.tickSchedules(m.ctx, time.Now()); err != nil && m.ctx.Err() == nil {
+			slog.Error("调度定时任务失败", "error", err)
+		}
 		m.dispatch()
 		select {
 		case <-m.ctx.Done():
@@ -177,6 +185,12 @@ func (m *Manager) execute(ctx context.Context, cancel context.CancelFunc, t Task
 	ctx = chat.WithIdentity(ctx, chat.Identity{Session: t.Message.Session, SenderID: t.Message.SenderID})
 	ctx = context.WithValue(ctx, workDirKey{}, t.WorkDir)
 	ctx = context.WithValue(ctx, taskIDKey{}, t.ID)
+	if err := m.checkScheduledTask(ctx, t); err != nil {
+		if finishErr := m.store.finish(context.Background(), t, agent.Result{}, err, m.ctx.Err() != nil); finishErr != nil {
+			slog.Error("保存计划任务拒绝状态失败", "error", finishErr)
+		}
+		return
+	}
 	var journalErr error
 	result, runErr := m.run(ctx, t.Request, func(event agent.Event) {
 		if journalErr != nil {
