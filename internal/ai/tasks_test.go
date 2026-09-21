@@ -79,7 +79,7 @@ func TestTasks_MatrixReceiptIsolationCommandsAndRetry(t *testing.T) {
 				t.Error(err)
 			}
 		} else {
-			if _, err := fmt.Fprint(w, `{"event_id":"$source","sender":"@alice:test","type":"m.room.message","content":{"msgtype":"m.text","body":"original"}}`); err != nil {
+			if _, err := fmt.Fprint(w, `{"event_id":"$source","sender":"@bot:test","type":"m.room.message","content":{"msgtype":"m.text","body":"original"}}`); err != nil {
 				t.Error(err)
 			}
 		}
@@ -105,6 +105,7 @@ func TestTasks_MatrixReceiptIsolationCommandsAndRetry(t *testing.T) {
 	require.NoError(t, service.EnableTasks(path))
 	require.Error(t, service.EnableTasks(path))
 	commands.RegisterCommand("ai", NewAICommand(service))
+	commands.SetReplyAIHandler(NewAICommand(service))
 	eventFor := func(eventID, sender, body string) *event.Event {
 		return &event.Event{Type: event.EventMessage, ID: id.EventID(eventID), Sender: id.UserID(sender), RoomID: "!room:test", Content: event.Content{Parsed: &event.MessageEventContent{MsgType: event.MsgText, Body: body, RelatesTo: &event.RelatesTo{Type: event.RelThread, EventID: "$thread"}}}}
 	}
@@ -152,7 +153,9 @@ func TestTasks_MatrixReceiptIsolationCommandsAndRetry(t *testing.T) {
 	_, err = service.toolExecutor.ExecuteToolCall(toolCtx, "saber_task", map[string]any{"action": "cancel", "id": 1.5})
 	require.Error(t, err)
 	// 取消入队任务的自然语言入口不需要等待模型或工作目录。
-	send("$cancel", "@bob:test", fmt.Sprintf("!ai 取消任务 #%d", b.ID))
+	cancelEvent := eventFor("$cancel", "@bob:test", fmt.Sprintf("> <@bot:test> 已接收，任务 #%d\n\n取消任务 #%d", b.ID, b.ID))
+	cancelEvent.Content.AsMessage().RelatesTo.InReplyTo = &event.InReplyTo{EventID: "$receipt"}
+	require.NoError(t, commands.HandleEvent(context.Background(), cancelEvent))
 	b, err = service.tasks.Get(context.Background(), session, b.ID)
 	require.NoError(t, err)
 	require.Equal(t, "cancelled", b.Status)

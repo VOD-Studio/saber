@@ -362,6 +362,7 @@ func (s *CommandService) handleReply(ctx context.Context, sender id.UserID, room
 	}
 
 	cleanedBody := event.TrimReplyFallbackText(content.Body)
+	ctx = context.WithValue(ctx, replyBodyKey, cleanedBody)
 
 	replyContext := ""
 	if evt, err := s.client.GetEvent(ctx, roomID, replyToEventID); err == nil {
@@ -506,7 +507,11 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 	}
 
 	// 解析命令
-	parsed := s.ParseCommand(content.Body)
+	commandBody := content.Body
+	if clean := event.TrimReplyFallbackText(content.Body); strings.HasPrefix(strings.TrimSpace(clean), "!") {
+		commandBody = clean
+	}
+	parsed := s.ParseCommand(commandBody)
 
 	// 命令处理
 	if parsed != nil {

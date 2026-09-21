@@ -121,3 +121,11 @@ func GetThreadID(ctx context.Context) id.EventID {
 	value, _ := ctx.Value(threadIDKey).(id.EventID)
 	return value
 }
+
+var replyBodyKey = &contextKey{"reply_body"}
+
+// GetReplyBody 返回引用包装前的用户正文，供任务入口识别控制指令。
+func GetReplyBody(ctx context.Context) (string, bool) {
+	value, ok := ctx.Value(replyBodyKey).(string)
+	return value, ok
+}
