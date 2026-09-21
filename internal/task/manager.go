@@ -16,7 +16,7 @@ import (
 // RunFunc 使用持久化请求运行 Agent；事件回调必须在返回前串行调用。
 type RunFunc func(context.Context, agent.Request, func(agent.Event)) (agent.Result, error)
 
-// SendFunc 只发送已保存的结果；重试必须使用同一个 Task.ID 作为平台幂等键。
+// SendFunc 只发送已保存的结果；各上传和发送步骤须独立限时并使用稳定平台幂等键。
 type SendFunc func(context.Context, Task) (string, error)
 
 // Manager 管理单个机器人进程的队列；同一数据库只允许一个 Manager 实例。
@@ -235,9 +235,7 @@ func (m *Manager) deliverLoop() {
 			if m.ctx.Err() != nil {
 				return
 			}
-			ctx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
-			messageID, sendErr := m.send(ctx, t)
-			cancel()
+			messageID, sendErr := m.send(m.ctx, t)
 			if err := m.store.delivered(context.Background(), t.ID, messageID, sendErr, t.DeliveryAttempts); err != nil {
 				slog.Error("保存任务投递状态失败", "error", taskError(t.ID, err))
 			}

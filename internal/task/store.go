@@ -84,6 +84,10 @@ func openStore(path string) (*store, error) {
 		id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL REFERENCES tasks(id),
 		created_at INTEGER NOT NULL, record BLOB NOT NULL
 	);
+ CREATE TABLE IF NOT EXISTS task_delivery_parts (
+  task_id INTEGER NOT NULL REFERENCES tasks(id), part TEXT NOT NULL,
+  payload BLOB NOT NULL, message_id TEXT NOT NULL DEFAULT '', PRIMARY KEY(task_id,part)
+ );
  CREATE TABLE IF NOT EXISTS task_messages (
   task_id INTEGER NOT NULL REFERENCES tasks(id), message_id TEXT NOT NULL,
   PRIMARY KEY(task_id, message_id)

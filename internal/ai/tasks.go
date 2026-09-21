@@ -86,30 +86,12 @@ func (s *Service) EnableTasks(path string) error {
 		}
 		return s.RunAgent(ctx, req, emit)
 	}, func(ctx context.Context, t task.Task) (string, error) {
-		messageID, err := adapter.Send(ctx, taskReply(t, "result", task.Report(t)))
-		if err != nil || s.executor == nil || t.Status != "completed" {
-			return messageID, err
+		select {
+		case <-ready:
+		case <-ctx.Done():
+			return "", ctx.Err()
 		}
-		artifacts, err := s.executor.Artifacts(t.ID)
-		if err != nil {
-			return "", err
-		}
-		for _, artifact := range artifacts {
-			identity := chat.Identity{Session: t.Message.Session, SenderID: t.Message.SenderID}
-			artifactCtx := execution.WithTask(chat.WithIdentity(ctx, identity), t.ID, t.WorkDir)
-			if err = s.executor.Check(artifactCtx, "read_file"); err != nil {
-				return "", err
-			}
-			data, readErr := os.ReadFile(artifact.Path)
-			if readErr != nil {
-				return "", readErr
-			}
-			reply := taskReply(t, "artifact:"+filepath.Base(artifact.Path), artifact.Name)
-			if _, err = s.matrixService.SendTaskFile(ctx, id.RoomID(t.Message.Session.Conversation), artifact.Name, data, reply.TransactionID, id.EventID(t.Message.ID), id.EventID(t.Message.Session.Thread)); err != nil {
-				return "", err
-			}
-		}
-		return messageID, nil
+		return s.deliverTask(ctx, adapter, t)
 	}, s.authorizeSchedule)
 	if err != nil {
 		return err

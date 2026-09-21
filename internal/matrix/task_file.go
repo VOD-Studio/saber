@@ -11,20 +11,23 @@ import (
 	"rua.plus/saber/internal/chat"
 )
 
-// SendTaskFile 上传任务文件快照并引用原消息；固定事务 ID 使汇报重试不会重复发文件。
-// 上传内容始终加密，解密信息由房间消息携带，E2EE 房间由客户端继续加密消息事件。
-func (s *CommandService) SendTaskFile(ctx context.Context, roomID id.RoomID, name string, data []byte, transactionID string, replyTo, thread id.EventID) (id.EventID, error) {
+// UploadTaskFile 上传加密快照，返回可持久化的消息内容；重试发送时复用上传及密钥。
+func (s *CommandService) UploadTaskFile(ctx context.Context, name string, data []byte, replyTo, thread id.EventID) (*event.MessageEventContent, error) {
 	if len(data) > 16*1024*1024 {
-		return "", errors.New("task artifact exceeds 16 MiB")
+		return nil, errors.New("task artifact exceeds 16 MiB")
 	}
 	encrypted := attachment.NewEncryptedFile()
 	ciphertext := append([]byte(nil), data...)
 	encrypted.EncryptInPlace(ciphertext)
 	upload, err := s.client.UploadBytesWithName(ctx, ciphertext, "application/octet-stream", name)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	content := &event.MessageEventContent{MsgType: event.MsgFile, Body: name, FileName: name, Info: &event.FileInfo{MimeType: "application/octet-stream", Size: len(data)}, File: &event.EncryptedFileInfo{EncryptedFile: *encrypted, URL: upload.ContentURI.CUString()}, RelatesTo: chatReplyRelation(chat.Reply{Session: chat.Session{Thread: string(thread)}, ReplyTo: string(replyTo)})}
+	return &event.MessageEventContent{MsgType: event.MsgFile, Body: name, FileName: name, Info: &event.FileInfo{MimeType: "application/octet-stream", Size: len(data)}, File: &event.EncryptedFileInfo{EncryptedFile: *encrypted, URL: upload.ContentURI.CUString()}, RelatesTo: chatReplyRelation(chat.Reply{Session: chat.Session{Thread: string(thread)}, ReplyTo: string(replyTo)})}, nil
+}
+
+// SendUploadedTaskFile 用固定事务 ID 发送已上传的文件，不再次上传或生成密钥。
+func (s *CommandService) SendUploadedTaskFile(ctx context.Context, roomID id.RoomID, content *event.MessageEventContent, transactionID string) (id.EventID, error) {
 	response, err := s.client.SendMessageEvent(ctx, roomID, event.EventMessage, content, mautrix.ReqSendEvent{TransactionID: transactionID})
 	if err != nil {
 		return "", err

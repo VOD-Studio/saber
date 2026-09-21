@@ -31,7 +31,7 @@ func (m *Manager) Continue(ctx context.Context, message chat.Message, dir string
 	if message.ReplyTo == "" {
 		return Task{}, sql.ErrNoRows
 	}
-	parent, err := scanTask(m.store.db.QueryRowContext(ctx, `SELECT `+taskColumns+` FROM tasks WHERE platform=? AND account=? AND room=? AND (event=? OR delivery_id=? OR id IN (SELECT task_id FROM task_messages WHERE message_id=?)) ORDER BY id DESC LIMIT 1`, append(scope(message.Session), message.ReplyTo, message.ReplyTo, message.ReplyTo)...))
+	parent, err := scanTask(m.store.db.QueryRowContext(ctx, `SELECT `+taskColumns+` FROM tasks WHERE platform=? AND account=? AND room=? AND (event=? OR delivery_id=? OR id IN (SELECT task_id FROM task_messages WHERE message_id=? UNION SELECT task_id FROM task_delivery_parts WHERE message_id=?)) ORDER BY id DESC LIMIT 1`, append(scope(message.Session), message.ReplyTo, message.ReplyTo, message.ReplyTo, message.ReplyTo)...))
 	if err != nil {
 		return Task{}, err
 	}
