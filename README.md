@@ -1,13 +1,12 @@
 # Saber
 
-一个集成 AI 功能的多平台机器人，支持 Matrix 和 QQ，使用 Go 构建。
+一个集成 AI 功能的 Matrix 机器人，使用 Go 构建。
 
 ## 功能特性
 
 ### 平台支持
 
 - **Matrix 协议**: 通过 mautrix-go 完整支持 Matrix 协议
-- **QQ 机器人**: 支持 QQ 频道机器人，通过腾讯官方 API 接入
 - **端到端加密**: Matrix 可选的 E2EE 支持，使用 goolm（纯 Go 实现，无需 CGO）
 
 ### AI 功能
@@ -37,7 +36,7 @@
 
 ### 前置要求
 
-- Go 1.26.1 或更高版本
+- Go 1.27.1 或更高版本
 - 一个 Matrix 账号
 - （可选）一个 OpenAI 兼容的 API 密钥
 
@@ -92,12 +91,12 @@ ai:
 
 ### CLI 标志
 
-| 标志 | 缩写 | 默认值 | 描述 |
-|------|------|--------|------|
-| `-config` | `-c` | `./config.yaml` | 配置文件路径 |
-| `-verbose` | `-v` | `false` | 启用调试日志 |
-| `-version` | | | 显示版本信息 |
-| `-generate-config` | | | 生成示例配置文件 |
+| 标志               | 缩写 | 默认值          | 描述             |
+|--------------------|------|-----------------|------------------|
+| `-config`          | `-c` | `./config.yaml` | 配置文件路径     |
+| `-verbose`         | `-v` | `false`         | 启用调试日志     |
+| `-version`         |      |                 | 显示版本信息     |
+| `-generate-config` |      |                 | 生成示例配置文件 |
 
 ### Docker 部署
 
@@ -149,40 +148,40 @@ make docker-push DOCKER_REGISTRY=your-registry.com/
 
 项目使用 `docker-bake.hcl` 配置多架构构建，支持以下变量：
 
-| 变量 | 默认值 | 描述 |
-|------|--------|------|
-| `REGISTRY` | `""` | Docker 仓库地址 |
-| `VERSION` | `dev` | 镜像版本标签 |
+| 变量         | 默认值    | 描述            |
+|--------------|-----------|-----------------|
+| `REGISTRY`   | `""`      | Docker 仓库地址 |
+| `VERSION`    | `dev`     | 镜像版本标签    |
 | `GIT_COMMIT` | `unknown` | Git commit hash |
-| `GIT_BRANCH` | `unknown` | Git 分支名 |
-| `BUILD_TIME` | `""` | 构建时间 |
+| `GIT_BRANCH` | `unknown` | Git 分支名      |
+| `BUILD_TIME` | `""`      | 构建时间        |
 
 ## 使用说明
 
 ### 内置命令
 
-| 命令                | 描述                                       |
-| ------------------- | ------------------------------------------ |
-| `!ping`             | 检查机器人是否在线                         |
-| `!help`             | 列出所有可用命令                           |
-| `!version`          | 显示版本信息                               |
-| `!ai <message>`     | 与 AI 对话                                 |
-| `!ai clear`         | 清除对话上下文                             |
-| `!ai context`       | 显示上下文信息                             |
-| `!ai models`        | 列出所有可用模型                           |
-| `!ai switch <id>`   | 切换默认模型                               |
-| `!ai current`       | 显示当前默认模型                           |
-| `!mcp list`         | 列出所有 MCP 服务器和工具                  |
-| `!meme <keyword>`   | 搜索并发送 GIF/Sticker/Meme                |
-| `!meme --gif <kw>`  | 搜索并发送 GIF 动图                        |
-| `!meme --sticker <kw>`| 搜索并发送 Sticker 贴纸                  |
-| `!meme --meme <kw>` | 搜索并发送 Meme 图片                       |
-| `!persona list`     | 列出所有可用人格                           |
-| `!persona set <id>` | 设置当前房间的人格                         |
-| `!persona clear`    | 清除当前房间的人格设置                     |
-| `!persona status`   | 显示当前房间的人格状态                     |
-| `!persona new ...`  | 创建新的自定义人格                         |
-| `!persona del <id>` | 删除自定义人格                             |
+| 命令                   | 描述                        |
+|------------------------|-----------------------------|
+| `!ping`                | 检查机器人是否在线          |
+| `!help`                | 列出所有可用命令            |
+| `!version`             | 显示版本信息                |
+| `!ai <message>`        | 与 AI 对话                  |
+| `!ai clear`            | 清除对话上下文              |
+| `!ai context`          | 显示上下文信息              |
+| `!ai models`           | 列出所有可用模型            |
+| `!ai switch <id>`      | 切换默认模型                |
+| `!ai current`          | 显示当前默认模型            |
+| `!mcp list`            | 列出所有 MCP 服务器和工具   |
+| `!meme <keyword>`      | 搜索并发送 GIF/Sticker/Meme |
+| `!meme --gif <kw>`     | 搜索并发送 GIF 动图         |
+| `!meme --sticker <kw>` | 搜索并发送 Sticker 贴纸     |
+| `!meme --meme <kw>`    | 搜索并发送 Meme 图片        |
+| `!persona list`        | 列出所有可用人格            |
+| `!persona set <id>`    | 设置当前房间的人格          |
+| `!persona clear`       | 清除当前房间的人格设置      |
+| `!persona status`      | 显示当前房间的人格状态      |
+| `!persona new ...`     | 创建新的自定义人格          |
+| `!persona del <id>`    | 删除自定义人格              |
 
 ### 私聊
 
@@ -242,7 +241,7 @@ ai:
       check_interval_minutes: 15
     schedule:
       enabled: true
-      times: ["09:00", "12:00", "18:00"]
+      times: [ "09:00", "12:00", "18:00" ]
     new_member:
       enabled: true
       welcome_prompt: "用友好的方式欢迎新成员加入"
@@ -268,6 +267,7 @@ silence:
 ```
 
 工作流程:
+
 1. 定时检查所有已加入的房间
 2. 计算每个房间距离最后一条用户消息的时间
 3. 如果静默时长超过阈值，触发 AI 决策
@@ -280,10 +280,11 @@ silence:
 ```yaml
 schedule:
   enabled: true
-  times: ["09:00", "12:00", "18:00"]  # 24 小时制，格式 "HH:MM"
+  times: [ "09:00", "12:00", "18:00" ]  # 24 小时制，格式 "HH:MM"
 ```
 
 工作流程:
+
 1. 每分钟检查当前时间是否匹配配置的时间点
 2. 每个时间点每天只触发一次
 3. 日期变化后自动重置触发状态
@@ -299,6 +300,7 @@ new_member:
 ```
 
 工作流程:
+
 1. 监听房间成员变更事件
 2. 检测到新成员加入时触发
 3. 使用 AI 生成个性化欢迎消息（如 AI 未启用则使用简单模板）
@@ -306,10 +308,12 @@ new_member:
 #### AI 决策引擎
 
 当触发器被激活后，AI 决策引擎会根据当前上下文决定:
+
 - 是否应该发送消息
 - 发送什么内容
 
 决策上下文包括:
+
 - 房间名称和成员数量
 - 活动水平（low/medium/high）
 - 距离最后一条消息的时间
@@ -326,6 +330,7 @@ decision:
 ```
 
 决策响应格式 (JSON):
+
 ```json
 {
   "should_speak": true,
@@ -344,6 +349,7 @@ min_interval_minutes: 60  # 两次主动消息之间至少间隔 60 分钟
 ```
 
 限制规则:
+
 - 达到每日上限后，当天不再发送主动消息
 - 未达到最小间隔时，跳过本次触发
 - 频率限制独立应用于每个房间
@@ -361,6 +367,7 @@ min_interval_minutes: 60  # 两次主动消息之间至少间隔 60 分钟
 **问题: 主动消息没有发送**
 
 检查以下几点:
+
 1. `proactive.enabled` 是否为 `true`
 2. AI 服务是否正常启用（`ai.enabled: true`）
 3. 检查日志中的频率限制信息
@@ -457,6 +464,7 @@ ai:
 ```
 
 使用场景:
+
 1. 用户在私聊中发送图片
 2. 机器人自动调用视觉模型分析图片
 3. 用户可以追加文字说明，如"这张图片里有什么？"
@@ -469,11 +477,11 @@ Saber 支持 MCP (Model Context Protocol) 工具调用，让 AI 能够执行实�
 
 Saber 默认启用以下内置 MCP 工具：
 
-| 工具        | 描述                               |
-| ----------- | ---------------------------------- |
-| `fetch_url` | 获取网页内容并转换为文本           |
-| `web_search`| 搜索互联网获取相关信息             |
-| `run_js`    | 在安全沙箱中执行 JavaScript 代码   |
+| 工具         | 描述                             |
+|--------------|----------------------------------|
+| `fetch_url`  | 获取网页内容并转换为文本         |
+| `web_search` | 搜索互联网获取相关信息           |
+| `run_js`     | 在安全沙箱中执行 JavaScript 代码 |
 
 #### 配置示例
 
@@ -504,7 +512,7 @@ mcp:
       type: stdio
       enabled: true
       command: "/path/to/mcp-server-filesystem"
-      args: ["--root", "/home/user/documents"]
+      args: [ "--root", "/home/user/documents" ]
       timeout_seconds: 30
     # http 类型服务器
     remote-server:
@@ -556,13 +564,13 @@ meme:
 
 #### 内置人格
 
-| ID | 名称 | 描述 |
-|---|---|---|
-| `catgirl` | 猫娘 | 可爱活泼，句尾加"喵～" |
-| `butler` | 管家 | 优雅恭敬，英伦风格 |
-| `pirate` | 海盗 | 豪爽冒险，说话带"啊哈" |
-| `tsundere` | 傲娇 | 表面冷淡内心温柔 |
-| `poet` | 诗人 | 文雅古风，喜用诗词 |
+| ID         | 名称 | 描述                   |
+|------------|------|------------------------|
+| `catgirl`  | 猫娘 | 可爱活泼，句尾加"喵～" |
+| `butler`   | 管家 | 优雅恭敬，英伦风格     |
+| `pirate`   | 海盗 | 豪爽冒险，说话带"啊哈" |
+| `tsundere` | 傲娇 | 表面冷淡内心温柔       |
+| `poet`     | 诗人 | 文雅古风，喜用诗词     |
 
 #### 使用方式
 
@@ -580,6 +588,7 @@ meme:
 ```
 
 参数说明：
+
 - `robot` - 人格 ID（唯一标识符）
 - `"机器人"` - 显示名称
 - `"你是一个友好的机器人助手"` - 系统提示词
@@ -597,280 +606,205 @@ meme:
 
 人格数据存储在 SQLite 数据库中，默认位于配置文件同目录下的 `persona.db`。
 
-### QQ 机器人
-
-Saber 支持 QQ 频道机器人，通过腾讯官方 API 接入，提供与 Matrix 相似的 AI 对话功能。
-
-#### 配置示例
-
-```yaml
-qq:
-  enabled: true
-  app_id: "你的AppID"           # 从 QQ 开放平台获取
-  app_secret: "你的AppSecret"   # 从 QQ 开放平台获取
-  webhook_port: 8080            # Webhook 服务器端口
-  webhook_path: "/qq/callback"  # Webhook 回调路径
-  webhook_secret: ""            # Webhook 签名密钥（可选）
-  max_concurrent_events: 10     # 最大并发事件数
-```
-
-#### 前置要求
-
-1. 在 [QQ 开放平台](https://q.qq.com/) 注册开发者账号
-2. 创建机器人应用，获取 AppID 和 AppSecret
-3. 配置 Webhook 回调地址（需要公网可访问）
-
-#### 功能特性
-
-- **私聊对话**: 用户私聊机器人时自动响应 AI 消息
-- **群聊提及**: 在群聊中 @机器人 时触发 AI 响应
-- **上下文管理**: 每个用户/群组独立的对话上下文
-- **命令系统**: 支持 `!ping`、`!help`、`!version`、`!ai` 等命令
-
-#### QQ 命令列表
-
-| 命令 | 描述 |
-|------|------|
-| `!ping` | 检查机器人在线状态 |
-| `!help` | 显示帮助信息 |
-| `!version` | 显示版本信息 |
-| `!ai <message>` | 与 AI 对话 |
-| `!ai clear` | 清除对话上下文 |
-| `!ai context` | 显示上下文信息 |
-
-#### 架构说明
-
-QQ 机器人模块独立于 Matrix 模块，共享 AI 服务层：
-
-```
-QQ 平台                          Matrix 平台
-    │                                │
-    ▼                                ▼
-QQ Adapter                    Matrix Client
-    │                                │
-    └────────────┬───────────────────┘
-                 │
-                 ▼
-           AI Service (共享)
-```
-
-#### 注意事项
-
-- QQ 机器人需要公网 IP 接收 Webhook 回调
-- 开发环境可使用 ngrok 等工具进行本地调试
-- QQ 频道机器人有消息频率限制，请参考官方文档
-
 ## 配置参考
 
 ### Matrix 设置
 
-| 字段                | 必填    | 描述                             |
-| ------------------- | ------- | -------------------------------- |
-| `homeserver`        | 是      | Matrix 服务器 URL                |
-| `user_id`           | 是      | 机器人的 Matrix ID（如 `@bot:matrix.org`） |
-| `device_id`         | 否      | 设备标识符                       |
-| `device_name`       | 否      | 设备显示名称                     |
-| `access_token`      | 否      | 访问令牌（推荐）                 |
-| `password`          | 否      | 用于首次登录的密码               |
-| `auto_join_rooms`   | 否      | 启动时自动加入的房间列表         |
-| `enable_e2ee`       | 否      | 启用端到端加密                   |
-| `e2ee_session_path` | 如果启用 E2EE | 加密会话数据库路径         |
-| `pickle_key_path`   | 否      | E2EE pickle 密钥路径（默认为 e2ee_session_path + ".key"） |
-| `max_concurrent_events` | 否 | 最大并发事件处理数（默认 10）   |
+| 字段                    | 必填          | 描述                                                      |
+|-------------------------|---------------|-----------------------------------------------------------|
+| `homeserver`            | 是            | Matrix 服务器 URL                                         |
+| `user_id`               | 是            | 机器人的 Matrix ID（如 `@bot:matrix.org`）                |
+| `device_id`             | 否            | 设备标识符                                                |
+| `device_name`           | 否            | 设备显示名称                                              |
+| `access_token`          | 否            | 访问令牌（推荐）                                          |
+| `password`              | 否            | 用于首次登录的密码                                        |
+| `auto_join_rooms`       | 否            | 启动时自动加入的房间列表                                  |
+| `enable_e2ee`           | 否            | 启用端到端加密                                            |
+| `e2ee_session_path`     | 如果启用 E2EE | 加密会话数据库路径                                        |
+| `pickle_key_path`       | 否            | E2EE pickle 密钥路径（默认为 e2ee_session_path + ".key"） |
+| `max_concurrent_events` | 否            | 最大并发事件处理数（默认 10）                             |
 
 ### AI 设置
 
-| 字段                      | 必填        | 描述                         |
-| ------------------------- | ----------- | ---------------------------- |
-| `enabled`                 | 否          | 启用 AI 功能                 |
-| `providers`               | 否          | 多提供商配置（推荐）         |
-| `default_model`           | 如果启用    | 默认模型（推荐使用完全限定名称 `提供商.模型名`） |
-| `provider`                | 否          | 提供商名称（旧格式，向后兼容）|
-| `base_url`                | 否          | API 基础 URL（全局默认）     |
-| `api_key`                 | 否          | API 密钥（全局默认）         |
-| `max_tokens`              | 否          | 每次响应的最大 token 数      |
-| `temperature`             | 否          | 响应随机性（0-2）            |
-| `system_prompt`           | 否          | 自定义系统提示词             |
-| `timeout_seconds`         | 否          | 请求超时时间（秒）           |
-| `rate_limit_per_minute`   | 否          | 每分钟请求限制（0 表示无限制）|
-| `stream_enabled`          | 否          | 启用流式响应                 |
-| `stream_edit`             | 否          | 流式编辑配置（见下表）       |
-| `direct_chat_auto_reply`  | 否          | 私聊自动回复                 |
-| `group_chat_mention_reply`| 否          | 群聊 @mention 时自动回复     |
-| `reply_to_bot_reply`      | 否          | 回复机器人消息时自动回复     |
-| `media`                   | 否          | 媒体处理配置（见下表）       |
-| `proactive`               | 否          | 主动聊天配置（见下表）       |
+| 字段                       | 必填     | 描述                                             |
+|----------------------------|----------|--------------------------------------------------|
+| `enabled`                  | 否       | 启用 AI 功能                                     |
+| `providers`                | 否       | 多提供商配置（推荐）                             |
+| `default_model`            | 如果启用 | 默认模型（推荐使用完全限定名称 `提供商.模型名`） |
+| `provider`                 | 否       | 提供商名称（旧格式，向后兼容）                   |
+| `base_url`                 | 否       | API 基础 URL（全局默认）                         |
+| `api_key`                  | 否       | API 密钥（全局默认）                             |
+| `max_tokens`               | 否       | 每次响应的最大 token 数                          |
+| `temperature`              | 否       | 响应随机性（0-2）                                |
+| `system_prompt`            | 否       | 自定义系统提示词                                 |
+| `timeout_seconds`          | 否       | 请求超时时间（秒）                               |
+| `rate_limit_per_minute`    | 否       | 每分钟请求限制（0 表示无限制）                   |
+| `stream_enabled`           | 否       | 启用流式响应                                     |
+| `stream_edit`              | 否       | 流式编辑配置（见下表）                           |
+| `direct_chat_auto_reply`   | 否       | 私聊自动回复                                     |
+| `group_chat_mention_reply` | 否       | 群聊 @mention 时自动回复                         |
+| `reply_to_bot_reply`       | 否       | 回复机器人消息时自动回复                         |
+| `media`                    | 否       | 媒体处理配置（见下表）                           |
+| `proactive`                | 否       | 主动聊天配置（见下表）                           |
 
 ### 提供商配置 (providers)
 
-| 字段       | 必填 | 描述                                    |
-| ---------- | ---- | --------------------------------------- |
-| `type`     | 是   | 提供商类型（`openai`, `azure`）        |
-| `base_url` | 是   | API 基础 URL                            |
-| `api_key`  | 是   | API 密钥                                |
-| `models`   | 否   | 模型配置 map（键为模型名，值为配置）   |
+| 字段       | 必填 | 描述                                 |
+|------------|------|--------------------------------------|
+| `type`     | 是   | 提供商类型（`openai`, `azure`）      |
+| `base_url` | 是   | API 基础 URL                         |
+| `api_key`  | 是   | API 密钥                             |
+| `models`   | 否   | 模型配置 map（键为模型名，值为配置） |
 
 ### 模型配置 (models)
 
-| 字段          | 必填 | 描述                               |
-| ------------- | ---- | ---------------------------------- |
-| `model`       | 是   | 实际使用的模型名称                 |
-| `temperature` | 否   | 响应随机性（覆盖全局设置）         |
-| `max_tokens`  | 否   | 最大 token 数（覆盖全局设置）      |
+| 字段          | 必填 | 描述                          |
+|---------------|------|-------------------------------|
+| `model`       | 是   | 实际使用的模型名称            |
+| `temperature` | 否   | 响应随机性（覆盖全局设置）    |
+| `max_tokens`  | 否   | 最大 token 数（覆盖全局设置） |
 
 ### 流式编辑设置
 
-| 字段               | 默认值 | 描述                               |
-| ------------------ | ------ | ---------------------------------- |
-| `enabled`          | `true` | 启用流式编辑                       |
-| `char_threshold`   | `300`  | 触发编辑的字符数阈值               |
-| `time_threshold_ms`| `3000` | 触发编辑的时间阈值（毫秒）         |
-| `edit_interval_ms` | `500`  | 编辑间隔（毫秒）                   |
-| `max_edits`        | `5`    | 单条消息最大编辑次数               |
+| 字段                | 默认值 | 描述                       |
+|---------------------|--------|----------------------------|
+| `enabled`           | `true` | 启用流式编辑               |
+| `char_threshold`    | `300`  | 触发编辑的字符数阈值       |
+| `time_threshold_ms` | `3000` | 触发编辑的时间阈值（毫秒） |
+| `edit_interval_ms`  | `500`  | 编辑间隔（毫秒）           |
+| `max_edits`         | `5`    | 单条消息最大编辑次数       |
 
 ### 媒体处理设置
 
-| 字段          | 默认值 | 描述                             |
-| ------------- | ------ | -------------------------------- |
-| `enabled`     | `true` | 启用媒体处理                     |
-| `max_size_mb` | `10`   | 最大文件大小（MB）               |
-| `timeout_sec` | `30`   | 处理超时时间（秒）               |
-| `model`       | `""`   | 图片识别专用模型（留空用默认）   |
+| 字段          | 默认值 | 描述                           |
+|---------------|--------|--------------------------------|
+| `enabled`     | `true` | 启用媒体处理                   |
+| `max_size_mb` | `10`   | 最大文件大小（MB）             |
+| `timeout_sec` | `30`   | 处理超时时间（秒）             |
+| `model`       | `""`   | 图片识别专用模型（留空用默认） |
 
 ### 主动聊天设置
 
-| 字段                      | 默认值  | 描述                             |
-| ------------------------- | ------- | -------------------------------- |
-| `enabled`                 | `false` | 启用主动聊天功能                 |
-| `max_messages_per_day`    | `5`     | 每个房间每天最大主动消息数       |
-| `min_interval_minutes`    | `60`    | 两次主动消息的最小间隔（分钟）   |
+| 字段                   | 默认值  | 描述                           |
+|------------------------|---------|--------------------------------|
+| `enabled`              | `false` | 启用主动聊天功能               |
+| `max_messages_per_day` | `5`     | 每个房间每天最大主动消息数     |
+| `min_interval_minutes` | `60`    | 两次主动消息的最小间隔（分钟） |
 
 ### 静默检测设置
 
-| 字段                    | 默认值 | 描述                         |
-| ----------------------- | ------ | ---------------------------- |
-| `enabled`               | `true` | 启用静默触发                 |
-| `threshold_minutes`     | `60`   | 静默阈值（分钟）             |
-| `check_interval_minutes`| `15`   | 检查间隔（分钟）             |
+| 字段                     | 默认值 | 描述             |
+|--------------------------|--------|------------------|
+| `enabled`                | `true` | 启用静默触发     |
+| `threshold_minutes`      | `60`   | 静默阈值（分钟） |
+| `check_interval_minutes` | `15`   | 检查间隔（分钟） |
 
 ### 定时触发设置
 
-| 字段      | 默认值                         | 描述               |
-| --------- | ------------------------------ | ------------------ |
-| `enabled` | `true`                         | 启用定时触发       |
-| `times`   | `["09:00", "12:00", "18:00"]`  | 触发时间点列表     |
+| 字段      | 默认值                        | 描述           |
+|-----------|-------------------------------|----------------|
+| `enabled` | `true`                        | 启用定时触发   |
+| `times`   | `["09:00", "12:00", "18:00"]` | 触发时间点列表 |
 
 ### 新成员欢迎设置
 
-| 字段            | 默认值                       | 描述             |
-| --------------- | ---------------------------- | ---------------- |
-| `enabled`       | `true`                       | 启用新成员欢迎   |
-| `welcome_prompt`| `"用友好的方式欢迎新成员加入"` | 欢迎提示词       |
+| 字段             | 默认值                         | 描述           |
+|------------------|--------------------------------|----------------|
+| `enabled`        | `true`                         | 启用新成员欢迎 |
+| `welcome_prompt` | `"用友好的方式欢迎新成员加入"` | 欢迎提示词     |
 
 ### 决策模型设置
 
-| 字段             | 默认值 | 描述                           |
-| ---------------- | ------ | ------------------------------ |
-| `model`          | `""`   | 决策使用的模型（留空用默认）   |
-| `temperature`    | `0.8`  | 决策温度（0-2）                |
-| `prompt_template`| `""`   | 自定义决策提示词（留空用默认） |
-| `stream_enabled` | `true` | 启用流式请求（更快响应）       |
+| 字段              | 默认值 | 描述                           |
+|-------------------|--------|--------------------------------|
+| `model`           | `""`   | 决策使用的模型（留空用默认）   |
+| `temperature`     | `0.8`  | 决策温度（0-2）                |
+| `prompt_template` | `""`   | 自定义决策提示词（留空用默认） |
+| `stream_enabled`  | `true` | 启用流式请求（更快响应）       |
 
 ### 上下文设置
 
-| 字段            | 默认值  | 描述               |
-| --------------- | ------- | ------------------ |
-| `enabled`       | `true`  | 启用上下文管理     |
-| `max_messages`  | `50`    | 最大保留消息数     |
-| `max_tokens`    | `8000`  | 最大上下文 token 数 |
-| `expiry_minutes`| `60`    | 上下文过期时间     |
-| `inactive_room_hours`| `24` | 不活跃房间清理阈值（小时） |
+| 字段                  | 默认值 | 描述                       |
+|-----------------------|--------|----------------------------|
+| `enabled`             | `true` | 启用上下文管理             |
+| `max_messages`        | `50`   | 最大保留消息数             |
+| `max_tokens`          | `8000` | 最大上下文 token 数        |
+| `expiry_minutes`      | `60`   | 上下文过期时间             |
+| `inactive_room_hours` | `24`   | 不活跃房间清理阈值（小时） |
 
 ### 重试设置
 
-| 字段              | 默认值 | 描述                   |
-| ----------------- | ------ | ---------------------- |
-| `enabled`         | `true` | 启用失败重试           |
-| `max_retries`     | `3`    | 最大重试次数           |
-| `initial_delay_ms`| `1000` | 初始延迟               |
-| `max_delay_ms`    | `30000`| 最大延迟               |
-| `backoff_factor`  | `2.0`  | 指数退避乘数           |
-| `fallback_enabled`| `true` | 启用降级到备用模型     |
-| `fallback_models` | `[]`   | 降级使用的模型列表     |
+| 字段               | 默认值  | 描述               |
+|--------------------|---------|--------------------|
+| `enabled`          | `true`  | 启用失败重试       |
+| `max_retries`      | `3`     | 最大重试次数       |
+| `initial_delay_ms` | `1000`  | 初始延迟           |
+| `max_delay_ms`     | `30000` | 最大延迟           |
+| `backoff_factor`   | `2.0`   | 指数退避乘数       |
+| `fallback_enabled` | `true`  | 启用降级到备用模型 |
+| `fallback_models`  | `[]`    | 降级使用的模型列表 |
 
 ### 工具调用设置
 
-| 字段           | 默认值 | 描述                   |
-| -------------- | ------ | ---------------------- |
-| `max_iterations`| `5`   | 最大工具调用迭代次数   |
+| 字段             | 默认值 | 描述                 |
+|------------------|--------|----------------------|
+| `max_iterations` | `5`    | 最大工具调用迭代次数 |
 
 ### MCP 设置
 
-| 字段       | 必填 | 描述                         |
-| ---------- | ---- | ---------------------------- |
-| `enabled`  | 否   | 启用 MCP 功能                |
-| `servers`  | 否   | 外部 MCP 服务器配置          |
-| `builtin`  | 否   | 内置工具配置                 |
+| 字段      | 必填 | 描述                |
+|-----------|------|---------------------|
+| `enabled` | 否   | 启用 MCP 功能       |
+| `servers` | 否   | 外部 MCP 服务器配置 |
+| `builtin` | 否   | 内置工具配置        |
 
 ### MCP 内置工具设置
 
 #### web_search 配置
 
-| 字段             | 默认值 | 描述                         |
-| ---------------- | ------ | ---------------------------- |
-| `instances`      | `[]`   | SearXNG 实例列表（留空使用默认）|
-| `max_results`    | `5`    | 最大返回结果数（最大 10）    |
-| `timeout_seconds`| `20`   | 请求超时时间                 |
+| 字段              | 默认值 | 描述                             |
+|-------------------|--------|----------------------------------|
+| `instances`       | `[]`   | SearXNG 实例列表（留空使用默认） |
+| `max_results`     | `5`    | 最大返回结果数（最大 10）        |
+| `timeout_seconds` | `20`   | 请求超时时间                     |
 
 #### js_sandbox 配置
 
-| 字段               | 默认值  | 描述                   |
-| ------------------ | ------- | ---------------------- |
-| `enabled`          | `true`  | 启用 JS 沙箱           |
-| `timeout_ms`       | `5000`  | 执行超时时间（毫秒）   |
-| `max_memory_mb`    | `64`    | 最大内存限制（MB）     |
-| `max_output_length`| `10000` | 最大输出长度（字符）   |
+| 字段                | 默认值  | 描述                 |
+|---------------------|---------|----------------------|
+| `enabled`           | `true`  | 启用 JS 沙箱         |
+| `timeout_ms`        | `5000`  | 执行超时时间（毫秒） |
+| `max_memory_mb`     | `64`    | 最大内存限制（MB）   |
+| `max_output_length` | `10000` | 最大输出长度（字符） |
 
 ### MCP 服务器设置
 
-| 字段              | 必填         | 描述                             |
-| ----------------- | ------------ | -------------------------------- |
-| `type`            | 是           | 服务器类型: `builtin`, `stdio`, `http` |
-| `enabled`         | 否           | 是否启用                         |
-| `command`         | stdio 必填   | 可执行文件路径                   |
-| `args`            | 否           | 命令参数                         |
-| `env`             | 否           | 环境变量                         |
-| `url`             | http 必填    | 服务器地址                       |
-| `token`           | 否           | Bearer 认证令牌                  |
-| `timeout_seconds` | 否           | 调用超时时间                     |
-| `allowed_commands`| 否           | stdio 命令白名单（默认禁止所有） |
+| 字段               | 必填       | 描述                                   |
+|--------------------|------------|----------------------------------------|
+| `type`             | 是         | 服务器类型: `builtin`, `stdio`, `http` |
+| `enabled`          | 否         | 是否启用                               |
+| `command`          | stdio 必填 | 可执行文件路径                         |
+| `args`             | 否         | 命令参数                               |
+| `env`              | 否         | 环境变量                               |
+| `url`              | http 必填  | 服务器地址                             |
+| `token`            | 否         | Bearer 认证令牌                        |
+| `timeout_seconds`  | 否         | 调用超时时间                           |
+| `allowed_commands` | 否         | stdio 命令白名单（默认禁止所有）       |
 
 ### Meme 设置
 
-| 字段             | 默认值  | 描述                             |
-| ---------------- | ------- | -------------------------------- |
-| `enabled`        | `false` | 启用 Meme 搜索功能               |
-| `api_key`        | -       | Klipy API Key（从 partner.klipy.com 获取） |
-| `max_results`    | `5`     | 最大返回结果数                   |
-| `timeout_seconds`| `10`    | 请求超时时间（秒）               |
-
-### QQ 机器人设置
-
-| 字段                      | 必填 | 默认值 | 描述                             |
-| ------------------------- | ---- | ------ | -------------------------------- |
-| `enabled`                 | 否   | `false`| 启用 QQ 机器人功能               |
-| `app_id`                  | 是   | -      | QQ 机器人 AppID（从开放平台获取）|
-| `app_secret`              | 是   | -      | QQ 机器人 AppSecret              |
-| `webhook_port`            | 否   | `8080` | Webhook 服务器监听端口           |
-| `webhook_path`            | 否   | `/qq/callback` | Webhook 回调路径          |
-| `webhook_secret`          | 否   | `""`   | Webhook 签名密钥                 |
-| `max_concurrent_events`   | 否   | `10`   | 最大并发事件处理数               |
+| 字段              | 默认值  | 描述                                       |
+|-------------------|---------|--------------------------------------------|
+| `enabled`         | `false` | 启用 Meme 搜索功能                         |
+| `api_key`         | -       | Klipy API Key（从 partner.klipy.com 获取） |
+| `max_results`     | `5`     | 最大返回结果数                             |
+| `timeout_seconds` | `10`    | 请求超时时间（秒）                         |
 
 ### 关闭设置
 
-| 字段             | 默认值 | 描述                   |
-| ---------------- | ------ | ---------------------- |
-| `timeout_seconds`| `30`   | 关闭超时时间（秒）     |
+| 字段              | 默认值 | 描述               |
+|-------------------|--------|--------------------|
+| `timeout_seconds` | `30`   | 关闭超时时间（秒） |
 
 ## 架构
 
@@ -956,14 +890,6 @@ saber/
       builtin.go                   # 内置人格定义
       service.go                   # 人格服务（CRUD、房间映射）
       commands.go                  # !persona 命令处理
-    qq/                            # QQ 机器人模块
-      adapter.go                   # QQ 适配器（WebSocket 连接、事件分发）
-      client.go                    # QQ API 客户端
-      handlers.go                  # QQ 事件处理（C2C/群聊）
-      message.go                   # QQ 消息构建和发送
-      commands.go                  # QQ 命令注册
-      ai_command.go                # QQ AI 命令处理
-      context.go                   # QQ 上下文管理
 ```
 
 ## 开发
@@ -993,22 +919,22 @@ make clean       # 清理构建产物
 
 项目使用纯 Go 编译（`CGO_ENABLED=0`），使用 `modernc/sqlite` 作为 SQLite 驱动：
 
-| 命令 | 特点 | 适用场景 |
-|------|------|----------|
-| `make build` | 纯 Go，静态链接 | 日常开发 |
+| 命令              | 特点                                     | 适用场景 |
+|-------------------|------------------------------------------|----------|
+| `make build`      | 纯 Go，静态链接                          | 日常开发 |
 | `make build-prod` | 纯 Go + 激进内联优化 (`-gcflags="-l=4"`) | 生产部署 |
-| `make build-all` | 交叉编译 6 个平台 × 2 架构 | 发布版本 |
+| `make build-all`  | 交叉编译 6 个平台 × 2 架构               | 发布版本 |
 
 **构建参数说明**：
 
-| 参数 | 作用 |
-|------|------|
-| `CGO_ENABLED=0` | 禁用 CGO，强制纯 Go 编译 |
-| `-tags goolm` | 使用纯 Go 的 E2EE 实现 |
-| `-trimpath` | 移除文件系统路径，可复现构建 |
-| `-ldflags="-s -w"` | 移除符号表和调试信息，减小体积 |
+| 参数                | 作用                              |
+|---------------------|-----------------------------------|
+| `CGO_ENABLED=0`     | 禁用 CGO，强制纯 Go 编译          |
+| `-tags goolm`       | 使用纯 Go 的 E2EE 实现            |
+| `-trimpath`         | 移除文件系统路径，可复现构建      |
+| `-ldflags="-s -w"`  | 移除符号表和调试信息，减小体积    |
 | `-ldflags="-X ..."` | 运行时注入版本、Git commit 等信息 |
-| `-gcflags="-l=4"` | 激进内联优化（仅 build-prod） |
+| `-gcflags="-l=4"`   | 激进内联优化（仅 build-prod）     |
 
 ### 使用 E2EE 构建
 
@@ -1043,22 +969,16 @@ go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 ## 安全注意事项
 
 - 永远不要将 `config.yaml` 提交到版本控制
+- 配置文件与会话文件包含密钥，建议手动执行 `chmod 600 config.yaml`（程序不再强制校验权限）
 - 会话文件包含访问令牌，使用 `0600` 权限保护
 - 生产环境使用访问令牌而非密码
 - E2EE pickle 密钥应安全存储
-
-### 环境变量
-
-| 变量 | 描述 |
-|------|------|
-| `SABER_ALLOW_INSECURE_CONFIG` | 设置为 `true` 允许加载权限过宽的配置文件（仅用于测试环境，不推荐生产使用） |
 
 ## 依赖
 
 - [mautrix-go](https://github.com/mautrix/go) - Matrix 客户端库
 - [go-openai](https://github.com/sashabaranov/go-openai) - OpenAI 客户端
 - [go-sdk](https://github.com/modelcontextprotocol/go-sdk) - MCP (Model Context Protocol) SDK
-- [botgo](https://github.com/tencent-connect/botgo) - QQ 频道机器人 SDK
 - [goja](https://github.com/dop251/goja) - JavaScript 运行时（用于 JS 沙箱）
 - [tint](https://github.com/lmittmann/tint) - 带颜色的结构化日志
 - [bluemonday](https://github.com/microcosm-cc/bluemonday) - HTML 净化库
