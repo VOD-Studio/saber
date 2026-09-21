@@ -36,6 +36,9 @@ func (a *ChatAdapter) Session(ctx context.Context, roomID id.RoomID) chat.Sessio
 
 // Message 在接入层解析图片和引用关系，核心无需理解 MXC 或 Matrix SDK。
 func (a *ChatAdapter) Message(ctx context.Context, userID id.UserID, roomID id.RoomID, text string) chat.Message {
+	if GetReplyToID(ctx) != "" {
+		text = event.TrimReplyFallbackText(text)
+	}
 	message := chat.Message{Session: a.Session(ctx, roomID), ID: string(GetEventID(ctx)), SenderID: string(userID), Text: text, ReplyTo: string(GetReplyToID(ctx))}
 	if a.media == nil || !a.mediaConfig.Enabled {
 		return message
