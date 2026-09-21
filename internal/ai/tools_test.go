@@ -14,12 +14,10 @@ import (
 
 // TestNewToolExecutor 测试创建工具执行器。
 func TestNewToolExecutor(t *testing.T) {
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled = true
-	cfg.Provider = "openai"
-	cfg.BaseURL = "https://api.openai.com/v1"
-	cfg.APIKey = "test-key"
-	cfg.DefaultModel = "gpt-4"
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "test-key"}}
+	cfg.AI.DefaultModel = "openai.gpt-4"
 
 	mcpMgr := mcp.NewManager(&config.MCPConfig{})
 	service, err := NewService(&cfg, nil, mcpMgr, nil)
@@ -35,13 +33,11 @@ func TestNewToolExecutor(t *testing.T) {
 
 // TestToolExecutor_ExecuteToolCallingLoop_NoToolCalls 测试无工具调用的场景。
 func TestToolExecutor_ExecuteToolCallingLoop_NoToolCalls(t *testing.T) {
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled = true
-	cfg.Provider = "openai"
-	cfg.BaseURL = "https://api.openai.com/v1"
-	cfg.APIKey = "test-key"
-	cfg.DefaultModel = "gpt-4"
-	cfg.ToolCalling.MaxIterations = 5
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "test-key"}}
+	cfg.AI.DefaultModel = "openai.gpt-4"
+	cfg.Agent.MaxIterations = 5
 
 	mcpMgr := mcp.NewManager(&config.MCPConfig{})
 	service, err := NewService(&cfg, nil, mcpMgr, nil)
@@ -132,8 +128,8 @@ func TestToolExecutor_ExecuteToolCall(t *testing.T) {
 
 // TestPrepareToolsWithMCPServer 测试带 MCP 服务器的工具准备。
 func TestPrepareToolsWithMCPServer(t *testing.T) {
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled = true
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
 
 	mcpCfg := &config.MCPConfig{
 		Enabled: true,
@@ -159,13 +155,11 @@ func TestPrepareToolsWithMCPServer(t *testing.T) {
 
 // TestToolExecutor_MaxIterations 测试最大迭代次数。
 func TestToolExecutor_MaxIterations(t *testing.T) {
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled = true
-	cfg.Provider = "openai"
-	cfg.BaseURL = "https://api.openai.com/v1"
-	cfg.APIKey = "test-key"
-	cfg.DefaultModel = "gpt-4"
-	cfg.ToolCalling.MaxIterations = 3
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "test-key"}}
+	cfg.AI.DefaultModel = "openai.gpt-4"
+	cfg.Agent.MaxIterations = 3
 
 	mcpMgr := mcp.NewManager(&config.MCPConfig{})
 	service, err := NewService(&cfg, nil, mcpMgr, nil)
@@ -176,8 +170,8 @@ func TestToolExecutor_MaxIterations(t *testing.T) {
 	executor := NewToolExecutor(service)
 
 	// 验证最大迭代次数被正确设置
-	if service.core.GetConfig().ToolCalling.MaxIterations != 3 {
-		t.Errorf("MaxIterations = %d, want 3", service.core.GetConfig().ToolCalling.MaxIterations)
+	if service.config.Agent.MaxIterations != 3 {
+		t.Errorf("MaxIterations = %d, want 3", service.config.Agent.MaxIterations)
 	}
 
 	_ = executor
@@ -203,12 +197,10 @@ func TestToolExecutor_ExecuteToolCallWithContext(t *testing.T) {
 
 // TestToolExecutor_CancelledContext 测试取消的上下文。
 func TestToolExecutor_CancelledContext(t *testing.T) {
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled = true
-	cfg.Provider = "openai"
-	cfg.BaseURL = "https://api.openai.com/v1"
-	cfg.APIKey = "test-key"
-	cfg.DefaultModel = "gpt-4"
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "test-key"}}
+	cfg.AI.DefaultModel = "openai.gpt-4"
 
 	mcpMgr := mcp.NewManager(&config.MCPConfig{})
 	service, err := NewService(&cfg, nil, mcpMgr, nil)
@@ -235,12 +227,10 @@ func TestToolExecutor_CancelledContext(t *testing.T) {
 
 // TestToolExecutor_DefaultMaxIterations 测试默认最大迭代次数。
 func TestToolExecutor_DefaultMaxIterations(t *testing.T) {
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled = true
-	cfg.Provider = "openai"
-	cfg.BaseURL = "https://api.openai.com/v1"
-	cfg.APIKey = "test-key"
-	cfg.DefaultModel = "gpt-4"
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "test-key"}}
+	cfg.AI.DefaultModel = "openai.gpt-4"
 	// 不设置 ToolCalling.MaxIterations，使用配置默认值
 
 	mcpMgr := mcp.NewManager(&config.MCPConfig{})
@@ -253,7 +243,7 @@ func TestToolExecutor_DefaultMaxIterations(t *testing.T) {
 	_ = executor
 
 	// 验证使用配置默认值
-	if service.core.GetConfig().ToolCalling.MaxIterations < 1 {
+	if service.config.Agent.MaxIterations < 1 {
 		t.Error("MaxIterations should be at least 1")
 	}
 }

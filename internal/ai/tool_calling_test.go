@@ -9,12 +9,10 @@ import (
 )
 
 func TestNewService_WithMCPManager(t *testing.T) {
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled = true
-	cfg.Provider = "openai"
-	cfg.BaseURL = "https://api.openai.com/v1"
-	cfg.APIKey = "test-key"
-	cfg.DefaultModel = "gpt-4"
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "test-key"}}
+	cfg.AI.DefaultModel = "openai.gpt-4"
 
 	mcpCfg := &config.MCPConfig{
 		Enabled: false,

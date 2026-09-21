@@ -2,12 +2,11 @@
 
 在 `ai.providers` 中设置 `api: openai-responses` 后，Saber 使用 go-openai 的 `CreateResponse` / `CreateResponseStream` 调用 `POST {base_url}/responses`。`base_url` 应包含 `/v1`，不要包含 `/responses`。也支持 `type: openai-responses`；显式 `api` 优先。
 
-将下面的 provider 合并到已有 `config.yaml` 的 `ai.providers`，替换密钥。`models` 是 Saber 的 map 格式，不是 OMP 的列表格式。模型标识和输出上限来自用户提供的 Podlink 清单，实际可用性与额度由中继决定。
+将下面的 provider 合并到已有 `config.yaml` 的 `ai.providers`，替换密钥。`models` 是 Saber 的 map 格式，不是 OMP 的列表格式。模型标识和输出上限来自用户提供的 Podlink 清单，实际可用性与额度由中继决定。这里的 `max_tokens` 会实际作为输出预算发送，普通聊天可省略这些大值，继承全局默认 8192。请求时限为 `ai.request_timeout_seconds`，整个任务时限为 `agent.timeout_seconds`，流式开关为 `agent.stream`。
 
 ```yaml
 ai:
   default_model: podlink-responses.gpt-5.6-sol
-  stream_enabled: true
   providers:
     podlink-responses:
       type: openai

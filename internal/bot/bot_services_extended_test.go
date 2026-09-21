@@ -13,12 +13,11 @@ import (
 // TestInitMemeService_Enabled 测试启用的 Meme 服务初始化。
 func TestInitMemeService_Enabled(t *testing.T) {
 	state := &appState{
-		cfg: &config.Config{
-			Meme: config.MemeConfig{
-				Enabled:    true,
-				APIKey:     "test-api-key",
-				MaxResults: 5,
-			},
+		cfg: &config.Config{Matrix: config.MatrixConfig{Meme: config.MemeConfig{
+			Enabled:    true,
+			APIKey:     "test-api-key",
+			MaxResults: 5,
+		}},
 		},
 		services: &services{
 			// client 和 commandService 为 nil，会阻止初始化
@@ -37,12 +36,11 @@ func TestInitMemeService_Enabled(t *testing.T) {
 // TestInitMemeService_InvalidMaxResults 测试无效的最大结果数。
 func TestInitMemeService_InvalidMaxResults(t *testing.T) {
 	state := &appState{
-		cfg: &config.Config{
-			Meme: config.MemeConfig{
-				Enabled:    true,
-				APIKey:     "test-api-key",
-				MaxResults: 0, // 无效值
-			},
+		cfg: &config.Config{Matrix: config.MatrixConfig{Meme: config.MemeConfig{
+			Enabled:    true,
+			APIKey:     "test-api-key",
+			MaxResults: 0, // 无效值
+		}},
 		},
 		services: &services{},
 	}
@@ -58,11 +56,10 @@ func TestInitMemeService_InvalidMaxResults(t *testing.T) {
 // TestInitMemeService_EmptyAPIKey 测试空 API Key。
 func TestInitMemeService_EmptyAPIKey(t *testing.T) {
 	state := &appState{
-		cfg: &config.Config{
-			Meme: config.MemeConfig{
-				Enabled: true,
-				APIKey:  "", // 空 API Key
-			},
+		cfg: &config.Config{Matrix: config.MatrixConfig{Meme: config.MemeConfig{
+			Enabled: true,
+			APIKey:  "", // 空 API Key
+		}},
 		},
 		services: &services{},
 	}
@@ -200,15 +197,15 @@ func TestRegisterAICommands(t *testing.T) {
 	// 我们只能测试配置逻辑
 	cfg := &config.Config{
 		AI: config.AIConfig{
-			Enabled:               true,
-			DirectChatAutoReply:   true,
-			GroupChatMentionReply: true,
-			ReplyToBotReply:       true,
+			Enabled: true,
+
 			Models: map[string]config.ModelConfig{
 				"gpt-4":  {Model: "gpt-4"},
 				"claude": {Model: "claude-3"},
 			},
-		},
+		}, Matrix: config.MatrixConfig{DirectChatAutoReply: true,
+			GroupChatMentionReply: true,
+			ReplyToBotReply:       true},
 	}
 
 	// 验证配置
@@ -216,7 +213,7 @@ func TestRegisterAICommands(t *testing.T) {
 		t.Error("AI should be enabled")
 	}
 
-	if !cfg.AI.DirectChatAutoReply {
+	if !cfg.Matrix.DirectChatAutoReply {
 		t.Error("DirectChatAutoReply should be enabled")
 	}
 
@@ -271,19 +268,18 @@ func TestInitProactiveManager_Config(t *testing.T) {
 	cfg := &config.Config{
 		AI: config.AIConfig{
 			Enabled: true,
-			Proactive: config.ProactiveConfig{
-				Enabled:            true,
-				MinIntervalMinutes: 60,
-			},
-		},
+		}, Matrix: config.MatrixConfig{Proactive: config.ProactiveConfig{
+			Enabled:            true,
+			MinIntervalMinutes: 60,
+		}},
 	}
 
-	if !cfg.AI.Proactive.Enabled {
+	if !cfg.Matrix.Proactive.Enabled {
 		t.Error("Proactive should be enabled")
 	}
 
-	if cfg.AI.Proactive.MinIntervalMinutes != 60 {
-		t.Errorf("MinIntervalMinutes = %d, want 60", cfg.AI.Proactive.MinIntervalMinutes)
+	if cfg.Matrix.Proactive.MinIntervalMinutes != 60 {
+		t.Errorf("MinIntervalMinutes = %d, want 60", cfg.Matrix.Proactive.MinIntervalMinutes)
 	}
 }
 
@@ -328,13 +324,12 @@ func TestInitServices_MediaConfig(t *testing.T) {
 	cfg := &config.Config{
 		AI: config.AIConfig{
 			Enabled: true,
-			Media: config.MediaConfig{
-				MaxSizeMB: 50,
-			},
-		},
+		}, Matrix: config.MatrixConfig{Media: config.MediaConfig{
+			MaxSizeMB: 50,
+		}},
 	}
 
-	maxSizeBytes := int64(cfg.AI.Media.MaxSizeMB) * 1024 * 1024
+	maxSizeBytes := int64(cfg.Matrix.Media.MaxSizeMB) * 1024 * 1024
 	if maxSizeBytes != 50*1024*1024 {
 		t.Errorf("MaxSizeBytes = %d, want %d", maxSizeBytes, 50*1024*1024)
 	}
@@ -343,15 +338,13 @@ func TestInitServices_MediaConfig(t *testing.T) {
 // TestStartSync_Config 测试同步启动配置。
 func TestStartSync_Config(t *testing.T) {
 	cfg := &config.Config{
-		AI: config.AIConfig{
-			Proactive: config.ProactiveConfig{
-				Enabled: true,
-			},
-		},
+		AI: config.AIConfig{}, Matrix: config.MatrixConfig{Proactive: config.ProactiveConfig{
+			Enabled: true,
+		}},
 	}
 
 	// 验证配置
-	if !cfg.AI.Proactive.Enabled {
+	if !cfg.Matrix.Proactive.Enabled {
 		t.Error("Proactive should be enabled")
 	}
 }
@@ -416,18 +409,15 @@ func TestInitServices_WithAIEnabled(t *testing.T) {
 	state := &appState{
 		cfg: &config.Config{
 			AI: config.AIConfig{
-				Enabled:        true,
-				Provider:       "openai",
-				BaseURL:        "https://api.openai.com/v1",
-				APIKey:         "test-key",
-				DefaultModel:   "gpt-4",
+				Enabled: true,
+
+				DefaultModel: config.FormatModelID("openai",
+
+					"gpt-4"),
 				TimeoutSeconds: 30,
 				Models: map[string]config.ModelConfig{
 					"gpt-4": {Model: "gpt-4"},
-				},
-				ToolCalling: config.ToolCallingConfig{
-					MaxIterations: 5,
-				},
+				}, Providers: map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "test-key"}},
 			},
 		},
 		services: &services{

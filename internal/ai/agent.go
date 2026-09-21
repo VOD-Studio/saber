@@ -21,17 +21,14 @@ func (s *Service) RunAgent(ctx context.Context, req agent.Request, emit func(age
 }
 
 func (s *Service) runAgent(ctx context.Context, req agent.Request, emit func(agent.Event), firstClient *Client) (agent.Result, error) {
-	cfg := s.core.GetConfig()
-	retry := &RetryConfigWrapper{MaxRetries: cfg.Retry.MaxRetries, InitialDelay: time.Duration(cfg.Retry.InitialDelayMs) * time.Millisecond, MaxDelay: time.Duration(cfg.Retry.MaxDelayMs) * time.Millisecond, BackoffFactor: cfg.Retry.BackoffFactor}
-	if !cfg.Retry.Enabled {
+	retry := &RetryConfigWrapper{MaxRetries: s.config.Agent.Retry.MaxRetries, InitialDelay: time.Duration(s.config.Agent.Retry.InitialDelayMs) * time.Millisecond, MaxDelay: time.Duration(s.config.Agent.Retry.MaxDelayMs) * time.Millisecond, BackoffFactor: s.config.Agent.Retry.BackoffFactor}
+	if !s.config.Agent.Retry.Enabled {
 		retry.MaxRetries = 0
 	}
-	if cfg.Retry.FallbackEnabled {
-		retry.FallbackModels = cfg.Retry.FallbackModels
+	if s.config.Agent.Retry.FallbackEnabled {
+		retry.FallbackModels = s.config.Agent.Retry.FallbackModels
 	}
-	if cfg.CircuitBreaker.Enabled {
-		retry.CircuitBreaker = NewCircuitBreaker(cfg.CircuitBreaker.FailureThreshold, time.Duration(cfg.CircuitBreaker.ResetTimeout)*time.Second)
-	}
+	retry.CircuitBreaker = s.circuitBreaker
 	getClient := func(model string) (*Client, error) {
 		if firstClient != nil && model == req.Model {
 			return firstClient, nil
@@ -39,8 +36,9 @@ func (s *Service) runAgent(ctx context.Context, req agent.Request, emit func(age
 		return s.getClient(model)
 	}
 	runtime := agent.Runtime{
-		Limits: agent.Limits{MaxRounds: cfg.ToolCalling.MaxIterations, Timeout: time.Duration(cfg.ToolCalling.TimeoutSeconds) * time.Second, MaxToolOutputBytes: cfg.ToolCalling.MaxToolOutputBytes},
-		Model:  model.AgentModel(getClient, retry),
+		Context: s.contextPolicy(),
+		Limits:  agent.Limits{MaxRounds: s.config.Agent.MaxIterations, Timeout: time.Duration(s.config.Agent.TimeoutSeconds) * time.Second, MaxToolOutputBytes: s.config.Agent.MaxToolOutputBytes},
+		Model:   model.AgentModel(getClient, retry),
 		Execute: func(ctx context.Context, name string, args map[string]any) (agent.ToolOutput, error) {
 			value, err := s.toolExecutor.ExecuteToolCall(ctx, name, args)
 			output := agent.ToolOutput{Value: value}
@@ -58,18 +56,17 @@ func (s *Service) runAgent(ctx context.Context, req agent.Request, emit func(age
 
 // runAgentReply 兼容预先构造请求的旧调用方，展示复用通用 Presenter。
 func (s *Service) runAgentReply(ctx context.Context, req agent.Request, roomID id.RoomID, client *Client) (*ChatCompletionResponse, error) {
-	cfg := s.core.GetConfig()
-	timeout := time.Duration(cfg.ToolCalling.TimeoutSeconds) * time.Second
+	timeout := time.Duration(s.config.Agent.TimeoutSeconds) * time.Second
 	if timeout == 0 {
-		timeout = 120 * time.Second
+		timeout = 600 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	adapter := matrix.NewChatAdapter(s.matrixService, s.mediaService, cfg.Media, cfg.StreamEdit.Enabled, nil)
+	adapter := matrix.NewChatAdapter(s.matrixService, s.mediaService, s.config.Matrix.Media, s.config.Matrix.StreamEdit.Enabled, nil)
 	message := chat.Message{Session: adapter.Session(ctx, roomID), ID: string(matrix.GetEventID(ctx))}
 	result, err := conversation.Deliver(ctx, func(ctx context.Context, req agent.Request, emit func(agent.Event)) (agent.Result, error) {
 		return s.runAgent(ctx, req, emit, client)
-	}, req, message, adapter, displayConfig(cfg.StreamEdit), func(result agent.Result) {
+	}, req, message, adapter, displayConfig(s.config.Matrix.StreamEdit), func(result agent.Result) {
 		if s.contextManager != nil {
 			s.contextManager.history.AddMessage(message.Session.Key(), RoleAssistant, result.Content, "")
 		}
@@ -80,4 +77,9 @@ func (s *Service) runAgentReply(ctx context.Context, req agent.Request, roomID i
 	response := result.Rounds[len(result.Rounds)-1].Response
 	response.Usage = result.Usage
 	return &response, nil
+}
+
+func (s *Service) contextPolicy() agent.ContextPolicy {
+	c := s.config.Agent.Context
+	return agent.ContextPolicy{Enabled: c.Enabled, MaxMessages: c.MaxMessages, MaxInputTokens: c.MaxTokens}
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
 )
@@ -31,18 +32,18 @@ func TestService_ChatTaskConfiguration(t *testing.T) {
 				if request[key] != float64(1234) || request["stream"] == true {
 					t.Errorf("model budget or non-stream setting lost: %v", request)
 				}
-				if request["temperature"] != 0.2 {
+				if request["temperature"] != float64(0) {
 					t.Errorf("model temperature lost: %v", request)
 				}
 				http.Error(w, "upstream unavailable", http.StatusServiceUnavailable)
 			}))
 			defer server.Close()
-			cfg := config.DefaultAIConfig()
-			cfg.Enabled, cfg.StreamEnabled, cfg.Retry.Enabled = true, false, false
-			cfg.DefaultModel = "test.model"
-			cfg.Providers = map[string]config.ProviderConfig{"test": {
+			cfg := *config.DefaultConfig()
+			cfg.AI.Enabled, cfg.Agent.StreamEnabled, cfg.Agent.Retry.Enabled = true, false, false
+			cfg.AI.DefaultModel = "test.model"
+			cfg.AI.Providers = map[string]config.ProviderConfig{"test": {
 				Type: "openai", API: api, BaseURL: server.URL, ReasoningEffort: "none",
-				Models: map[string]config.ModelConfig{"model": {Model: "model", MaxTokens: 1234, Temperature: 0.2}},
+				Models: map[string]config.ModelConfig{"model": {Model: "model", MaxTokens: 1234, Temperature: new(float64(0))}},
 			}}
 			s, err := NewService(&cfg, nil, nil, nil)
 			if err != nil {
@@ -73,5 +74,33 @@ func TestService_ChatTaskConfiguration(t *testing.T) {
 			}
 			t.Fatal("task did not finish")
 		})
+	}
+}
+
+func TestService_CircuitBreakerAcrossTasks(t *testing.T) {
+	var requests atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer upstream.Close()
+	cfg := config.DefaultConfig()
+	cfg.AI.Enabled, cfg.AI.DefaultModel = true, "test.model"
+	cfg.AI.Providers = map[string]config.ProviderConfig{"test": {Type: "openai", BaseURL: upstream.URL}}
+	cfg.Agent.Retry.Enabled = false
+	cfg.Agent.CircuitBreaker.Enabled, cfg.Agent.CircuitBreaker.FailureThreshold = true, 1
+	s, err := NewService(cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Stop()
+	for range 2 {
+		_, err := s.RunAgent(context.Background(), agent.Request{Model: "test.model"}, nil)
+		if err == nil {
+			t.Fatal("expected upstream/circuit error")
+		}
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("circuit reset between tasks: %d requests", requests.Load())
 	}
 }

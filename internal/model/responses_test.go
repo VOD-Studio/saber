@@ -54,7 +54,7 @@ models:
 	client, err := NewClientWithModel(&cfg)
 	require.NoError(t, err)
 	choice := "required"
-	req := agent.Request{Model: ai.DefaultModel, MaxTokens: cfg.MaxTokens, Temperature: cfg.Temperature, ToolChoice: &choice,
+	req := agent.Request{Model: ai.DefaultModel, MaxTokens: cfg.MaxTokens, Temperature: *cfg.Temperature, ToolChoice: &choice,
 		Messages: []openai.ChatCompletionMessage{
 			{Role: "system", Content: "system"}, {Role: "developer", Content: "developer"},
 			{Role: "user", MultiContent: []openai.ChatMessagePart{{Type: openai.ChatMessagePartTypeText, Text: "look"}, {Type: openai.ChatMessagePartTypeImageURL, ImageURL: &openai.ChatMessageImageURL{URL: "data:image/png;base64,eA==", Detail: "low"}}}},

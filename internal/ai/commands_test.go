@@ -43,13 +43,11 @@ func TestAICommand_Handle(t *testing.T) {
 	})
 
 	t.Run("service exists", func(t *testing.T) {
-		cfg := config.DefaultAIConfig()
-		cfg.Enabled = true
-		cfg.Provider = "openai"
-		cfg.BaseURL = "https://api.openai.com/v1"
-		cfg.APIKey = "test-key"
-		cfg.DefaultModel = "gpt-4"
-		cfg.Models = map[string]config.ModelConfig{"gpt-4": {Model: "gpt-4"}}
+		cfg := *config.DefaultConfig()
+		cfg.AI.Enabled = true
+		cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "test-key"}}
+		cfg.AI.DefaultModel = "openai.gpt-4"
+		cfg.AI.Models = map[string]config.ModelConfig{"gpt-4": {Model: "gpt-4"}}
 
 		mcpMgr := mcp.NewManager(&config.MCPConfig{})
 		service, err := NewService(&cfg, nil, mcpMgr, nil)
@@ -67,13 +65,11 @@ func TestAICommand_Handle(t *testing.T) {
 // TestMultiModelAICommand_Handle 测试 MultiModelAICommand 的 Handle 方法。
 func TestMultiModelAICommand_Handle(t *testing.T) {
 	t.Run("create command", func(t *testing.T) {
-		cfg := config.DefaultAIConfig()
-		cfg.Enabled = true
-		cfg.Provider = "openai"
-		cfg.BaseURL = "https://api.openai.com/v1"
-		cfg.APIKey = "test-key"
-		cfg.DefaultModel = "gpt-4"
-		cfg.Models = map[string]config.ModelConfig{
+		cfg := *config.DefaultConfig()
+		cfg.AI.Enabled = true
+		cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "test-key"}}
+		cfg.AI.DefaultModel = "openai.gpt-4"
+		cfg.AI.Models = map[string]config.ModelConfig{
 			"gpt-4":         {Model: "gpt-4"},
 			"gpt-3.5-turbo": {Model: "gpt-3.5-turbo"},
 		}
@@ -194,13 +190,11 @@ func TestAICommandRouter_Handle(t *testing.T) {
 // TestModelsCommand 测试模型列表命令。
 func TestModelsCommand(t *testing.T) {
 	t.Run("create command", func(t *testing.T) {
-		cfg := config.DefaultAIConfig()
-		cfg.Enabled = true
-		cfg.Provider = "openai"
-		cfg.BaseURL = "https://api.openai.com/v1"
-		cfg.APIKey = "test-key"
-		cfg.DefaultModel = "gpt-4"
-		cfg.Models = map[string]config.ModelConfig{
+		cfg := *config.DefaultConfig()
+		cfg.AI.Enabled = true
+		cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "test-key"}}
+		cfg.AI.DefaultModel = "openai.gpt-4"
+		cfg.AI.Models = map[string]config.ModelConfig{
 			"gpt-4":         {Model: "gpt-4"},
 			"gpt-3.5-turbo": {Model: "gpt-3.5-turbo"},
 		}
@@ -262,7 +256,7 @@ func TestAICommand_Handle_Disabled(t *testing.T) {
 	matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
 
 	cfg := createTestMultiProviderAIConfig()
-	cfg.Enabled = false // AI 禁用
+	cfg.AI.Enabled = false // AI 禁用
 
 	service, err := NewService(cfg, matrixSvc, nil, nil)
 	if err != nil {
@@ -321,7 +315,7 @@ func TestMultiModelAICommand_Handle_Disabled(t *testing.T) {
 	matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
 
 	cfg := createTestMultiProviderAIConfig()
-	cfg.Enabled = false // AI 禁用
+	cfg.AI.Enabled = false // AI 禁用
 
 	service, err := NewService(cfg, matrixSvc, nil, nil)
 	if err != nil {
@@ -381,7 +375,7 @@ func TestClearContextCommand_Handle(t *testing.T) {
 		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
 
 		cfg := createTestMultiProviderAIConfig()
-		cfg.Context.Enabled = false // 禁用上下文管理
+		cfg.Agent.Context.Enabled = false // 禁用上下文管理
 
 		service, err := NewService(cfg, matrixSvc, nil, nil)
 		if err != nil {
@@ -408,7 +402,7 @@ func TestClearContextCommand_Handle(t *testing.T) {
 		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
 
 		cfg := createTestMultiProviderAIConfig()
-		cfg.Context.Enabled = true
+		cfg.Agent.Context.Enabled = true
 
 		service, err := NewService(cfg, matrixSvc, nil, nil)
 		if err != nil {
@@ -447,7 +441,7 @@ func TestContextInfoCommand_Handle(t *testing.T) {
 		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
 
 		cfg := createTestMultiProviderAIConfig()
-		cfg.Context.Enabled = false
+		cfg.Agent.Context.Enabled = false
 
 		service, err := NewService(cfg, matrixSvc, nil, nil)
 		if err != nil {
@@ -474,7 +468,7 @@ func TestContextInfoCommand_Handle(t *testing.T) {
 		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
 
 		cfg := createTestMultiProviderAIConfig()
-		cfg.Context.Enabled = true
+		cfg.Agent.Context.Enabled = true
 
 		service, err := NewService(cfg, matrixSvc, nil, nil)
 		if err != nil {

@@ -89,14 +89,12 @@ func TestTasks_MatrixReceiptIsolationCommandsAndRetry(t *testing.T) {
 	require.NoError(t, err)
 	client.DefaultHTTPRetries = 0
 	commands := matrix.NewCommandService(client, "@bot:test", nil)
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled = true
-	cfg.Provider = "openai"
-	cfg.BaseURL = modelServer.URL
-	cfg.APIKey = "test"
-	cfg.DefaultModel = "local"
-	cfg.StreamEnabled = false
-	cfg.SystemPrompt = "task system"
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: modelServer.URL, APIKey: "test"}}
+	cfg.AI.DefaultModel = "openai.local"
+	cfg.Agent.StreamEnabled = false
+	cfg.AI.SystemPrompt = "task system"
 	service, err := NewService(&cfg, commands, nil, nil)
 	require.NoError(t, err)
 	defer service.Stop()
@@ -265,14 +263,12 @@ func TestTasks_MatrixReplyKeepsQuoteUnlessContinuingTask(t *testing.T) {
 			client, err := mautrix.NewClient(homeserver.URL, "@bot:test", "test")
 			require.NoError(t, err)
 			commands := matrix.NewCommandService(client, "@bot:test", nil)
-			cfg := config.DefaultAIConfig()
-			cfg.Enabled = true
-			cfg.Provider = "openai"
-			cfg.BaseURL = model.URL
-			cfg.APIKey = "test"
-			cfg.DefaultModel = "local"
-			cfg.StreamEnabled = false
-			cfg.SystemPrompt = "system"
+			cfg := *config.DefaultConfig()
+			cfg.AI.Enabled = true
+			cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: model.URL, APIKey: "test"}}
+			cfg.AI.DefaultModel = "openai.local"
+			cfg.Agent.StreamEnabled = false
+			cfg.AI.SystemPrompt = "system"
 			service, err := NewService(&cfg, commands, nil, nil)
 			require.NoError(t, err)
 			defer service.Stop()
@@ -326,9 +322,10 @@ func TestTasks_MatrixReplyKeepsQuoteUnlessContinuingTask(t *testing.T) {
 }
 
 func TestService_EnableTasksWithoutMatrix(t *testing.T) {
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled, cfg.Provider, cfg.APIKey, cfg.DefaultModel = true, "openai", "test", "local"
-	cfg.BaseURL = "http://127.0.0.1:1/v1"
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.DefaultModel = "openai.local"
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", APIKey: "test", BaseURL: "http://127.0.0.1:1/v1"}}
 	service, err := NewService(&cfg, nil, nil, nil)
 	require.NoError(t, err)
 	defer service.Stop()

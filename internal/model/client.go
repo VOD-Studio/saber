@@ -136,7 +136,7 @@ func NewClientWithModel(cfg *config.ModelConfig) (*Client, error) {
 	}
 
 	// 设置 HTTP 客户端
-	clientConfig.HTTPClient = httpClient
+	clientConfig.HTTPClient = requestClient{client: httpClient}
 
 	// 创建 OpenAI 客户端
 	openaiClient := openai.NewClientWithConfig(clientConfig)

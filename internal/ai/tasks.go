@@ -80,15 +80,14 @@ func (s *Service) EnableTasks(path string) error {
 			return agent.Result{}, err
 		}
 		return s.RunAgent(ctx, req, emit)
-	}, nil, task.Authorization{Schedule: s.authorizeSchedule, Manage: func(identity chat.Identity) bool { return s.executor != nil && s.executor.IsTaskAdmin(identity) }})
+	}, nil, task.Options{Context: s.contextPolicy(), Schedule: s.authorizeSchedule, Manage: func(identity chat.Identity) bool { return s.executor != nil && s.executor.IsTaskAdmin(identity) }})
 	if err != nil {
 		return err
 	}
 	s.tasks, s.taskDir = manager, dir
 	close(ready)
 	if s.matrixService != nil {
-		cfg := s.core.GetConfig()
-		adapter := matrix.NewChatAdapter(s.matrixService, s.mediaService, cfg.Media, false, nil)
+		adapter := matrix.NewChatAdapter(s.matrixService, s.mediaService, s.config.Matrix.Media, false, nil)
 		if err := manager.RegisterDelivery("matrix", func(ctx context.Context, t task.Task) (string, error) {
 			return s.deliverTask(ctx, adapter, t)
 		}); err != nil {
@@ -169,7 +168,7 @@ func (c *taskCommand) Handle(ctx context.Context, userID id.UserID, roomID id.Ro
 	if len(args) > 1 && args[0] == "run" {
 		return s.handleAICommand(ctx, userID, roomID, s.GetModelRegistry().GetDefault(), args[1:])
 	}
-	adapter := matrix.NewChatAdapter(s.matrixService, nil, s.core.GetConfig().Media, false, nil)
+	adapter := matrix.NewChatAdapter(s.matrixService, nil, s.config.Matrix.Media, false, nil)
 	message := adapter.Message(ctx, userID, roomID, "!task "+strings.Join(args, " "))
 	action := ""
 	var taskID int64

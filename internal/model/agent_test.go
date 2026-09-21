@@ -178,3 +178,33 @@ func TestAgentModel_CancelRetryAndFallback(t *testing.T) {
 		})
 	}
 }
+
+func TestAgentModel_FallbackUsesModelSettings(t *testing.T) {
+	primary, _ := setupMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	})
+	fallback, _ := setupMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+		}
+		if req["max_tokens"] != float64(321) || req["temperature"] != float64(0.25) {
+			t.Errorf("wrong fallback settings: %v", req)
+		}
+		if _, err := fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}`); err != nil {
+			t.Error(err)
+		}
+	})
+	fallback.config.MaxTokens, fallback.config.Temperature = 321, new(float64(0.25))
+	call := AgentModel(func(name string) (*Client, error) {
+		if name == "fallback" {
+			return fallback, nil
+		}
+		return primary, nil
+	}, &RetryConfigWrapper{FallbackModels: []string{"fallback"}})
+	req := agent.Request{Model: "primary", MaxTokens: 1234, Temperature: 0.7}
+	result, err := call(context.Background(), req, func(agent.Event) {})
+	if err != nil || result.Content != "done" || req.Model != "primary" {
+		t.Fatalf("fallback: %+v %v", result, err)
+	}
+}

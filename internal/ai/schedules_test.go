@@ -77,9 +77,11 @@ func TestSchedules_CommandsRestartReportAndNaturalTool(t *testing.T) {
 	require.NoError(t, err)
 	client.DefaultHTTPRetries = 0
 	commands := matrix.NewCommandService(client, "@bot:test", nil)
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled, cfg.StreamEnabled = true, false
-	cfg.Provider, cfg.BaseURL, cfg.APIKey, cfg.DefaultModel, cfg.SystemPrompt = "openai", model.URL, "test", "local", "system"
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled, cfg.Agent.StreamEnabled = true, false
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: model.URL, APIKey: "test"}}
+	cfg.AI.DefaultModel = "openai.local"
+	cfg.AI.SystemPrompt = "system"
 	workdir, logs, dbdir := t.TempDir(), t.TempDir(), t.TempDir()
 	execCfg := config.ExecutionConfig{Enabled: true, LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"project": {Path: workdir}}, Grants: []config.ExecutionGrant{{Platform: "matrix", Account: "@bot:test", Room: "!room:test", Users: []string{"@alice:test"}, Workspace: "project", Tools: []string{"read_file"}}}}
 	start := func() *Service {

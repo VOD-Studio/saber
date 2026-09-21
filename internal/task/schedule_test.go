@@ -147,7 +147,7 @@ func TestSchedule_BackgroundOnceAndDeliveryRetry(t *testing.T) {
 			return "", errors.New("lost source")
 		}
 		return "reply", nil
-	}, Authorization{Schedule: func(chat.Identity, string) error { return nil }})
+	}, Options{Schedule: func(chat.Identity, string) error { return nil }})
 	require.NoError(t, err)
 	defer closeManager(t, m)
 	msg := message("original", "alice")

@@ -49,10 +49,12 @@ func TestServer_ChatReconnectHistoryAndIsolation(t *testing.T) {
 		}
 	}))
 	defer upstream.Close()
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled, cfg.Provider, cfg.BaseURL, cfg.APIKey, cfg.DefaultModel = true, "openai", upstream.URL, "secret-test", "local"
-	cfg.ReasoningEffort = "medium"
-	cfg.Retry.MaxRetries = 0
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: upstream.URL, APIKey: "secret-test"}}
+	cfg.AI.DefaultModel = "openai.local"
+	cfg.AI.ReasoningEffort = "medium"
+	cfg.Agent.Retry.MaxRetries = 0
 	service, err := ai.NewService(&cfg, nil, nil, nil)
 	require.NoError(t, err)
 	defer service.Stop()

@@ -32,18 +32,16 @@ func TestService_RunAgentWithoutMatrix(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled = true
-	cfg.Provider = "openai"
-	cfg.BaseURL = server.URL
-	cfg.APIKey = "test"
-	cfg.DefaultModel = "local"
-	cfg.Context.Enabled = false
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: server.URL, APIKey: "test"}}
+	cfg.AI.DefaultModel = "openai.local"
+	cfg.Agent.Context.Enabled = false
 	service, err := NewService(&cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := service.RunAgent(context.Background(), agent.Request{Model: cfg.DefaultModel}, nil)
+	result, err := service.RunAgent(context.Background(), agent.Request{Model: cfg.AI.DefaultModel}, nil)
 	if err != nil || result.Status != agent.Completed || result.Content != "hello" || result.Rounds[0].Response.Model == "" {
 		t.Fatalf("%+v %v", result, err)
 	}
@@ -90,13 +88,11 @@ func TestService_RunAgentMCPFailure(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled = true
-	cfg.Provider = "openai"
-	cfg.BaseURL = modelServer.URL
-	cfg.APIKey = "test"
-	cfg.DefaultModel = "local"
-	cfg.Context.Enabled = false
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: modelServer.URL, APIKey: "test"}}
+	cfg.AI.DefaultModel = "openai.local"
+	cfg.Agent.Context.Enabled = false
 	service, err := NewService(&cfg, nil, manager, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +116,7 @@ func TestService_RunAgentMCPFailure(t *testing.T) {
 	manager.SetAuthorizer(service.executor.CheckMCP)
 	taskCtx = execution.WithTask(taskCtx, 1, workspace)
 	available, _ := service.toolExecutor.PrepareTools(taskCtx)
-	result, err := service.RunAgent(taskCtx, agent.Request{Model: cfg.DefaultModel, Tools: available}, nil)
+	result, err := service.RunAgent(taskCtx, agent.Request{Model: cfg.AI.DefaultModel, Tools: available}, nil)
 	if err != nil || result.Status != agent.Completed || result.Rounds[0].Tools[0].ErrorCode != "tool_failed" {
 		t.Fatalf("%+v %v", result, err)
 	}
@@ -178,19 +174,17 @@ func TestService_RunAgentReply(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				cfg := config.DefaultAIConfig()
-				cfg.Enabled = true
-				cfg.Provider = "openai"
-				cfg.BaseURL = "http://unused.invalid"
-				cfg.APIKey = "test"
-				cfg.DefaultModel = "local"
-				cfg.StreamEdit.CharThreshold = 1
+				cfg := *config.DefaultConfig()
+				cfg.AI.Enabled = true
+				cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "http://unused.invalid", APIKey: "test"}}
+				cfg.AI.DefaultModel = "openai.local"
+				cfg.Matrix.StreamEdit.CharThreshold = 1
 				service, err := NewService(&cfg, matrix.NewCommandService(client, id.UserID("@bot:local"), &matrix.BuildInfo{}), nil, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer service.Stop()
-				response, err := service.runAgentReply(context.Background(), agent.Request{Model: cfg.DefaultModel, Stream: stream}, "!test:local", model)
+				response, err := service.runAgentReply(context.Background(), agent.Request{Model: cfg.AI.DefaultModel, Stream: stream}, "!test:local", model)
 				if (err != nil) != sendFails || modelRequests.Load() != 1 || sent.Load() == 0 {
 					t.Fatalf("response=%+v err=%v requests=%d sent=%d", response, err, modelRequests.Load(), sent.Load())
 				}
@@ -240,14 +234,12 @@ func TestService_HandleChat_MemoryWithoutMatrix(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled = true
-	cfg.Provider = "openai"
-	cfg.BaseURL = server.URL
-	cfg.APIKey = "test"
-	cfg.DefaultModel = "local"
-	cfg.StreamEnabled = false
-	cfg.SystemPrompt = "base prompt"
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: server.URL, APIKey: "test"}}
+	cfg.AI.DefaultModel = "openai.local"
+	cfg.Agent.StreamEnabled = false
+	cfg.AI.SystemPrompt = "base prompt"
 	service, err := NewService(&cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)

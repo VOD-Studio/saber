@@ -49,7 +49,10 @@ func (s *Service) SubmitChatTask(ctx context.Context, message chat.Message, mode
 	if len(effort) > 64 || strings.ContainsAny(effort, "\r\n\x00") {
 		return task.Task{}, errors.New("无效思考等级")
 	}
-	req := s.taskRequest(message, model)
+	req, err := s.taskRequest(message, model)
+	if err != nil {
+		return task.Task{}, err
+	}
 	req.ReasoningEffort = effort
 	req.Messages = append(req.Messages, taskInput(message))
 	dir := s.taskDir

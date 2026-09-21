@@ -3,6 +3,7 @@ package ai
 
 import (
 	"context"
+	"os"
 	"sync"
 	"testing"
 
@@ -12,23 +13,21 @@ import (
 	ruacontext "rua.plus/saber/internal/context"
 )
 
-// createTestAIConfig 创建测试用的 AI 配置（使用旧格式，会自动迁移）。
-func createTestAIConfig() *config.AIConfig {
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled = true
-	cfg.Provider = "openai"
-	cfg.BaseURL = "https://api.openai.com/v1"
-	cfg.APIKey = "test-key"
-	cfg.DefaultModel = "gpt-4"
+// createTestAIConfig 创建使用显式提供商的测试配置。
+func createTestAIConfig() *config.Config {
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "test-key"}}
+	cfg.AI.DefaultModel = "openai.gpt-4"
 	return &cfg
 }
 
 // createTestMultiProviderAIConfig 创建多提供商格式的测试配置。
-func createTestMultiProviderAIConfig() *config.AIConfig {
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled = true
-	cfg.DefaultModel = "openai.gpt-4"
-	cfg.Providers = map[string]config.ProviderConfig{
+func createTestMultiProviderAIConfig() *config.Config {
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.DefaultModel = "openai.gpt-4"
+	cfg.AI.Providers = map[string]config.ProviderConfig{
 		"openai": {
 			Type:    "openai",
 			BaseURL: "https://api.openai.com/v1",
@@ -53,9 +52,9 @@ func TestNewService_NilConfig(t *testing.T) {
 
 // TestNewService_InvalidConfig 测试无效配置错误。
 func TestNewService_InvalidConfig(t *testing.T) {
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled = true
-	cfg.Provider = ""
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = nil
 
 	_, err := NewService(&cfg, nil, nil, nil)
 	if err == nil {
@@ -65,8 +64,8 @@ func TestNewService_InvalidConfig(t *testing.T) {
 
 // TestNewService_DisabledConfig 测试禁用配置。
 func TestNewService_DisabledConfig(t *testing.T) {
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled = false
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = false
 
 	service, err := NewService(&cfg, nil, nil, nil)
 	if err != nil {
@@ -96,7 +95,7 @@ func TestNewService_ValidConfig(t *testing.T) {
 // TestNewService_ContextEnabled 测试上下文管理器初始化。
 func TestNewService_ContextEnabled(t *testing.T) {
 	cfg := createTestAIConfig()
-	cfg.Context.Enabled = true
+	cfg.Agent.Context.Enabled = true
 
 	service, err := NewService(cfg, nil, nil, nil)
 	if err != nil {
@@ -111,7 +110,7 @@ func TestNewService_ContextEnabled(t *testing.T) {
 // TestNewService_ContextDisabled 测试上下文管理器未初始化。
 func TestNewService_ContextDisabled(t *testing.T) {
 	cfg := createTestAIConfig()
-	cfg.Context.Enabled = false
+	cfg.Agent.Context.Enabled = false
 
 	service, err := NewService(cfg, nil, nil, nil)
 	if err != nil {
@@ -128,12 +127,12 @@ func TestService_GetClient_Caching(t *testing.T) {
 	cfg := createTestAIConfig()
 	service, _ := NewService(cfg, nil, nil, nil)
 
-	client1, err := service.getClient("gpt-4")
+	client1, err := service.getClient("openai.gpt-4")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	client2, err := service.getClient("gpt-4")
+	client2, err := service.getClient("openai.gpt-4")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -148,12 +147,12 @@ func TestService_GetClient_DifferentModels(t *testing.T) {
 	cfg := createTestAIConfig()
 	service, _ := NewService(cfg, nil, nil, nil)
 
-	client1, err := service.getClient("gpt-4")
+	client1, err := service.getClient("openai.gpt-4")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	client2, err := service.getClient("gpt-3.5-turbo")
+	client2, err := service.getClient("openai.gpt-3.5-turbo")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -176,7 +175,7 @@ func TestService_GetClient_Concurrency(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := service.getClient("gpt-4")
+			_, err := service.getClient("openai.gpt-4")
 			errChan <- err
 		}()
 	}
@@ -195,7 +194,7 @@ func TestService_GetClient_Concurrency(t *testing.T) {
 func TestService_IsEnabled(t *testing.T) {
 	t.Run("enabled", func(t *testing.T) {
 		cfg := createTestAIConfig()
-		cfg.Enabled = true
+		cfg.AI.Enabled = true
 		service, _ := NewService(cfg, nil, nil, nil)
 
 		if !service.IsEnabled() {
@@ -205,7 +204,7 @@ func TestService_IsEnabled(t *testing.T) {
 
 	t.Run("disabled", func(t *testing.T) {
 		cfg := createTestAIConfig()
-		cfg.Enabled = false
+		cfg.AI.Enabled = false
 		service, _ := NewService(cfg, nil, nil, nil)
 
 		if service.IsEnabled() {
@@ -261,7 +260,7 @@ func TestContextInfoCommand_New(t *testing.T) {
 // TestService_ContextIntegration 测试上下文集成。
 func TestService_ContextIntegration(t *testing.T) {
 	cfg := createTestAIConfig()
-	cfg.Context.Enabled = true
+	cfg.Agent.Context.Enabled = true
 	service, _ := NewService(cfg, nil, nil, nil)
 
 	roomID := id.RoomID("!room:example.com")
@@ -290,7 +289,7 @@ func TestService_ContextIntegration(t *testing.T) {
 // TestService_Concurrency 测试服务的并发安全性。
 func TestService_Concurrency(t *testing.T) {
 	cfg := createTestAIConfig()
-	cfg.Context.Enabled = true
+	cfg.Agent.Context.Enabled = true
 	service, _ := NewService(cfg, nil, nil, nil)
 
 	const goroutines = 50
@@ -318,7 +317,7 @@ func TestService_Concurrency(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = service.getClient("gpt-4")
+			_, _ = service.getClient("openai.gpt-4")
 		}()
 	}
 
@@ -328,7 +327,7 @@ func TestService_Concurrency(t *testing.T) {
 // TestService_Stop 测试 Stop 方法。
 func TestService_Stop(t *testing.T) {
 	cfg := createTestAIConfig()
-	cfg.Context.Enabled = true
+	cfg.Agent.Context.Enabled = true
 	service, _ := NewService(cfg, nil, nil, nil)
 
 	// 验证 contextManager 已初始化
@@ -486,6 +485,9 @@ func (m *testMockPromptProvider) GetSystemPrompt(roomID id.RoomID, basePrompt st
 }
 
 func TestOllamaIntegration(t *testing.T) {
+	if os.Getenv("SABER_LIVE_TEST") != "1" {
+		t.Skip("设置 SABER_LIVE_TEST=1 才使用本机配置进行上游验收")
+	}
 	cfg, err := config.Load("../../config.yaml")
 	if err != nil {
 		t.Skipf("Config load skipped: %v", err)
@@ -497,7 +499,7 @@ func TestOllamaIntegration(t *testing.T) {
 	}
 	t.Logf("Testing with model %s (%s, %s)", cfg.AI.DefaultModel, modelCfg.Provider, modelCfg.BaseURL)
 
-	svc, err := NewService(&cfg.AI, nil, nil, nil)
+	svc, err := NewService(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewService failed: %v", err)
 	}

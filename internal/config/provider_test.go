@@ -18,7 +18,7 @@ func TestProviderConfig_Validate(t *testing.T) {
 				BaseURL: "https://api.openai.com/v1",
 				APIKey:  "sk-test",
 				Models: map[string]ModelConfig{
-					"gpt-4": {Model: "gpt-4", Temperature: 0.7},
+					"gpt-4": {Model: "gpt-4", Temperature: new(float64(0.7))},
 				},
 			},
 			providerName: "openai",
@@ -55,7 +55,7 @@ func TestProviderConfig_Validate(t *testing.T) {
 			config: ProviderConfig{
 				BaseURL: "https://api.openai.com/v1",
 				Models: map[string]ModelConfig{
-					"bad": {Temperature: 3.0}, // invalid temperature
+					"bad": {Temperature: new(float64(3.0))}, // invalid temperature
 				},
 			},
 			providerName: "openai",
@@ -97,7 +97,7 @@ func TestProviderConfig_GetModelConfig(t *testing.T) {
 		Models: map[string]ModelConfig{
 			"gpt-4": {
 				Model:       "gpt-4-turbo",
-				Temperature: 0.7,
+				Temperature: new(float64(0.7)),
 				MaxTokens:   4096,
 			},
 		},
@@ -111,7 +111,7 @@ func TestProviderConfig_GetModelConfig(t *testing.T) {
 		if cfg.Model != "gpt-4-turbo" {
 			t.Errorf("GetModelConfig() model = %q, want %q", cfg.Model, "gpt-4-turbo")
 		}
-		if cfg.Temperature != 0.7 {
+		if cfg.Temperature == nil || *cfg.Temperature != 0.7 {
 			t.Errorf("GetModelConfig() temperature = %v, want %v", cfg.Temperature, 0.7)
 		}
 	})

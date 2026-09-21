@@ -61,10 +61,6 @@ make build
 ```yaml
 matrix:
   enabled: false  # 可选聊天入口；接入 Matrix 时设为 true
-  homeserver: "https://matrix.org"
-  user_id: "@your-bot:matrix.org"
-  device_id: "saber-bot"
-  access_token: "your-access-token"
 
 ai:
   enabled: true
@@ -94,7 +90,7 @@ ai:
 
 直接运行 `./bin/saber` 或 `./bin/saber serve` 启动常驻服务，默认监听 `127.0.0.1:8320`。首次启动在配置目录创建 `.saber-token`（0600）；HTTP 接口使用 Bearer 令牌认证。会话、任务和增量事件保存到 `tasks.db`，订阅断开不取消任务。Matrix 是独立的可选聊天入口。使用 `./bin/saber chat` 进入 TUI，支持流式 Markdown、工具状态、会话切换、模型与思考等级选择。界面预览和快捷键见 [终端聊天](docs/tui.md)。
 
-Matrix 仅在 `matrix.enabled: true` 时校验账号并连接服务器。升级旧配置时，已有 Matrix 用户也需要显式添加该开关。AI 未启用时服务继续运行，聊天入口提示完成模型配置。
+Matrix 仅在 `matrix.enabled: true` 时校验账号并连接服务器。旧配置需要按[新配置结构](docs/configuration.md)重新整理。AI 未启用时服务继续运行，聊天入口提示完成模型配置。
 
 ### CLI 标志
 
@@ -239,7 +235,7 @@ ai:
 配置示例:
 
 ```yaml
-ai:
+matrix:
   proactive:
     enabled: true
     max_messages_per_day: 5
@@ -434,19 +430,6 @@ ai:
   default_model: "openai.gpt-4o-mini"
 ```
 
-### 向后兼容
-
-旧的单提供商配置格式仍然支持，会自动迁移为新格式：
-
-```yaml
-ai:
-  enabled: true
-  provider: "openai"
-  base_url: "https://api.openai.com/v1"
-  api_key: "your-api-key"
-  default_model: "gpt-4o-mini"  # 自动转换为 openai.gpt-4o-mini
-```
-
 ### 模型切换命令
 
 ```bash
@@ -464,12 +447,12 @@ ai:
 配置示例:
 
 ```yaml
-ai:
+matrix:
   media:
     enabled: true           # 启用媒体处理
     max_size_mb: 10         # 最大文件大小（MB）
     timeout_sec: 30         # 处理超时时间（秒）
-    # model: "gpt-4o"       # 指定视觉模型（留空使用默认模型）
+    # model: "openai.gpt-4o"       # 指定视觉模型（留空使用默认模型）
 ```
 
 使用场景:
@@ -484,7 +467,7 @@ Saber 支持 MCP (Model Context Protocol) 工具调用，让 AI 能够执行实�
 
 #### 内置工具
 
-Saber 默认启用以下内置 MCP 工具：
+开启 MCP 并配置执行授权后，可使用以下内置工具：
 
 | 工具         | 描述                             |
 |--------------|----------------------------------|
@@ -551,11 +534,12 @@ Saber 支持 Meme 搜索功能，可以通过 Klipy API 搜索 GIF、Sticker 和
 配置示例:
 
 ```yaml
-meme:
-  enabled: true
-  api_key: "your-klipy-api-key"  # 从 partner.klipy.com 获取
-  max_results: 5
-  timeout_seconds: 10
+matrix:
+  meme:
+    enabled: true
+    api_key: "your-klipy-api-key"  # 从 partner.klipy.com 获取
+    max_results: 5
+    timeout_seconds: 10
 ```
 
 使用方式:
@@ -617,233 +601,20 @@ meme:
 
 ## 配置参考
 
-### Matrix 设置
+完整字段、默认值和可直接使用的示例见 [配置说明](docs/configuration.md)。
 
-| 字段                    | 必填          | 描述                                                      |
-|-------------------------|---------------|-----------------------------------------------------------|
-| `enabled`               | 否            | 是否启用 Matrix，默认 `false`；关闭时本机服务仍正常运行 |
-| `homeserver`            | 启用 Matrix 时 | Matrix 服务器 URL                                         |
-| `user_id`               | 启用 Matrix 时 | 机器人的 Matrix ID（如 `@bot:matrix.org`）                |
-| `device_id`             | 否            | 设备标识符                                                |
-| `device_name`           | 否            | 设备显示名称                                              |
-| `access_token`          | 否            | 访问令牌（推荐）                                          |
-| `password`              | 否            | 用于首次登录的密码                                        |
-| `auto_join_rooms`       | 否            | 启动时自动加入的房间列表                                  |
-| `enable_e2ee`           | 否            | 启用端到端加密                                            |
-| `e2ee_session_path`     | 如果启用 E2EE | 加密会话数据库路径                                        |
-| `pickle_key_path`       | 否            | E2EE pickle 密钥路径（默认为 e2ee_session_path + ".key"） |
-| `max_concurrent_events` | 否            | 最大并发事件处理数（默认 10）                             |
+| 配置节 | 职责 |
+|---|---|
+| `server` | 本机 HTTP 服务及令牌 |
+| `ai` | 提供商、协议、模型参数、请求超时 |
+| `agent` | 任务轮数、总超时、流式传输、重试、上下文预算 |
+| `matrix` | 可选聊天接入、媒体、主动聊天、Meme |
+| `mcp` / `execution` | 可选工具与服务端授权 |
+| `shutdown` | 优雅关闭时限 |
 
-### AI 设置
+`-generate-config` 输出以服务端为中心的精简配置；Matrix、MCP 和本地执行默认关闭，不预置空密钥模型。旧配置不自动迁移，未知字段明确报错。模型输出预算与温度按模型覆盖全局设置；思考等级支持模型、提供商、全局继承和 TUI 本轮覆盖。
 
-| 字段                       | 必填     | 描述                                             |
-|----------------------------|----------|--------------------------------------------------|
-| `enabled`                  | 否       | 启用 AI 功能                                     |
-| `providers`                | 否       | 多提供商配置（推荐）                             |
-| `default_model`            | 如果启用 | 默认模型（推荐使用完全限定名称 `提供商.模型名`） |
-| `provider`                 | 否       | 提供商名称（旧格式，向后兼容）                   |
-| `base_url`                 | 否       | API 基础 URL（全局默认）                         |
-| `api_key`                  | 否       | API 密钥（全局默认）                             |
-| `max_tokens`               | 否       | 每次响应的最大 token 数                          |
-| `temperature`              | 否       | 响应随机性（0-2）                                |
-| `reasoning_effort`         | 否       | 全局思考等级，空值使用上游默认 |
-| `system_prompt`            | 否       | 自定义系统提示词                                 |
-| `timeout_seconds`          | 否       | 请求超时时间（秒）                               |
-| `rate_limit_per_minute`    | 否       | 每分钟请求限制（0 表示无限制）                   |
-| `stream_enabled`           | 否       | 启用流式响应                                     |
-| `stream_edit`              | 否       | 流式编辑配置（见下表）                           |
-| `direct_chat_auto_reply`   | 否       | 私聊自动回复                                     |
-| `group_chat_mention_reply` | 否       | 群聊 @mention 时自动回复                         |
-| `reply_to_bot_reply`       | 否       | 回复机器人消息时自动回复                         |
-| `media`                    | 否       | 媒体处理配置（见下表）                           |
-| `proactive`                | 否       | 主动聊天配置（见下表）                           |
-
-### 提供商配置 (providers)
-
-| 字段       | 必填 | 描述                                 |
-|------------|------|--------------------------------------|
-| `type`     | 否   | 提供商类型（`openai`, `azure`, `openai-responses`），默认使用键名 |
-| `api`      | 否   | 协议：`openai-completions` / `openai-responses` |
-| `base_url` | 是   | API 基础 URL                         |
-| `api_key`  | 是   | API 密钥                             |
-| `models`   | 否   | 模型配置 map（键为模型名，值为配置） |
-| `reasoning_effort` | 否 | 提供商默认思考等级，覆盖 AI 全局设置 |
-
-Responses / Podlink 配置与完整模型清单见 [接入说明](docs/responses.md)。
-
-### 模型配置 (models)
-
-| 字段          | 必填 | 描述                          |
-|---------------|------|-------------------------------|
-| `model`       | 是   | 实际使用的模型名称            |
-| `api`         | 否   | 协议（覆盖提供商）             |
-| `reasoning_effort` | 否 | 模型思考等级，覆盖提供商及 AI 全局设置 |
-| `temperature` | 否   | 响应随机性（覆盖全局设置）    |
-| `max_tokens`  | 否   | 最大 token 数（覆盖全局设置） |
-
-`reasoning_effort` 的优先级为模型（含别名）> 提供商 > AI 全局。空字符串或省略字段表示继承；所有层级均为空时不发送参数，使用上游默认值。显式 `none` 表示请求关闭思考，不等于省略。
-
-```yaml
-ai:
-  reasoning_effort: ""  # 混用非推理模型时建议保持为空
-  providers:
-    podlink-responses:
-      reasoning_effort: medium
-      models:
-        gpt-5.6-sol:
-          model: gpt-5.6-sol
-          reasoning_effort: high  # 仅覆盖这个模型
-```
-
-以上是合并到已有配置的片段，仍需保留 `api`、`base_url` 等字段。Responses 映射为 `reasoning.effort`，Chat Completions 映射为 `reasoning_effort`；两者均覆盖流式和非流式入口。等级原样传给上游，不自动降级。常见值包括 `low`、`medium`、`high`，其他值及关闭思考能力取决于模型，详见 [OpenAI 思考等级说明](https://developers.openai.com/api/docs/guides/reasoning)。修改后重启 Saber 生效。
-
-### 流式编辑设置
-
-| 字段                | 默认值 | 描述                       |
-|---------------------|--------|----------------------------|
-| `enabled`           | `true` | 启用流式编辑               |
-| `char_threshold`    | `300`  | 触发编辑的字符数阈值       |
-| `time_threshold_ms` | `3000` | 触发编辑的时间阈值（毫秒） |
-| `edit_interval_ms`  | `500`  | 编辑间隔（毫秒）           |
-| `max_edits`         | `5`    | 单条消息最大编辑次数       |
-
-### 媒体处理设置
-
-| 字段          | 默认值 | 描述                           |
-|---------------|--------|--------------------------------|
-| `enabled`     | `true` | 启用媒体处理                   |
-| `max_size_mb` | `10`   | 最大文件大小（MB）             |
-| `timeout_sec` | `30`   | 处理超时时间（秒）             |
-| `model`       | `""`   | 图片识别专用模型（留空用默认） |
-
-### 主动聊天设置
-
-| 字段                   | 默认值  | 描述                           |
-|------------------------|---------|--------------------------------|
-| `enabled`              | `false` | 启用主动聊天功能               |
-| `max_messages_per_day` | `5`     | 每个房间每天最大主动消息数     |
-| `min_interval_minutes` | `60`    | 两次主动消息的最小间隔（分钟） |
-
-### 静默检测设置
-
-| 字段                     | 默认值 | 描述             |
-|--------------------------|--------|------------------|
-| `enabled`                | `true` | 启用静默触发     |
-| `threshold_minutes`      | `60`   | 静默阈值（分钟） |
-| `check_interval_minutes` | `15`   | 检查间隔（分钟） |
-
-### 定时触发设置
-
-| 字段      | 默认值                        | 描述           |
-|-----------|-------------------------------|----------------|
-| `enabled` | `true`                        | 启用定时触发   |
-| `times`   | `["09:00", "12:00", "18:00"]` | 触发时间点列表 |
-
-### 新成员欢迎设置
-
-| 字段             | 默认值                         | 描述           |
-|------------------|--------------------------------|----------------|
-| `enabled`        | `true`                         | 启用新成员欢迎 |
-| `welcome_prompt` | `"用友好的方式欢迎新成员加入"` | 欢迎提示词     |
-
-### 决策模型设置
-
-| 字段              | 默认值 | 描述                           |
-|-------------------|--------|--------------------------------|
-| `model`           | `""`   | 决策使用的模型（留空用默认）   |
-| `temperature`     | `0.8`  | 决策温度（0-2）                |
-| `prompt_template` | `""`   | 自定义决策提示词（留空用默认） |
-| `stream_enabled`  | `true` | 启用流式请求（更快响应）       |
-
-### 上下文设置
-
-| 字段                  | 默认值 | 描述                       |
-|-----------------------|--------|----------------------------|
-| `enabled`             | `true` | 启用上下文管理             |
-| `max_messages`        | `50`   | 最大保留消息数             |
-| `max_tokens`          | `8000` | 最大上下文 token 数        |
-| `expiry_minutes`      | `60`   | 上下文过期时间             |
-| `inactive_room_hours` | `24`   | 不活跃房间清理阈值（小时） |
-
-### 重试设置
-
-| 字段               | 默认值  | 描述               |
-|--------------------|---------|--------------------|
-| `enabled`          | `true`  | 启用失败重试       |
-| `max_retries`      | `3`     | 最大重试次数       |
-| `initial_delay_ms` | `1000`  | 初始延迟           |
-| `max_delay_ms`     | `30000` | 最大延迟           |
-| `backoff_factor`   | `2.0`   | 指数退避乘数       |
-| `fallback_enabled` | `true`  | 启用降级到备用模型 |
-| `fallback_models`  | `[]`    | 降级使用的模型列表 |
-
-### 工具调用设置
-
-| 字段             | 默认值 | 描述                 |
-|------------------|--------|----------------------|
-| `max_iterations` | `5`    | 最大模型轮数，包含首次请求和最终回答；最后一轮不派发工具 |
-| `timeout_seconds` | `120` | 整次运行上限，包含请求、重试等待和工具执行；0 使用默认值 |
-| `max_tool_output_bytes` | `32768` | 单条工具结果最大字节数，包含截断标记；0 使用默认值，非零至少 128 |
-
-流式和非流式对话共用独立 Agent Runtime；重试只作用于当前模型请求，保留已有工具结果。
-工具失败原因会交回模型，运行轨迹由返回值和事件提供，不自动持久化。
-详细接口、状态与离线验收见 [Agent Runtime](docs/agent-runtime.md)。
-
-### MCP 设置
-
-| 字段      | 必填 | 描述                |
-|-----------|------|---------------------|
-| `enabled` | 否   | 启用 MCP 功能       |
-| `servers` | 否   | 外部 MCP 服务器配置 |
-| `builtin` | 否   | 内置工具配置        |
-
-### MCP 内置工具设置
-
-#### web_search 配置
-
-| 字段              | 默认值 | 描述                             |
-|-------------------|--------|----------------------------------|
-| `instances`       | `[]`   | SearXNG 实例列表（留空使用默认） |
-| `max_results`     | `5`    | 最大返回结果数（最大 10）        |
-| `timeout_seconds` | `20`   | 请求超时时间                     |
-
-#### js_sandbox 配置
-
-| 字段                | 默认值  | 描述                 |
-|---------------------|---------|----------------------|
-| `enabled`           | `true`  | 启用 JS 沙箱         |
-| `timeout_ms`        | `5000`  | 执行超时时间（毫秒） |
-| `max_memory_mb`     | `64`    | 最大内存限制（MB）   |
-| `max_output_length` | `10000` | 最大输出长度（字符） |
-
-### MCP 服务器设置
-
-| 字段               | 必填       | 描述                                   |
-|--------------------|------------|----------------------------------------|
-| `type`             | 是         | 服务器类型: `builtin`, `stdio`, `http` |
-| `enabled`          | 否         | 是否启用                               |
-| `command`          | stdio 必填 | 可执行文件路径                         |
-| `args`             | 否         | 命令参数                               |
-| `env`              | 否         | 环境变量                               |
-| `url`              | http 必填  | 服务器地址                             |
-| `token`            | 否         | Bearer 认证令牌                        |
-| `timeout_seconds`  | 否         | 调用超时时间                           |
-| `allowed_commands` | 否         | stdio 命令白名单（默认禁止所有）       |
-
-### Meme 设置
-
-| 字段              | 默认值  | 描述                                       |
-|-------------------|---------|--------------------------------------------|
-| `enabled`         | `false` | 启用 Meme 搜索功能                         |
-| `api_key`         | -       | Klipy API Key（从 partner.klipy.com 获取） |
-| `max_results`     | `5`     | 最大返回结果数                             |
-| `timeout_seconds` | `10`    | 请求超时时间（秒）                         |
-
-### 关闭设置
-
-| 字段              | 默认值 | 描述               |
-|-------------------|--------|--------------------|
-| `timeout_seconds` | `30`   | 关闭超时时间（秒） |
+`agent.context` 裁剪实际模型输入，保留完整工具调用轮次，不删除数据库历史。请求时限、任务时限和单次工具时限分别配置，详见配置说明。Responses 模型清单见 [接入说明](docs/responses.md)。
 
 ## 架构
 

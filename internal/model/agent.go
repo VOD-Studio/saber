@@ -27,11 +27,18 @@ func AgentModel(getClient func(string) (*Client, error), retry *RetryConfigWrapp
 				client, clientErr := getClient(model)
 				requestErr = clientErr
 				if requestErr == nil {
-					req.Model = model
+					request := req
+					request.Model = model
+					if model != req.Model {
+						request.MaxTokens = client.config.MaxTokens
+						if client.config.Temperature != nil {
+							request.Temperature = *client.config.Temperature
+						}
+					}
 					if client.usesResponses() {
 						collector := newAgentStreamHandler(emit)
 						var result *ChatCompletionResponse
-						result, requestErr = client.createResponse(ctx, req, collector)
+						result, requestErr = client.createResponse(ctx, request, collector)
 						if result != nil {
 							response = *result
 						} else {
@@ -39,11 +46,11 @@ func AgentModel(getClient func(string) (*Client, error), retry *RetryConfigWrapp
 						}
 					} else if req.Stream {
 						collector := newAgentStreamHandler(emit)
-						requestErr = client.CreateStreamingChatCompletionWithTools(ctx, req, collector)
+						requestErr = client.CreateStreamingChatCompletionWithTools(ctx, request, collector)
 						response = collector.response()
 					} else {
 						var result *ChatCompletionResponse
-						result, requestErr = client.CreateChatCompletion(ctx, req)
+						result, requestErr = client.CreateChatCompletion(ctx, request)
 						if result != nil {
 							response = *result
 						}

@@ -72,7 +72,7 @@ func TestTaskLogs_FailedTimedOutCancelledAndInterrupted(t *testing.T) {
 	client, err := mautrix.NewClient(server.URL, "bot", "test")
 	require.NoError(t, err)
 	commands := matrix.NewCommandService(client, "bot", nil)
-	cfg := config.DefaultAIConfig()
+	cfg := *config.DefaultConfig()
 	s, err := NewService(&cfg, commands, nil, nil)
 	require.NoError(t, err)
 	defer s.Stop()
@@ -89,7 +89,7 @@ func TestTaskLogs_FailedTimedOutCancelledAndInterrupted(t *testing.T) {
 			return agent.Result{}, ctx.Err()
 		}
 		return agent.Result{Status: agent.Status(req.Model)}, errors.New("execution failed")
-	}, func(context.Context, task.Task) (string, error) { return "$report", nil }, task.Authorization{Manage: func(i chat.Identity) bool { return i.SenderID == "admin" && i.Session.Conversation == "room" }})
+	}, func(context.Context, task.Task) (string, error) { return "$report", nil }, task.Options{Manage: func(i chat.Identity) bool { return i.SenderID == "admin" && i.Session.Conversation == "room" }})
 	require.NoError(t, err)
 	ctx := context.Background()
 	session := chat.Session{Platform: "matrix", Account: "bot", Conversation: "room"}
@@ -106,7 +106,7 @@ func TestTaskLogs_FailedTimedOutCancelledAndInterrupted(t *testing.T) {
 				require.NoError(t, s.tasks.Close())
 				s.tasks, err = task.Open(path, func(context.Context, agent.Request, func(agent.Event)) (agent.Result, error) {
 					return agent.Result{}, errors.New("unexpected replay")
-				}, func(context.Context, task.Task) (string, error) { return "$report", nil }, task.Authorization{Manage: func(i chat.Identity) bool { return i.SenderID == "admin" && i.Session.Conversation == "room" }})
+				}, func(context.Context, task.Task) (string, error) { return "$report", nil }, task.Options{Manage: func(i chat.Identity) bool { return i.SenderID == "admin" && i.Session.Conversation == "room" }})
 				require.NoError(t, err)
 			}
 			require.Eventually(t, func() bool {

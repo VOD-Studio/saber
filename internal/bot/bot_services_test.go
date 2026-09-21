@@ -70,12 +70,11 @@ func TestInitPersonaService_AIEnabled(t *testing.T) {
 // TestInitMemeService_ValidConfig 测试有效 Meme 配置。
 func TestInitMemeService_ValidConfig(t *testing.T) {
 	state := &appState{
-		cfg: &config.Config{
-			Meme: config.MemeConfig{
-				Enabled:    true,
-				APIKey:     "test-api-key",
-				MaxResults: 5,
-			},
+		cfg: &config.Config{Matrix: config.MatrixConfig{Meme: config.MemeConfig{
+			Enabled:    true,
+			APIKey:     "test-api-key",
+			MaxResults: 5,
+		}},
 		},
 		services: &services{
 			client:         nil, // 需要 client
@@ -95,11 +94,10 @@ func TestInitMemeService_ValidConfig(t *testing.T) {
 // TestInitMemeService_InvalidConfig 测试无效 Meme 配置。
 func TestInitMemeService_InvalidConfig(t *testing.T) {
 	state := &appState{
-		cfg: &config.Config{
-			Meme: config.MemeConfig{
-				Enabled: true,
-				APIKey:  "", // 空 APIKey 无效
-			},
+		cfg: &config.Config{Matrix: config.MatrixConfig{Meme: config.MemeConfig{
+			Enabled: true,
+			APIKey:  "", // 空 APIKey 无效
+		}},
 		},
 		services: &services{},
 	}
@@ -121,11 +119,9 @@ func TestRegisterAICommands_NilCommandService(t *testing.T) {
 func TestInitProactiveManager_Disabled(t *testing.T) {
 	state := &appState{
 		cfg: &config.Config{
-			AI: config.AIConfig{
-				Proactive: config.ProactiveConfig{
-					Enabled: false,
-				},
-			},
+			AI: config.AIConfig{}, Matrix: config.MatrixConfig{Proactive: config.ProactiveConfig{
+				Enabled: false,
+			}},
 		},
 		services: &services{},
 		info:     matrix.BuildInfo{},
@@ -133,7 +129,7 @@ func TestInitProactiveManager_Disabled(t *testing.T) {
 
 	// 主动聊天禁用时，initProactiveManager 不应被调用
 	// 测试配置状态
-	if state.cfg.AI.Proactive.Enabled {
+	if state.cfg.Matrix.Proactive.Enabled {
 		t.Error("Proactive should be disabled")
 	}
 }

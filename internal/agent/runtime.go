@@ -22,6 +22,8 @@ type Runtime struct {
 	Execute ToolFunc
 	// Limits 是本次运行的资源限制。
 	Limits Limits
+	// Context 在每轮模型请求前裁剪历史，包含后续工具结果。
+	Context ContextPolicy
 }
 
 // Run 顺序执行模型与工具，任何终态都返回已有记录并发出一次 RunFinished。
@@ -89,6 +91,10 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 	}
 	for number := 1; number <= limits.MaxRounds; number++ {
 		if err := ctx.Err(); err != nil {
+			return stop(err)
+		}
+		req, err = TrimContext(req, r.Context)
+		if err != nil {
 			return stop(err)
 		}
 		emit(Event{Kind: ModelStarted, Round: number})

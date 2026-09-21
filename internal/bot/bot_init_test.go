@@ -254,8 +254,8 @@ func TestAIConfigDefaults(t *testing.T) {
 		t.Error("AI should be disabled by default")
 	}
 
-	if cfg.Provider != "" {
-		t.Errorf("expected empty provider, got %s", cfg.Provider)
+	if cfg.Providers["openai"].Type != "" {
+		t.Errorf("expected empty provider, got %s", cfg.Providers["openai"].Type)
 	}
 
 	if cfg.TimeoutSeconds <= 0 {
@@ -390,14 +390,15 @@ func TestInitServices_AIEnabledButNoClient(t *testing.T) {
 	// 此测试仅记录预期行为，不执行 initServices（因为会 panic）
 	cfg := &config.Config{
 		AI: config.AIConfig{
-			Enabled:        true,
-			Provider:       "openai",
-			BaseURL:        "https://api.openai.com/v1",
-			DefaultModel:   "gpt-4",
-			APIKey:         "test-key",
+			Enabled: true,
+
+			DefaultModel: config.FormatModelID("openai",
+
+				"gpt-4"),
+
 			TimeoutSeconds: 30,
-			ToolCalling:    config.ToolCallingConfig{MaxIterations: 5},
-			Models:         map[string]config.ModelConfig{"gpt-4": {Model: "gpt-4"}},
+
+			Models: map[string]config.ModelConfig{"gpt-4": {Model: "gpt-4"}}, Providers: map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "test-key"}},
 		},
 	}
 
@@ -481,16 +482,16 @@ func TestInitMCPManager_MCPEnabledWithServers(t *testing.T) {
 func TestAIConfigValidation(t *testing.T) {
 	t.Run("valid config", func(t *testing.T) {
 		cfg := &config.AIConfig{
-			Enabled:        true,
-			Provider:       "openai",
-			BaseURL:        "https://api.openai.com/v1",
-			APIKey:         "test-api-key",
-			DefaultModel:   "gpt-4",
+			Enabled: true,
+
+			DefaultModel: config.FormatModelID("openai",
+
+				"gpt-4"),
 			TimeoutSeconds: 30,
-			ToolCalling:    config.ToolCallingConfig{MaxIterations: 5},
+
 			Models: map[string]config.ModelConfig{
 				"gpt-4": {Model: "gpt-4"},
-			},
+			}, Providers: map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "test-api-key"}},
 		}
 
 		err := cfg.Validate()
@@ -501,10 +502,12 @@ func TestAIConfigValidation(t *testing.T) {
 
 	t.Run("missing provider", func(t *testing.T) {
 		cfg := &config.AIConfig{
-			Enabled:      true,
-			Provider:     "", // 缺失
-			APIKey:       "test-key",
-			DefaultModel: "gpt-4",
+			Enabled: true,
+			// 缺失
+
+			DefaultModel: config.FormatModelID("",
+
+				"gpt-4"), Providers: map[string]config.ProviderConfig{"": {Type: "", APIKey: "test-key"}},
 		}
 
 		err := cfg.Validate()
@@ -515,10 +518,12 @@ func TestAIConfigValidation(t *testing.T) {
 
 	t.Run("missing API key", func(t *testing.T) {
 		cfg := &config.AIConfig{
-			Enabled:      true,
-			Provider:     "openai",
-			APIKey:       "", // 缺失
-			DefaultModel: "gpt-4",
+			Enabled: true,
+
+			// 缺失
+			DefaultModel: config.FormatModelID("openai",
+
+				"gpt-4"), Providers: map[string]config.ProviderConfig{"openai": {Type: "openai", APIKey: ""}},
 		}
 
 		err := cfg.Validate()
@@ -529,10 +534,12 @@ func TestAIConfigValidation(t *testing.T) {
 
 	t.Run("missing default model", func(t *testing.T) {
 		cfg := &config.AIConfig{
-			Enabled:      true,
-			Provider:     "openai",
-			APIKey:       "test-key",
-			DefaultModel: "", // 缺失
+			Enabled: true,
+
+			DefaultModel: config.FormatModelID("openai",
+
+				""), Providers: map[string]config.ProviderConfig{"openai": {Type: "openai", APIKey: "test-key"}},
+			// 缺失
 		}
 
 		err := cfg.Validate()
@@ -559,10 +566,12 @@ func TestInitServices_AIConfigValidationFailure(t *testing.T) {
 	state := &appState{
 		cfg: &config.Config{
 			AI: config.AIConfig{
-				Enabled:      true,
-				Provider:     "", // 无效配置：缺少 provider
-				APIKey:       "test-key",
-				DefaultModel: "gpt-4",
+				Enabled: true,
+				// 无效配置：缺少 provider
+
+				DefaultModel: config.FormatModelID("",
+
+					"gpt-4"), Providers: map[string]config.ProviderConfig{"": {Type: "", APIKey: "test-key"}},
 			},
 		},
 		services: &services{},
@@ -683,14 +692,14 @@ func TestProactiveConfig(t *testing.T) {
 // TestMediaConfig 测试媒体配置。
 func TestMediaConfig(t *testing.T) {
 	t.Run("default max size", func(t *testing.T) {
-		cfg := config.DefaultAIConfig()
+		cfg := config.DefaultMatrixConfig()
 		if cfg.Media.MaxSizeMB <= 0 {
 			t.Error("Media.MaxSizeMB should be positive by default")
 		}
 	})
 
 	t.Run("custom max size", func(t *testing.T) {
-		cfg := &config.AIConfig{
+		cfg := &config.MatrixConfig{
 			Media: config.MediaConfig{
 				MaxSizeMB: 50,
 			},

@@ -18,6 +18,7 @@ import (
 	"rua.plus/saber/internal/execution"
 	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/mcp"
+	"rua.plus/saber/internal/model"
 	"rua.plus/saber/internal/task"
 )
 
@@ -29,6 +30,10 @@ type PromptProvider interface {
 
 // Service 装配模型、通用聊天处理器以及旧 Matrix 命令兼容入口。
 type Service struct {
+	config *config.Config
+	// circuitBreaker 在任务之间保留失败状态。
+	circuitBreaker *model.CircuitBreaker
+
 	// core 是共享核心逻辑。
 	core *Core
 	// matrixService 是 Matrix 命令服务，用于发送消息。
@@ -66,18 +71,22 @@ type Service struct {
 // 返回值:
 //   - *Service: 创建的 AI 服务实例
 //   - error: 创建过程中发生的错误
-func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpManager *mcp.Manager, mediaService *matrix.MediaService) (*Service, error) {
-	if cfg == nil {
+func NewService(appConfig *config.Config, matrixService *matrix.CommandService, mcpManager *mcp.Manager, mediaService *matrix.MediaService) (*Service, error) {
+	if appConfig == nil {
 		return nil, fmt.Errorf("AI配置不能为空")
 	}
 
+	cfg := &appConfig.AI
+	if err := appConfig.Agent.Validate(); err != nil {
+		return nil, fmt.Errorf("agent 配置验证失败: %w", err)
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("AI配置验证失败: %w", err)
 	}
 
 	var contextManager *ContextManager
-	if cfg.Context.Enabled {
-		contextManager = NewContextManager(cfg.Context)
+	if appConfig.Agent.Context.Enabled {
+		contextManager = NewContextManager(appConfig.Agent.Context)
 	}
 
 	// 创建 Core 实例
@@ -87,6 +96,7 @@ func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpM
 	}
 
 	service := &Service{
+		config:         appConfig,
 		core:           core,
 		matrixService:  matrixService,
 		contextManager: contextManager,
@@ -94,6 +104,9 @@ func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpM
 		mediaService:   mediaService,
 		respHandler:    NewResponseHandler(nil), // 将在下面重新初始化
 		toolExecutor:   NewToolExecutor(nil),    // 将在下面重新初始化
+	}
+	if c := appConfig.Agent.CircuitBreaker; c.Enabled {
+		service.circuitBreaker = NewCircuitBreaker(c.FailureThreshold, time.Duration(c.ResetTimeout)*time.Second)
 	}
 
 	// 重新初始化处理器（需要 Service 实例）
@@ -106,8 +119,8 @@ func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpM
 		history = contextManager.history
 	}
 	service.chatProcessor = &conversation.Processor{
-		Run: service.RunAgent, History: history, Timeout: time.Duration(cfg.ToolCalling.TimeoutSeconds) * time.Second,
-		Display: displayConfig(cfg.StreamEdit),
+		Run: service.RunAgent, History: history, Timeout: time.Duration(appConfig.Agent.TimeoutSeconds) * time.Second,
+		Display: displayConfig(appConfig.Matrix.StreamEdit),
 	}
 	service.toolExecutor = NewToolExecutor(service)
 	service.executor, err = execution.New(config.ExecutionConfig{}, nil, nil)
@@ -120,9 +133,8 @@ func NewService(cfg *config.AIConfig, matrixService *matrix.CommandService, mcpM
 
 	slog.Info("AI服务初始化完成",
 		"enabled", cfg.Enabled,
-		"provider", cfg.Provider,
 		"default_model", cfg.DefaultModel,
-		"context_enabled", cfg.Context.Enabled,
+		"context_enabled", appConfig.Agent.Context.Enabled,
 		"rate_limit_per_minute", cfg.RateLimitPerMinute)
 
 	return service, nil
@@ -217,7 +229,7 @@ func (s *Service) GenerateSimpleResponse(ctx context.Context, systemPrompt, user
 		Model:       modelName,
 		Messages:    messages,
 		MaxTokens:   cfg.MaxTokens,
-		Temperature: cfg.Temperature,
+		Temperature: *cfg.Temperature,
 	}
 
 	slog.Debug("发送简单AI请求", "model", modelName, "system_prompt", systemPrompt, "user_message", userMessage)
@@ -262,8 +274,8 @@ func (s *Service) GenerateSimpleResponseWithModel(ctx context.Context, modelName
 
 	cfg, _ := s.core.GetConfig().GetModelConfig(modelName)
 	// 使用指定的温度或模型默认值
-	if temperature == 0 {
-		temperature = cfg.Temperature
+	if temperature == 0 && cfg.Temperature != nil {
+		temperature = *cfg.Temperature
 	}
 
 	client, err := s.getClient(modelName)
@@ -324,8 +336,8 @@ func (s *Service) GenerateStreamingSimpleResponse(ctx context.Context, modelName
 	}
 
 	cfg, _ := s.core.GetConfig().GetModelConfig(modelName)
-	if temperature == 0 {
-		temperature = cfg.Temperature
+	if temperature == 0 && cfg.Temperature != nil {
+		temperature = *cfg.Temperature
 	}
 
 	client, err := s.getClient(modelName)
@@ -360,8 +372,7 @@ func (s *Service) GenerateStreamingSimpleResponse(ctx context.Context, modelName
 
 // handleAICommand 保留 Matrix 命令入口，消息规范化和媒体下载由 Matrix adapter 完成。
 func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID id.RoomID, modelName string, args []string) error {
-	cfg := s.core.GetConfig()
-	adapter := matrix.NewChatAdapter(s.matrixService, s.mediaService, cfg.Media, cfg.StreamEdit.Enabled, func(ctx context.Context, message chat.Message, reply chat.Adapter) (agent.Result, error) {
+	adapter := matrix.NewChatAdapter(s.matrixService, s.mediaService, s.config.Matrix.Media, s.config.Matrix.StreamEdit.Enabled, func(ctx context.Context, message chat.Message, reply chat.Adapter) (agent.Result, error) {
 		return s.handleChat(ctx, message, reply, modelName)
 	})
 	return adapter.Handle(ctx, userID, roomID, args)
@@ -392,11 +403,13 @@ func (s *Service) handleChat(ctx context.Context, message chat.Message, reply ch
 			return agent.Result{}, fmt.Errorf("AI请求速率限制: %w", err)
 		}
 	}
-	cfg := s.core.GetConfig()
-	if len(message.Attachments) > 0 && cfg.Media.Model != "" {
-		modelName = cfg.Media.Model
+	if len(message.Attachments) > 0 && s.config.Matrix.Media.Model != "" {
+		modelName = s.config.Matrix.Media.Model
 	}
-	req := s.taskRequest(message, modelName)
+	req, err := s.taskRequest(message, modelName)
+	if err != nil {
+		return agent.Result{}, err
+	}
 	identity := chat.Identity{Session: message.Session, SenderID: message.SenderID}
 	toolCtx := chat.WithIdentity(ctx, identity)
 	if s.executor != nil {
@@ -411,7 +424,7 @@ func (s *Service) handleChat(ctx context.Context, message chat.Message, reply ch
 	return s.chatProcessor.Handle(ctx, message, req, reply)
 }
 
-func (s *Service) taskRequest(message chat.Message, modelName string) agent.Request {
+func (s *Service) taskRequest(message chat.Message, modelName string) (agent.Request, error) {
 	cfg := s.core.GetConfig()
 	prompt := cfg.SystemPrompt
 	// 计划和即时任务使用相同的人格与模型配置，不复制群聊历史。
@@ -419,11 +432,14 @@ func (s *Service) taskRequest(message chat.Message, modelName string) agent.Requ
 		prompt = s.promptProvider.GetSystemPrompt(id.RoomID(message.Session.Conversation), prompt)
 	}
 	modelCfg, _ := cfg.GetModelConfig(modelName)
-	req := agent.Request{Model: modelName, Stream: cfg.StreamEnabled, MaxTokens: modelCfg.MaxTokens, Temperature: modelCfg.Temperature}
+	if modelCfg.BaseURL == "" || modelCfg.Temperature == nil {
+		return agent.Request{}, fmt.Errorf("模型 %q 缺少有效提供商配置", modelName)
+	}
+	req := agent.Request{Model: modelName, Stream: s.config.Agent.StreamEnabled, MaxTokens: modelCfg.MaxTokens, Temperature: *modelCfg.Temperature}
 	if prompt != "" {
 		req.Messages = []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleSystem, Content: prompt}}
 	}
-	return req
+	return req, nil
 }
 
 func displayConfig(cfg config.StreamEditConfig) chat.Display {

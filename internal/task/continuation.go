@@ -59,17 +59,28 @@ func (m *Manager) Continue(ctx context.Context, message chat.Message, dir string
 }
 
 func (m *Manager) continuationRequest(ctx context.Context, t Task) (agent.Request, error) {
+	return m.restoreContinuationRequest(ctx, t, true)
+}
+
+func (m *Manager) restoreContinuationRequest(ctx context.Context, t Task, applyBudget bool) (agent.Request, error) {
 	var ready bool
 	if err := m.store.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM task_contexts WHERE task_id=?)`, t.ID).Scan(&ready); err != nil {
 		return t.Request, err
 	}
 	if ready {
 		messages, changed := sanitizeToolHistory(t.Request.Messages)
-		if !changed {
+		if !changed && (!applyBudget || m.contextPolicy.MaxMessages == 0 && m.contextPolicy.MaxInputTokens == 0) {
 			return t.Request, nil
 		}
 		req := t.Request
 		req.Messages = messages
+		if applyBudget {
+			var err error
+			req, err = agent.TrimContext(req, m.contextPolicy)
+			if err != nil {
+				return req, err
+			}
+		}
 		return req, m.saveContinuationRequest(ctx, t.ID, req)
 	}
 	var parentID int64
@@ -84,7 +95,7 @@ func (m *Manager) continuationRequest(ctx context.Context, t Task) (agent.Reques
 	if err != nil {
 		return t.Request, err
 	}
-	parentReq, err := m.continuationRequest(ctx, parent)
+	parentReq, err := m.restoreContinuationRequest(ctx, parent, false)
 	if err != nil {
 		return t.Request, err
 	}
@@ -154,6 +165,12 @@ func (m *Manager) continuationRequest(ctx context.Context, t Task) (agent.Reques
 	req := t.Request
 	req.Messages, _ = sanitizeToolHistory(messages)
 	req.ResponsesHistory = responsesHistory
+	if applyBudget {
+		req, err = agent.TrimContext(req, m.contextPolicy)
+		if err != nil {
+			return req, err
+		}
+	}
 	return req, m.saveContinuationRequest(ctx, t.ID, req)
 }
 

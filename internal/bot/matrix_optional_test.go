@@ -40,7 +40,9 @@ func TestRun_MatrixOptional(t *testing.T) {
 
 func TestServer_SharedServicesWithoutMatrix(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.AI.Enabled, cfg.AI.Provider, cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.DefaultModel = true, "openai", "http://127.0.0.1:1/v1", "test", "local"
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "http://127.0.0.1:1/v1", APIKey: "test"}}
+	cfg.AI.DefaultModel = "openai.local"
 	cfg.MCP.Enabled = false
 	state := &appState{cfg: cfg, flags: &cli.Flags{ConfigPath: filepath.Join(t.TempDir(), "config.yaml")}, services: &services{}}
 	defer state.shutdown(func() {})

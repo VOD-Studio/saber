@@ -87,7 +87,7 @@ func TestTaskDelivery_SlowMultipleFilesResumeWithoutReupload(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(artifactDir, fmt.Sprintf("%032d-%s", i, name)), []byte(name), 0600))
 	}
 	s := &Service{executor: executor, matrixService: commands}
-	adapter := matrix.NewChatAdapter(commands, nil, config.DefaultAIConfig().Media, false, nil)
+	adapter := matrix.NewChatAdapter(commands, nil, config.DefaultMatrixConfig().Media, false, nil)
 	manager, err := task.Open(filepath.Join(t.TempDir(), "tasks.db"), func(context.Context, agent.Request, func(agent.Event)) (agent.Result, error) {
 		return agent.Result{Status: agent.Completed, Content: "done"}, nil
 	}, func(ctx context.Context, t task.Task) (string, error) { return s.deliverTask(ctx, adapter, t) })

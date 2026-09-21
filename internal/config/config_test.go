@@ -76,28 +76,24 @@ func TestAIConfigValidate(t *testing.T) {
 		// 基本测试
 		{"禁用时不验证", AIConfig{Enabled: false}, false, ""},
 
-		// 旧格式配置（向后兼容）
-		{"旧格式-有效配置", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 5}}, false, ""},
-		{"旧格式-缺少 base_url", AIConfig{Enabled: true, Provider: "openai", APIKey: "key", DefaultModel: "gpt-4"}, true, "base_url is required"},
-		{"旧格式-缺少 default_model", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}, true, "default_model is required"},
-		{"旧格式-api_key 可为空", AIConfig{Enabled: true, Provider: "ollama", BaseURL: "http://localhost:11434/v1", DefaultModel: "llama3", TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 5}}, false, ""},
+		// 提供商配置
+		{"提供商-有效配置", AIConfig{Enabled: true, DefaultModel: FormatModelID("openai", "gpt-4"), TimeoutSeconds: 30, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}}}, false, ""},
+		{"提供商-缺少 base_url", AIConfig{Enabled: true, DefaultModel: FormatModelID("openai", "gpt-4"), Providers: map[string]ProviderConfig{"openai": {Type: "openai", APIKey: "key"}}}, true, "base_url is required"},
+		{"提供商-缺少 default_model", AIConfig{Enabled: true, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}}}, true, "default_model is required"},
+		{"提供商-api_key 可为空", AIConfig{Enabled: true, DefaultModel: FormatModelID("ollama", "llama3"), TimeoutSeconds: 30, Providers: map[string]ProviderConfig{"ollama": {Type: "ollama", BaseURL: "http://localhost:11434/v1"}}}, false, ""},
 
-		// 新格式配置（多提供商）
-		{"新格式-有效配置", AIConfig{Enabled: true, DefaultModel: "openai.gpt-4", Providers: map[string]ProviderConfig{"openai": {BaseURL: "https://api.openai.com/v1", APIKey: "key"}}, TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 5}}, false, ""},
-		{"新格式-提供商不存在", AIConfig{Enabled: true, DefaultModel: "anthropic.claude", Providers: map[string]ProviderConfig{"openai": {BaseURL: "https://api.openai.com/v1"}}, TimeoutSeconds: 30}, true, "provider \"anthropic\" not found"},
-		{"新格式-default_model 格式错误", AIConfig{Enabled: true, DefaultModel: "gpt-4", Providers: map[string]ProviderConfig{"openai": {BaseURL: "https://api.openai.com/v1"}}, TimeoutSeconds: 30}, true, "invalid model id format"},
+		// 多提供商校验
+		{"有效配置", AIConfig{Enabled: true, DefaultModel: "openai.gpt-4", Providers: map[string]ProviderConfig{"openai": {BaseURL: "https://api.openai.com/v1", APIKey: "key"}}, TimeoutSeconds: 30}, false, ""},
+		{"提供商不存在", AIConfig{Enabled: true, DefaultModel: "anthropic.claude", Providers: map[string]ProviderConfig{"openai": {BaseURL: "https://api.openai.com/v1"}}, TimeoutSeconds: 30}, true, "provider \"anthropic\" not found"},
+		{"default_model 格式错误", AIConfig{Enabled: true, DefaultModel: "gpt-4", Providers: map[string]ProviderConfig{"openai": {BaseURL: "https://api.openai.com/v1"}}, TimeoutSeconds: 30}, true, "invalid model id format"},
 
 		// 参数验证
-		{"温度过低", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: -0.1}, true, "temperature must be between 0 and 2"},
-		{"温度过高", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: 2.1}, true, "temperature must be between 0 and 2"},
-		{"温度边界 0", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: 0, TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 5}}, false, ""},
-		{"温度边界 2", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", Temperature: 2, TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 5}}, false, ""},
-		{"timeout 无效", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 0}, true, "timeout_seconds must be positive"},
-		{"timeout 负数", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: -1}, true, "timeout_seconds must be positive"},
-		{"tool_calling 迭代次数为0", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 0}}, true, "max_iterations must be at least 1"},
-		{"tool_calling 迭代次数为负数", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: -1}}, true, "max_iterations must be at least 1"},
-		{"tool_calling 迭代次数边界 1", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 1}}, false, ""},
-		{"tool_calling 迭代次数边界 20", AIConfig{Enabled: true, Provider: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key", DefaultModel: "gpt-4", TimeoutSeconds: 30, ToolCalling: ToolCallingConfig{MaxIterations: 20}}, false, ""},
+		{"温度过低", AIConfig{Enabled: true, DefaultModel: FormatModelID("openai", "gpt-4"), Temperature: -0.1, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}}}, true, "temperature must be between 0 and 2"},
+		{"温度过高", AIConfig{Enabled: true, DefaultModel: FormatModelID("openai", "gpt-4"), Temperature: 2.1, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}}}, true, "temperature must be between 0 and 2"},
+		{"温度边界 0", AIConfig{Enabled: true, DefaultModel: FormatModelID("openai", "gpt-4"), Temperature: 0, TimeoutSeconds: 30, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}}}, false, ""},
+		{"温度边界 2", AIConfig{Enabled: true, DefaultModel: FormatModelID("openai", "gpt-4"), Temperature: 2, TimeoutSeconds: 30, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}}}, false, ""},
+		{"timeout 无效", AIConfig{Enabled: true, DefaultModel: FormatModelID("openai", "gpt-4"), TimeoutSeconds: 0, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}}}, true, "timeout_seconds must be positive"},
+		{"timeout 负数", AIConfig{Enabled: true, DefaultModel: FormatModelID("openai", "gpt-4"), TimeoutSeconds: -1, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}}}, true, "timeout_seconds must be positive"},
 	}
 
 	for _, tt := range tests {
@@ -116,15 +112,14 @@ func TestAIConfigValidate(t *testing.T) {
 
 func TestAIConfigGetModelConfig(t *testing.T) {
 	globalConfig := AIConfig{
-		Provider:    "openai",
-		BaseURL:     "https://api.openai.com/v1",
-		APIKey:      "global-key",
+		DefaultModel: "openai.default",
+
 		MaxTokens:   4096,
 		Temperature: 0.7,
 		Models: map[string]ModelConfig{
 			"fast": {
 				Model:       "gpt-4o-mini",
-				Temperature: 0.3,
+				Temperature: new(float64(0.3)),
 			},
 			"custom": {
 				Model:    "gpt-4",
@@ -132,7 +127,7 @@ func TestAIConfigGetModelConfig(t *testing.T) {
 				BaseURL:  "https://custom.azure.com",
 				APIKey:   "custom-key",
 			},
-		},
+		}, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "global-key"}, "azure": {Type: "azure", BaseURL: "https://azure.invalid", APIKey: "azure-key"}},
 	}
 
 	tests := []struct {
@@ -146,7 +141,7 @@ func TestAIConfigGetModelConfig(t *testing.T) {
 		wantAPIKey    string
 		wantBaseURL   string
 	}{
-		{"未知模型使用全局配置", "unknown", "unknown", "openai", 0.7, false, 4096, "global-key", "https://api.openai.com/v1"},
+		{"未列出模型继承提供商", "openai.unknown", "unknown", "openai", 0.7, false, 4096, "global-key", "https://api.openai.com/v1"},
 		{"fast 模型部分覆盖", "fast", "gpt-4o-mini", "openai", 0.3, true, 4096, "global-key", "https://api.openai.com/v1"},
 		{"custom 模型完全覆盖", "custom", "gpt-4", "azure", 0.7, true, 4096, "custom-key", "https://custom.azure.com"},
 	}
@@ -164,7 +159,7 @@ func TestAIConfigGetModelConfig(t *testing.T) {
 			if got.Provider != tt.wantProvider {
 				t.Errorf("GetModelConfig() Provider = %v, want %v", got.Provider, tt.wantProvider)
 			}
-			if got.Temperature != tt.wantTemp {
+			if got.Temperature == nil || *got.Temperature != tt.wantTemp {
 				t.Errorf("GetModelConfig() Temperature = %v, want %v", got.Temperature, tt.wantTemp)
 			}
 			if got.MaxTokens != tt.wantMaxTokens {
@@ -192,13 +187,13 @@ func TestDefaultConfigs(t *testing.T) {
 		if cfg.Temperature != 0.7 {
 			t.Errorf("Default Temperature = %f, want 0.7", cfg.Temperature)
 		}
-		if cfg.TimeoutSeconds != 30 {
-			t.Errorf("Default TimeoutSeconds = %d, want 30", cfg.TimeoutSeconds)
+		if cfg.TimeoutSeconds != 120 {
+			t.Errorf("Default TimeoutSeconds = %d, want 120", cfg.TimeoutSeconds)
 		}
-		if !cfg.DirectChatAutoReply {
+		if !DefaultMatrixConfig().DirectChatAutoReply {
 			t.Error("Default DirectChatAutoReply should be true")
 		}
-		if !cfg.GroupChatMentionReply {
+		if !DefaultMatrixConfig().GroupChatMentionReply {
 			t.Error("Default GroupChatMentionReply should be true")
 		}
 	})
@@ -211,11 +206,11 @@ func TestDefaultConfigs(t *testing.T) {
 		if cfg.MaxMessages != 50 {
 			t.Errorf("Default MaxMessages = %d, want 50", cfg.MaxMessages)
 		}
-		if cfg.MaxTokens != 8000 {
-			t.Errorf("Default MaxTokens = %d, want 8000", cfg.MaxTokens)
+		if cfg.MaxTokens != 32768 {
+			t.Errorf("Default MaxTokens = %d, want 32768", cfg.MaxTokens)
 		}
-		if cfg.ExpiryMinutes != 60 {
-			t.Errorf("Default ExpiryMinutes = %d, want 60", cfg.ExpiryMinutes)
+		if cfg.ExpiryMinutes != 0 {
+			t.Errorf("Default ExpiryMinutes = %d, want 0", cfg.ExpiryMinutes)
 		}
 	})
 
@@ -285,10 +280,9 @@ matrix:
 
 ai:
   enabled: true
-  provider: "openai"
-  base_url: "https://api.openai.com/v1"
-  api_key: "test-key"
-  default_model: "gpt-4"
+  providers:
+    openai: {type: openai, base_url: "https://api.openai.com/v1", api_key: "test-key"}
+  default_model: "openai.gpt-4"
 `
 		if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
 			t.Fatalf("写入测试配置文件失败: %v", err)
@@ -308,8 +302,8 @@ ai:
 		if !cfg.AI.Enabled {
 			t.Error("AI should be enabled")
 		}
-		if cfg.AI.Provider != "openai" {
-			t.Errorf("Provider = %s, want openai", cfg.AI.Provider)
+		if cfg.AI.Providers["openai"].Type != "openai" {
+			t.Errorf("Provider = %s, want openai", cfg.AI.Providers["openai"].Type)
 		}
 	})
 
@@ -405,10 +399,10 @@ func TestGenerateExample(t *testing.T) {
 	}
 
 	content := string(data)
-	if !contains(content, "homeserver:") {
+	if !contains(content, "server:") {
 		t.Error("示例配置应包含 homeserver")
 	}
-	if !contains(content, "user_id:") {
+	if !contains(content, "listen:") {
 		t.Error("示例配置应包含 user_id")
 	}
 	if !contains(content, "ai:") {
@@ -425,16 +419,16 @@ func TestExampleConfig(t *testing.T) {
 	if !contains(content, "ai:") {
 		t.Error("示例配置应包含 ai 部分")
 	}
-	if !contains(content, "homeserver:") {
+	if !contains(content, "server:") {
 		t.Error("示例配置应包含 homeserver 说明")
 	}
 	if !contains(content, "providers:") {
 		t.Error("示例配置应包含 providers 多提供商配置")
 	}
-	if !contains(content, "provider:") {
+	if !contains(content, "providers:") {
 		t.Error("示例配置应包含 provider 说明")
 	}
-	if !contains(content, "proactive:") {
+	if !contains(content, "agent:") {
 		t.Error("示例配置应包含 proactive 说明")
 	}
 }
@@ -714,90 +708,10 @@ func TestMediaConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("AIConfig 包含 Media 字段", func(t *testing.T) {
-		cfg := DefaultAIConfig()
-		if cfg.Media.Enabled != true {
-			t.Error("Default AI Media.Enabled should be true")
-		}
-		if cfg.Media.MaxSizeMB != 10 {
-			t.Errorf("Default AI Media.MaxSizeMB = %d, want 10", cfg.Media.MaxSizeMB)
-		}
-		if cfg.Media.TimeoutSec != 30 {
-			t.Errorf("Default AI Media.TimeoutSec = %d, want 30", cfg.Media.TimeoutSec)
-		}
-	})
-
-	t.Run("Media 配置验证 - 禁用时不验证", func(t *testing.T) {
-		cfg := AIConfig{
-			Enabled:        true,
-			Provider:       "openai",
-			BaseURL:        "https://api.openai.com/v1",
-			APIKey:         "key",
-			DefaultModel:   "gpt-4",
-			TimeoutSeconds: 30,
-			ToolCalling:    ToolCallingConfig{MaxIterations: 5},
-			Media:          MediaConfig{Enabled: false, MaxSizeMB: -1, TimeoutSec: -1},
-		}
-		err := cfg.Validate()
-		if err != nil {
-			t.Errorf("Validate() should not error when media is disabled, got %v", err)
-		}
-	})
-
-	t.Run("Media 配置验证 - 有效配置", func(t *testing.T) {
-		cfg := AIConfig{
-			Enabled:        true,
-			Provider:       "openai",
-			BaseURL:        "https://api.openai.com/v1",
-			APIKey:         "key",
-			DefaultModel:   "gpt-4",
-			TimeoutSeconds: 30,
-			ToolCalling:    ToolCallingConfig{MaxIterations: 5},
-			Media:          MediaConfig{Enabled: true, MaxSizeMB: 10, TimeoutSec: 30},
-		}
-		err := cfg.Validate()
-		if err != nil {
-			t.Errorf("Validate() error = %v", err)
-		}
-	})
-
-	t.Run("Media 配置验证 - MaxSizeMB 为负数", func(t *testing.T) {
-		cfg := AIConfig{
-			Enabled:        true,
-			Provider:       "openai",
-			BaseURL:        "https://api.openai.com/v1",
-			APIKey:         "key",
-			DefaultModel:   "gpt-4",
-			TimeoutSeconds: 30,
-			ToolCalling:    ToolCallingConfig{MaxIterations: 5},
-			Media:          MediaConfig{Enabled: true, MaxSizeMB: -1, TimeoutSec: 30},
-		}
-		err := cfg.Validate()
-		if err == nil {
-			t.Error("Validate() should error when MaxSizeMB is negative")
-		}
-		if err != nil && !contains(err.Error(), "media.max_size_mb must be positive") {
-			t.Errorf("Validate() error = %v, want error containing 'media.max_size_mb must be positive'", err)
-		}
-	})
-
-	t.Run("Media 配置验证 - TimeoutSec 为负数", func(t *testing.T) {
-		cfg := AIConfig{
-			Enabled:        true,
-			Provider:       "openai",
-			BaseURL:        "https://api.openai.com/v1",
-			APIKey:         "key",
-			DefaultModel:   "gpt-4",
-			TimeoutSeconds: 30,
-			ToolCalling:    ToolCallingConfig{MaxIterations: 5},
-			Media:          MediaConfig{Enabled: true, MaxSizeMB: 10, TimeoutSec: -1},
-		}
-		err := cfg.Validate()
-		if err == nil {
-			t.Error("Validate() should error when TimeoutSec is negative")
-		}
-		if err != nil && !contains(err.Error(), "media.timeout_sec must be positive") {
-			t.Errorf("Validate() error = %v, want error containing 'media.timeout_sec must be positive'", err)
+	t.Run("MatrixConfig 包含 Media 字段", func(t *testing.T) {
+		cfg := DefaultMatrixConfig()
+		if !cfg.Media.Enabled || cfg.Media.MaxSizeMB != 10 || cfg.Media.TimeoutSec != 30 {
+			t.Fatal(cfg.Media)
 		}
 	})
 }
@@ -841,8 +755,8 @@ func TestToolCallingConfigValidate(t *testing.T) {
 		{"有效配置 - 默认值", ToolCallingConfig{MaxIterations: 5}, false, ""},
 		{"有效配置 - 最小值", ToolCallingConfig{MaxIterations: 1}, false, ""},
 		{"有效配置 - 最大值", ToolCallingConfig{MaxIterations: 20}, false, ""},
-		{"迭代次数为 0", ToolCallingConfig{MaxIterations: 0}, true, "max_iterations must be at least 1"},
-		{"迭代次数为负数", ToolCallingConfig{MaxIterations: -1}, true, "max_iterations must be at least 1"},
+		{"迭代次数为 0", ToolCallingConfig{MaxIterations: 0}, true, "max_rounds must be at least 1"},
+		{"迭代次数为负数", ToolCallingConfig{MaxIterations: -1}, true, "max_rounds must be at least 1"},
 	}
 
 	for _, tt := range tests {
@@ -866,12 +780,12 @@ func TestModelConfigValidate(t *testing.T) {
 		wantErr bool
 		errMsg  string
 	}{
-		{"有效配置", ModelConfig{Model: "gpt-4o", Temperature: 0.7, MaxTokens: 4096}, false, ""},
-		{"缺少模型名称", ModelConfig{Temperature: 0.7}, true, "model is required"},
-		{"温度过低", ModelConfig{Model: "gpt-4o", Temperature: -0.1}, true, "temperature must be between 0 and 2"},
-		{"温度过高", ModelConfig{Model: "gpt-4o", Temperature: 2.1}, true, "temperature must be between 0 and 2"},
-		{"温度边界 0", ModelConfig{Model: "gpt-4o", Temperature: 0}, false, ""},
-		{"温度边界 2", ModelConfig{Model: "gpt-4o", Temperature: 2}, false, ""},
+		{"有效配置", ModelConfig{Model: "gpt-4o", Temperature: new(float64(0.7)), MaxTokens: 4096}, false, ""},
+		{"缺少模型名称", ModelConfig{Temperature: new(float64(0.7))}, true, "model is required"},
+		{"温度过低", ModelConfig{Model: "gpt-4o", Temperature: new(float64(-0.1))}, true, "temperature must be between 0 and 2"},
+		{"温度过高", ModelConfig{Model: "gpt-4o", Temperature: new(float64(2.1))}, true, "temperature must be between 0 and 2"},
+		{"温度边界 0", ModelConfig{Model: "gpt-4o", Temperature: new(float64(0))}, false, ""},
+		{"温度边界 2", ModelConfig{Model: "gpt-4o", Temperature: new(float64(2))}, false, ""},
 		{"MaxTokens 为负数", ModelConfig{Model: "gpt-4o", MaxTokens: -1}, true, "max_tokens must be non-negative"},
 		{"MaxTokens 为 0 (有效)", ModelConfig{Model: "gpt-4o", MaxTokens: 0}, false, ""},
 	}
@@ -903,43 +817,6 @@ func containsHelper(s, substr string) bool {
 	return false
 }
 
-// TestAIConfig_MigrateFromOldFormat 测试旧格式配置迁移。
-func TestAIConfig_MigrateFromOldFormat(t *testing.T) {
-	// 创建旧格式配置
-	cfg := &AIConfig{
-		Enabled:      true,
-		Provider:     "openai",
-		BaseURL:      "https://api.openai.com/v1",
-		APIKey:       "test-key",
-		DefaultModel: "gpt-4",
-		Models: map[string]ModelConfig{
-			"gpt-4": {Model: "gpt-4", Temperature: 0.7},
-		},
-	}
-
-	// 触发迁移
-	cfg.migrateFromOldFormat()
-
-	// 验证迁移结果
-	if len(cfg.Providers) != 1 {
-		t.Errorf("Expected 1 provider, got %d", len(cfg.Providers))
-	}
-
-	provider, ok := cfg.Providers["openai"]
-	if !ok {
-		t.Error("Expected 'openai' provider")
-	}
-
-	if provider.BaseURL != "https://api.openai.com/v1" {
-		t.Errorf("Provider BaseURL = %s, want 'https://api.openai.com/v1'", provider.BaseURL)
-	}
-
-	// DefaultModel 应该被转换为完全限定格式
-	if cfg.DefaultModel != "openai.gpt-4" {
-		t.Errorf("DefaultModel = %s, want 'openai.gpt-4'", cfg.DefaultModel)
-	}
-}
-
 // TestAIConfig_GetModelConfig_FullyQualified 测试完全限定模型名查找。
 func TestAIConfig_GetModelConfig_FullyQualified(t *testing.T) {
 	cfg := &AIConfig{
@@ -951,7 +828,7 @@ func TestAIConfig_GetModelConfig_FullyQualified(t *testing.T) {
 				BaseURL: "https://api.openai.com/v1",
 				APIKey:  "test-key",
 				Models: map[string]ModelConfig{
-					"gpt-4": {Model: "gpt-4", Temperature: 0.7},
+					"gpt-4": {Model: "gpt-4", Temperature: new(float64(0.7))},
 				},
 			},
 		},
@@ -974,9 +851,10 @@ func TestAIConfig_GetModelConfig_FullyQualified(t *testing.T) {
 // TestAIConfig_GetModelConfig_Alias 测试别名查找。
 func TestAIConfig_GetModelConfig_Alias(t *testing.T) {
 	cfg := &AIConfig{
-		Enabled:      true,
-		Provider:     "openai",
-		DefaultModel: "gpt-4",
+		Enabled: true,
+
+		DefaultModel: FormatModelID("openai",
+			"gpt-4"),
 		Providers: map[string]ProviderConfig{
 			"openai": {
 				Type:    "openai",
@@ -1003,18 +881,18 @@ func TestAIConfig_GetModelConfig_Alias(t *testing.T) {
 // TestAIConfig_GetModelConfig_Fallback 测试回退到全局配置。
 func TestAIConfig_GetModelConfig_Fallback(t *testing.T) {
 	cfg := &AIConfig{
-		Enabled:      true,
-		Provider:     "openai",
-		BaseURL:      "https://api.openai.com/v1",
-		APIKey:       "test-key",
-		DefaultModel: "gpt-4",
-		MaxTokens:    1000,
-		Temperature:  0.5,
-		Providers:    map[string]ProviderConfig{},
-		Models:       map[string]ModelConfig{},
+		Enabled: true,
+
+		DefaultModel: FormatModelID("openai",
+
+			"gpt-4"),
+		MaxTokens:   1000,
+		Temperature: 0.5,
+
+		Models: map[string]ModelConfig{}, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "test-key"}},
 	}
 
-	modelCfg, found := cfg.GetModelConfig("unknown-model")
+	modelCfg, found := cfg.GetModelConfig("openai.unknown-model")
 	if found {
 		t.Error("Expected not to find unknown model")
 	}

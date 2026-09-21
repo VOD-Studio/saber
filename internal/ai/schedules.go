@@ -44,7 +44,7 @@ type scheduleCommand struct{ service *Service }
 
 func (c *scheduleCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
 	s := c.service
-	adapter := matrix.NewChatAdapter(s.matrixService, nil, s.core.GetConfig().Media, false, nil)
+	adapter := matrix.NewChatAdapter(s.matrixService, nil, s.config.Matrix.Media, false, nil)
 	msg := adapter.Message(ctx, userID, roomID, "!schedule "+strings.Join(args, " "))
 	in := scheduleInput{}
 	if len(args) == 1 && args[0] == "list" {
@@ -93,7 +93,10 @@ func (s *Service) scheduleOperation(ctx context.Context, msg chat.Message, in sc
 			return "", errors.New("目标不能为空")
 		}
 		msg.Text, msg.Attachments = strings.TrimSpace(in.Goal), nil
-		req := s.taskRequest(msg, s.GetModelRegistry().GetDefault())
+		req, err := s.taskRequest(msg, s.GetModelRegistry().GetDefault())
+		if err != nil {
+			return "", err
+		}
 		req.Messages = append(req.Messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: msg.Text})
 		plan, err := s.tasks.CreateSchedule(ctx, msg, dir, req, in.Spec)
 		if err != nil {

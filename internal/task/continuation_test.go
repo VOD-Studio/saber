@@ -229,3 +229,38 @@ func TestManager_ContinuationRepairsPreviouslySavedInvalidHistory(t *testing.T) 
 		})
 	}
 }
+
+func TestManager_ContinuationContextBudget(t *testing.T) {
+	ctx := context.Background()
+	path, dir := filepath.Join(t.TempDir(), "tasks.db"), t.TempDir()
+	s, err := openStore(path)
+	require.NoError(t, err)
+	m := &Manager{store: s, ctx: ctx, contextPolicy: agent.ContextPolicy{Enabled: true, MaxMessages: 3, MaxInputTokens: 10000}}
+	parent, err := m.Submit(ctx, message("first", "alice"), dir, request("first question"))
+	require.NoError(t, err)
+	for i := 0; i < 6; i++ {
+		follow := message(fmt.Sprintf("next-%d", i), "alice")
+		follow.ReplyTo = parent.Message.ID
+		child, err := m.Continue(ctx, follow, dir, request(fmt.Sprintf("question-%d", i)))
+		require.NoError(t, err)
+		req, err := m.continuationRequest(ctx, child)
+		require.NoError(t, err)
+		require.LessOrEqual(t, len(req.Messages), 3)
+		require.Equal(t, fmt.Sprintf("question-%d", i), req.Messages[len(req.Messages)-1].Content)
+		parent, err = m.Get(ctx, follow.Session, child.ID)
+		require.NoError(t, err)
+	}
+	// 历史仍在数据库，重启并收紧限制后重新裁剪已保存的请求。
+	require.NoError(t, s.db.Close())
+	s, err = openStore(path)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, s.db.Close()) }()
+	m = &Manager{store: s, ctx: ctx, contextPolicy: agent.ContextPolicy{MaxMessages: 2, MaxInputTokens: 10000}}
+	req, err := m.continuationRequest(ctx, parent)
+	require.NoError(t, err)
+	require.Len(t, req.Messages, 1)
+	require.Equal(t, "question-5", req.Messages[0].Content)
+	var count int
+	require.NoError(t, s.db.QueryRow("SELECT count(*) FROM tasks").Scan(&count))
+	require.Equal(t, 7, count)
+}

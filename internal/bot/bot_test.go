@@ -22,7 +22,7 @@ func TestSetupLoggingNoPanic(t *testing.T) {
 // 此测试验证：
 //  1. ProactiveManager 声明为包级变量
 //  2. 在调用 Start()/Stop() 前进行 nil 检查
-//  3. 初始化依赖于 config.AI.Proactive.Enabled
+//  3. 初始化依赖于 config.Matrix.Proactive.Enabled
 func TestProactiveIntegrationPattern(t *testing.T) {
 	// 测试 1：验证 nil 安全模式不会在 nil 值上执行操作
 	// 生产环境中：if proactiveManager != nil { proactiveManager.Stop() }
@@ -52,7 +52,7 @@ func TestProactiveIntegrationPattern(t *testing.T) {
 	})
 
 	// 测试 3：验证条件初始化模式
-	// 生产环境中：if cfg.AI.Proactive.Enabled { init proactiveManager }
+	// 生产环境中：if cfg.Matrix.Proactive.Enabled { init proactiveManager }
 	t.Run("conditional_init", func(t *testing.T) {
 		enabled := true
 		if enabled {

@@ -130,7 +130,7 @@ execution:
 
 ## 输出与交付
 
-工具结果包含 `exit_code`、前 8 KiB 的 `summary`、完整输出的 `log_path`，失败时附加 `error`。命令的非零退出作为工具失败反馈模型，不自动重跑命令。单次工具输入上限 4 MiB、输出上限 16 MiB；超出输出上限会终止容器，保留停止前已归档输出。单次超时默认 60 秒，总任务仍受 `ai.tool_calling.timeout_seconds` 与 `max_iterations` 限制。
+工具结果包含 `exit_code`、前 8 KiB 的 `summary`、完整输出的 `log_path`，失败时附加 `error`。命令的非零退出作为工具失败反馈模型，不自动重跑命令。单次工具输入上限 4 MiB、输出上限 16 MiB；超出输出上限会终止容器，保留停止前已归档输出。单次超时默认 60 秒，总任务仍受 `agent.timeout_seconds` 与 `agent.max_rounds` 限制。
 
 `write_file` 创建/覆盖完整文件；`apply_patch` 接收 `{path, edits: [{old, new}]}`，先验证每处旧文本唯一匹配，再写回。它是单文件精确替换格式，不接受 unified diff。
 

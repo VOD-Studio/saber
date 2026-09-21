@@ -19,35 +19,35 @@ type RunFunc func(context.Context, agent.Request, func(agent.Event)) (agent.Resu
 // SendFunc 只发送已保存的结果；各上传和发送步骤须独立限时并使用稳定平台幂等键。
 type SendFunc func(context.Context, Task) (string, error)
 
-// Authorization 注入当前部署的计划执行权限及任务管理员规则，不能由聊天或工具参数覆盖。
-type Authorization struct {
-	// Schedule 在计划创建和执行时复查当前权限。
+// Options 在启动工作线程前提供权限和上下文预算。
+type Options struct {
 	Schedule ScheduleAuthorize
-	// Manage 判断当前来源成员是否可以管理同群其他人的任务及计划。
-	Manage func(chat.Identity) bool
+	Manage   func(chat.Identity) bool
+	Context  agent.ContextPolicy
 }
 
 // Manager 管理单个机器人进程的队列；同一数据库只允许一个 Manager 实例。
 type Manager struct {
-	store      *store
-	run        RunFunc
-	deliveries map[string]SendFunc
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wake       chan struct{}
-	done       chan struct{}
-	mu         sync.Mutex
-	active     map[int64]context.CancelFunc
-	workers    sync.WaitGroup
-	closeOnce  sync.Once
-	closeErr   error
-	scheduleMu sync.Mutex
-	authorize  ScheduleAuthorize
-	manage     func(chat.Identity) bool
+	store         *store
+	run           RunFunc
+	deliveries    map[string]SendFunc
+	ctx           context.Context
+	cancel        context.CancelFunc
+	wake          chan struct{}
+	done          chan struct{}
+	mu            sync.Mutex
+	active        map[int64]context.CancelFunc
+	workers       sync.WaitGroup
+	closeOnce     sync.Once
+	closeErr      error
+	scheduleMu    sync.Mutex
+	authorize     ScheduleAuthorize
+	manage        func(chat.Identity) bool
+	contextPolicy agent.ContextPolicy
 }
 
 // Open 打开数据库，标记中断任务，并启动队列和结果投递。
-func Open(path string, run RunFunc, send SendFunc, authorization ...Authorization) (*Manager, error) {
+func Open(path string, run RunFunc, send SendFunc, options ...Options) (*Manager, error) {
 	if run == nil {
 		return nil, errors.New("task manager requires runner")
 	}
@@ -61,9 +61,10 @@ func Open(path string, run RunFunc, send SendFunc, authorization ...Authorizatio
 		return nil, errors.Join(err, s.db.Close())
 	}
 	m := &Manager{store: s, run: run, deliveries: make(map[string]SendFunc), ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), done: make(chan struct{}), active: make(map[int64]context.CancelFunc)}
-	if len(authorization) > 0 {
-		m.authorize = authorization[0].Schedule
-		m.manage = authorization[0].Manage
+	if len(options) > 0 {
+		m.authorize = options[0].Schedule
+		m.manage = options[0].Manage
+		m.contextPolicy = options[0].Context
 	}
 	if send != nil {
 		m.deliveries["*"] = send

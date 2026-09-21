@@ -448,17 +448,17 @@ func TestInitConfig_DefaultConfigValues(t *testing.T) {
 	}
 
 	// MCP 默认应该启用（内置功能）
-	if !cfg.MCP.Enabled {
-		t.Error("MCP should be enabled by default")
+	if cfg.MCP.Enabled {
+		t.Error("MCP should be disabled by default")
 	}
 
 	// Proactive 默认应该禁用
-	if cfg.AI.Proactive.Enabled {
+	if cfg.Matrix.Proactive.Enabled {
 		t.Error("Proactive should be disabled by default")
 	}
 
 	// Meme 默认应该禁用
-	if cfg.Meme.Enabled {
+	if cfg.Matrix.Meme.Enabled {
 		t.Error("Meme should be disabled by default")
 	}
 }

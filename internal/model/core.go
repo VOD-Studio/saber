@@ -106,6 +106,9 @@ func (c *Core) GetClient(modelName string) (*Client, error) {
 
 	// 获取模型配置
 	modelConfig, _ := c.globalConfig.GetModelConfig(modelName)
+	if modelConfig.Model == "" || modelConfig.BaseURL == "" {
+		return nil, fmt.Errorf("模型 %q 缺少有效提供商配置", modelName)
+	}
 	cfg := &modelConfig
 
 	// 创建新客户端

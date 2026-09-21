@@ -33,16 +33,16 @@ func createTestMatrixClient(server *httptest.Server) *mautrix.Client {
 func TestModelsCommand_Registry(t *testing.T) {
 	tests := []struct {
 		name            string
-		cfg             *config.AIConfig
+		cfg             *config.Config
 		wantModelCount  int
 		wantDefault     string
 		wantModelsExist []string
 	}{
 		{
 			name: "无模型配置",
-			cfg: func() *config.AIConfig {
+			cfg: func() *config.Config {
 				cfg := createTestMultiProviderAIConfig()
-				cfg.DefaultModel = "openai.gpt-4"
+				cfg.AI.DefaultModel = "openai.gpt-4"
 				return cfg
 			}(),
 			wantModelCount:  3, // gpt-4, gpt-4o-mini, gpt-4o
@@ -51,9 +51,9 @@ func TestModelsCommand_Registry(t *testing.T) {
 		},
 		{
 			name: "有模型配置",
-			cfg: func() *config.AIConfig {
+			cfg: func() *config.Config {
 				cfg := createTestMultiProviderAIConfig()
-				cfg.DefaultModel = "openai.gpt-4o-mini"
+				cfg.AI.DefaultModel = "openai.gpt-4o-mini"
 				return cfg
 			}(),
 			wantModelCount:  3, // gpt-4, gpt-4o-mini, gpt-4o
@@ -92,7 +92,7 @@ func TestModelsCommand_Registry(t *testing.T) {
 
 func TestSwitchModelCommand_Registry(t *testing.T) {
 	cfg := createTestMultiProviderAIConfig()
-	cfg.DefaultModel = "openai.gpt-4o-mini"
+	cfg.AI.DefaultModel = "openai.gpt-4o-mini"
 
 	t.Run("switch to existing model", func(t *testing.T) {
 		service, err := NewService(cfg, nil, nil, nil)
@@ -159,7 +159,7 @@ func TestSwitchModelCommand_Registry(t *testing.T) {
 
 func TestCurrentModelCommand_Registry(t *testing.T) {
 	cfg := createTestMultiProviderAIConfig()
-	cfg.DefaultModel = "openai.gpt-4o-mini"
+	cfg.AI.DefaultModel = "openai.gpt-4o-mini"
 
 	t.Run("initial state", func(t *testing.T) {
 		service, err := NewService(cfg, nil, nil, nil)
@@ -249,7 +249,7 @@ func TestModelsCommand_Handle(t *testing.T) {
 		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
 
 		cfg := createTestMultiProviderAIConfig()
-		cfg.DefaultModel = "openai.gpt-4"
+		cfg.AI.DefaultModel = "openai.gpt-4"
 
 		service, err := NewService(cfg, matrixSvc, nil, nil)
 		if err != nil {
@@ -276,8 +276,8 @@ func TestModelsCommand_Handle(t *testing.T) {
 		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
 
 		cfg := createTestMultiProviderAIConfig()
-		cfg.DefaultModel = "openai.gpt-4"
-		cfg.Models = map[string]config.ModelConfig{} // 空模型列表
+		cfg.AI.DefaultModel = "openai.gpt-4"
+		cfg.AI.Models = map[string]config.ModelConfig{} // 空模型列表
 
 		service, err := NewService(cfg, matrixSvc, nil, nil)
 		if err != nil {
@@ -307,7 +307,7 @@ func TestSwitchModelCommand_Handle(t *testing.T) {
 		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
 
 		cfg := createTestMultiProviderAIConfig()
-		cfg.DefaultModel = "openai.gpt-4"
+		cfg.AI.DefaultModel = "openai.gpt-4"
 
 		service, err := NewService(cfg, matrixSvc, nil, nil)
 		if err != nil {
@@ -334,7 +334,7 @@ func TestSwitchModelCommand_Handle(t *testing.T) {
 		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
 
 		cfg := createTestMultiProviderAIConfig()
-		cfg.DefaultModel = "openai.gpt-4"
+		cfg.AI.DefaultModel = "openai.gpt-4"
 
 		service, err := NewService(cfg, matrixSvc, nil, nil)
 		if err != nil {
@@ -361,7 +361,7 @@ func TestSwitchModelCommand_Handle(t *testing.T) {
 		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
 
 		cfg := createTestMultiProviderAIConfig()
-		cfg.DefaultModel = "openai.gpt-4"
+		cfg.AI.DefaultModel = "openai.gpt-4"
 
 		service, err := NewService(cfg, matrixSvc, nil, nil)
 		if err != nil {
@@ -394,7 +394,7 @@ func TestSwitchModelCommand_Handle(t *testing.T) {
 		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
 
 		cfg := createTestMultiProviderAIConfig()
-		cfg.DefaultModel = "openai.gpt-4"
+		cfg.AI.DefaultModel = "openai.gpt-4"
 
 		service, err := NewService(cfg, matrixSvc, nil, nil)
 		if err != nil {
@@ -425,7 +425,7 @@ func TestCurrentModelCommand_Handle(t *testing.T) {
 		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
 
 		cfg := createTestMultiProviderAIConfig()
-		cfg.DefaultModel = "openai.gpt-4"
+		cfg.AI.DefaultModel = "openai.gpt-4"
 
 		service, err := NewService(cfg, matrixSvc, nil, nil)
 		if err != nil {
@@ -452,7 +452,7 @@ func TestCurrentModelCommand_Handle(t *testing.T) {
 		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
 
 		cfg := createTestMultiProviderAIConfig()
-		cfg.DefaultModel = "openai.gpt-4"
+		cfg.AI.DefaultModel = "openai.gpt-4"
 
 		service, err := NewService(cfg, matrixSvc, nil, nil)
 		if err != nil {

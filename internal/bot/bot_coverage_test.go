@@ -193,10 +193,9 @@ func TestWaitForShutdown_ContextCancelled(t *testing.T) {
 
 // TestInitMemeService_Disabled 测试禁用 Meme 服务。
 func TestInitMemeService_Disabled(t *testing.T) {
-	cfg := &config.Config{
-		Meme: config.MemeConfig{
-			Enabled: false,
-		},
+	cfg := &config.Config{Matrix: config.MatrixConfig{Meme: config.MemeConfig{
+		Enabled: false,
+	}},
 	}
 
 	state := &appState{
@@ -256,9 +255,9 @@ func TestInitServices_ValidatesConfig(t *testing.T) {
 	// 创建一个无效的 AI 配置
 	cfg := &config.Config{
 		AI: config.AIConfig{
-			Enabled:  true,
-			Provider: "invalid-provider", // 无效的 provider
-			Models:   map[string]config.ModelConfig{},
+			Enabled: true,
+			// 无效的 provider
+			Models: map[string]config.ModelConfig{}, Providers: map[string]config.ProviderConfig{"invalid-provider": {Type: "invalid-provider"}},
 		},
 	}
 

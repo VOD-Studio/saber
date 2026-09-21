@@ -2,7 +2,9 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,12 +15,12 @@ import (
 
 // Config 存储从 YAML 配置文件加载的应用程序配置
 type Config struct {
+	Agent     AgentConfig      `yaml:"agent"`
 	Server    HTTPServerConfig `yaml:"server"`
 	Execution ExecutionConfig  `yaml:"execution"`
 	Matrix    MatrixConfig     `yaml:"matrix"`
 	AI        AIConfig         `yaml:"ai"`
 	MCP       MCPConfig        `yaml:"mcp"`
-	Meme      MemeConfig       `yaml:"meme"`
 	Shutdown  ShutdownConfig   `yaml:"shutdown"`
 }
 
@@ -29,6 +31,14 @@ type ShutdownConfig struct {
 
 // MatrixConfig 存储 Matrix 连接配置
 type MatrixConfig struct {
+	StreamEdit            StreamEditConfig `yaml:"-"`                        // 旧即时 Matrix 展示路径的内部默认值；持久化任务独立投递。
+	DirectChatAutoReply   bool             `yaml:"direct_chat_auto_reply"`   // 在私聊中自动回复（无需 !ai 前缀）
+	GroupChatMentionReply bool             `yaml:"group_chat_mention_reply"` // 在群聊中 @mention 时自动回复（无需 !ai 前缀）
+	ReplyToBotReply       bool             `yaml:"reply_to_bot_reply"`       // 回复机器人自己的回复（用于连续对话）
+	Proactive             ProactiveConfig  `yaml:"proactive"`                // 主动聊天配置
+	Media                 MediaConfig      `yaml:"media"`                    // 媒体文件处理配置
+	Meme                  MemeConfig       `yaml:"meme"`
+
 	Enabled                bool     `yaml:"enabled"` // 显式启用 Matrix 入口；默认关闭，独立于本机聊天服务。
 	Homeserver             string   `yaml:"homeserver"`
 	UserID                 string   `yaml:"user_id"`                   // 完整的 Matrix ID，如 @user:matrix.org
@@ -51,36 +61,30 @@ type AIConfig struct {
 	Providers       map[string]ProviderConfig `yaml:"providers"`                  // 多提供商配置
 	DefaultModel    string                    `yaml:"default_model"`              // 默认使用的模型（完全限定名称，如 openai.gpt-4o-mini）
 
-	// 旧字段保留向后兼容（已弃用，推荐使用 Providers）
-	Provider              string                 `yaml:"provider"`                 // AI 提供商名称（已弃用）
-	BaseURL               string                 `yaml:"base_url"`                 // API 基础 URL（已弃用）
-	APIKey                string                 `yaml:"api_key"`                  // API 密钥（已弃用）
-	MaxTokens             int                    `yaml:"max_tokens"`               // 最大生成 token 数
-	Temperature           float64                `yaml:"temperature"`              // 生成温度（0-2）
-	SystemPrompt          string                 `yaml:"system_prompt"`            // 系统提示词
-	RateLimitPerMinute    int                    `yaml:"rate_limit_per_minute"`    // 每分钟请求限制（0 表示无限制）
-	Context               ContextConfig          `yaml:"context"`                  // 上下文管理配置
-	StreamEnabled         bool                   `yaml:"stream_enabled"`           // 是否启用流式响应
-	StreamEdit            StreamEditConfig       `yaml:"stream_edit"`              // 流式编辑配置
-	Retry                 RetryConfig            `yaml:"retry"`                    // 重试配置
-	ToolCalling           ToolCallingConfig      `yaml:"tool_calling"`             // 工具调用配置
-	Models                map[string]ModelConfig `yaml:"models"`                   // 模型别名配置
-	TimeoutSeconds        int                    `yaml:"timeout_seconds"`          // 请求超时时间（秒）
-	DirectChatAutoReply   bool                   `yaml:"direct_chat_auto_reply"`   // 在私聊中自动回复（无需 !ai 前缀）
-	GroupChatMentionReply bool                   `yaml:"group_chat_mention_reply"` // 在群聊中 @mention 时自动回复（无需 !ai 前缀）
-	ReplyToBotReply       bool                   `yaml:"reply_to_bot_reply"`       // 回复机器人自己的回复（用于连续对话）
-	Proactive             ProactiveConfig        `yaml:"proactive"`                // 主动聊天配置
-	Media                 MediaConfig            `yaml:"media"`                    // 媒体文件处理配置
-	CircuitBreaker        CircuitBreakerConfig   `yaml:"circuit_breaker"`          // 熔断器配置
+	MaxTokens          int                    `yaml:"max_tokens"`              // 最大生成 token 数
+	Temperature        float64                `yaml:"temperature"`             // 生成温度（0-2）
+	SystemPrompt       string                 `yaml:"system_prompt"`           // 系统提示词
+	RateLimitPerMinute int                    `yaml:"rate_limit_per_minute"`   // 每分钟请求限制（0 表示无限制）
+	Models             map[string]ModelConfig `yaml:"models"`                  // 模型别名配置
+	TimeoutSeconds     int                    `yaml:"request_timeout_seconds"` // 请求超时时间（秒）
+}
+
+// AgentConfig 定义所有接入共用的任务执行策略。
+type AgentConfig struct {
+	ToolCallingConfig `yaml:",inline"`
+	Context           ContextConfig        `yaml:"context"`         // 上下文管理配置
+	StreamEnabled     bool                 `yaml:"stream"`          // 是否启用流式响应
+	Retry             RetryConfig          `yaml:"retry"`           // 重试配置
+	CircuitBreaker    CircuitBreakerConfig `yaml:"circuit_breaker"` // 熔断器配置
 }
 
 // ContextConfig 存储上下文管理配置
 type ContextConfig struct {
-	Enabled           bool `yaml:"enabled"`             // 是否启用上下文管理
-	MaxMessages       int  `yaml:"max_messages"`        // 最大保留消息数
-	MaxTokens         int  `yaml:"max_tokens"`          // 最大 token 数
-	ExpiryMinutes     int  `yaml:"expiry_minutes"`      // 上下文过期时间（分钟）
-	InactiveRoomHours int  `yaml:"inactive_room_hours"` // 不活跃房间清理阈值（小时）
+	Enabled           bool `yaml:"enabled"`          // 是否启用上下文管理
+	MaxMessages       int  `yaml:"max_messages"`     // 最大保留消息数
+	MaxTokens         int  `yaml:"max_input_tokens"` // 最大 token 数
+	ExpiryMinutes     int  `yaml:"-"`                // 上下文过期时间（分钟）
+	InactiveRoomHours int  `yaml:"-"`                // 不活跃房间清理阈值（小时）
 }
 
 // StreamEditConfig 存储流式编辑配置
@@ -113,8 +117,8 @@ type RetryConfig struct {
 // ToolCallingConfig 存储工具调用配置
 type ToolCallingConfig struct {
 	// MaxIterations 限制模型轮数，包含最终回答，默认 5。
-	MaxIterations int `yaml:"max_iterations"`
-	// TimeoutSeconds 限制整次 Agent 运行，零值使用 120 秒。
+	MaxIterations int `yaml:"max_rounds"`
+	// TimeoutSeconds 限制整次 Agent 运行，零值使用 600 秒。
 	TimeoutSeconds int `yaml:"timeout_seconds"`
 	// MaxToolOutputBytes 限制每条工具结果，零值使用 32 KiB。
 	MaxToolOutputBytes int `yaml:"max_tool_output_bytes"`
@@ -167,12 +171,12 @@ type ModelConfig struct {
 	API                   string `yaml:"api,omitempty"`                     // 协议（覆盖提供商）；空值沿用原有 Chat Completions。
 	ReasoningEffort       string `yaml:"reasoning_effort,omitempty"`        // 思考等级；空值继承提供商或全局设置。
 
-	Model       string  `yaml:"model"`       // 模型标识符
-	Provider    string  `yaml:"provider"`    // 提供商（覆盖全局）
-	BaseURL     string  `yaml:"base_url"`    // API URL（覆盖全局）
-	APIKey      string  `yaml:"api_key"`     // API 密钥（覆盖全局）
-	MaxTokens   int     `yaml:"max_tokens"`  // 最大 token 数（覆盖全局）
-	Temperature float64 `yaml:"temperature"` // 温度（覆盖全局）
+	Model       string   `yaml:"model"`                 // 模型标识符
+	Provider    string   `yaml:"provider"`              // 提供商（覆盖全局）
+	BaseURL     string   `yaml:"base_url"`              // API URL（覆盖全局）
+	APIKey      string   `yaml:"api_key"`               // API 密钥（覆盖全局）
+	MaxTokens   int      `yaml:"max_tokens"`            // 最大 token 数（覆盖全局）
+	Temperature *float64 `yaml:"temperature,omitempty"` // nil 继承全局，显式 0 保持零温度。
 }
 
 // ProactiveConfig 存储 AI 主动聊天配置
@@ -244,29 +248,26 @@ func (m *MatrixConfig) UsePasswordAuth() bool {
 // DefaultAIConfig 返回带有合理默认值的 AI 配置
 func DefaultAIConfig() AIConfig {
 	return AIConfig{
-		Enabled:               false,
-		Providers:             make(map[string]ProviderConfig),
-		DefaultModel:          "",
-		Provider:              "",
-		BaseURL:               "",
-		APIKey:                "",
-		MaxTokens:             8192,
-		Temperature:           0.7,
-		SystemPrompt:          "",
-		RateLimitPerMinute:    0,
-		Context:               DefaultContextConfig(),
-		StreamEnabled:         true,
-		StreamEdit:            DefaultStreamEditConfig(),
-		Retry:                 DefaultRetryConfig(),
-		ToolCalling:           DefaultToolCallingConfig(),
-		Models:                make(map[string]ModelConfig),
-		TimeoutSeconds:        30,
-		DirectChatAutoReply:   true,
-		GroupChatMentionReply: true,
-		ReplyToBotReply:       true,
-		Proactive:             DefaultProactiveConfig(),
-		Media:                 DefaultMediaConfig(),
-		CircuitBreaker:        DefaultCircuitBreakerConfig(),
+		Enabled:            false,
+		Providers:          make(map[string]ProviderConfig),
+		DefaultModel:       "",
+		MaxTokens:          8192,
+		Temperature:        0.7,
+		SystemPrompt:       "",
+		RateLimitPerMinute: 0,
+		Models:             make(map[string]ModelConfig),
+		TimeoutSeconds:     120,
+	}
+}
+
+// DefaultAgentConfig 返回通用任务默认策略。
+func DefaultAgentConfig() AgentConfig {
+	return AgentConfig{
+		Context:           DefaultContextConfig(),
+		StreamEnabled:     true,
+		Retry:             DefaultRetryConfig(),
+		ToolCallingConfig: DefaultToolCallingConfig(),
+		CircuitBreaker:    DefaultCircuitBreakerConfig(),
 	}
 }
 
@@ -275,9 +276,9 @@ func DefaultContextConfig() ContextConfig {
 	return ContextConfig{
 		Enabled:           true,
 		MaxMessages:       50,
-		MaxTokens:         8000,
-		ExpiryMinutes:     60,
-		InactiveRoomHours: 24,
+		MaxTokens:         32768,
+		ExpiryMinutes:     0,
+		InactiveRoomHours: 0,
 	}
 }
 
@@ -309,7 +310,7 @@ func DefaultRetryConfig() RetryConfig {
 		InitialDelayMs:  1000,
 		MaxDelayMs:      30000,
 		BackoffFactor:   2.0,
-		FallbackEnabled: true,
+		FallbackEnabled: false,
 		FallbackModels:  []string{},
 	}
 }
@@ -318,7 +319,7 @@ func DefaultRetryConfig() RetryConfig {
 func DefaultToolCallingConfig() ToolCallingConfig {
 	return ToolCallingConfig{
 		MaxIterations:      5,
-		TimeoutSeconds:     120,
+		TimeoutSeconds:     600,
 		MaxToolOutputBytes: 32768,
 	}
 }
@@ -429,6 +430,15 @@ func (m *MatrixConfig) Validate() error {
 		slog.Warn("max_concurrent_events is very high, this may cause resource issues",
 			"value", m.MaxConcurrentEvents)
 	}
+	if m.Media.Enabled && (m.Media.MaxSizeMB <= 0 || m.Media.TimeoutSec <= 0) {
+		return fmt.Errorf("matrix.media requires positive max_size_mb and timeout_sec")
+	}
+	if err := m.Proactive.Validate(); err != nil {
+		return err
+	}
+	if err := m.Meme.Validate(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -436,21 +446,6 @@ func (m *MatrixConfig) Validate() error {
 func (a *AIConfig) Validate() error {
 	if !a.Enabled {
 		return nil
-	}
-
-	// 检查是否使用旧配置格式
-	usingOldFormat := len(a.Providers) == 0 && a.Provider != ""
-
-	// 如果使用旧格式，先验证旧格式的必填字段（保持错误消息一致性）
-	if usingOldFormat {
-		if a.BaseURL == "" {
-			return fmt.Errorf("base_url is required when AI is enabled")
-		}
-		if a.DefaultModel == "" {
-			return fmt.Errorf("default_model is required when AI is enabled")
-		}
-		// 执行迁移
-		a.migrateFromOldFormat()
 	}
 
 	// 验证默认模型
@@ -472,6 +467,7 @@ func (a *AIConfig) Validate() error {
 		if err := p.Validate(name); err != nil {
 			return fmt.Errorf("providers.%s: %w", name, err)
 		}
+		a.Providers[name] = p
 		// 检查默认模型是否存在于提供商的模型列表中
 		if name == provider {
 			if _, found := p.Models[modelID]; !found {
@@ -486,26 +482,35 @@ func (a *AIConfig) Validate() error {
 	if a.Temperature < 0 || a.Temperature > 2 {
 		return fmt.Errorf("temperature must be between 0 and 2")
 	}
-	if a.TimeoutSeconds <= 0 {
-		return fmt.Errorf("timeout_seconds must be positive")
+	if a.TimeoutSeconds <= 0 || int64(a.TimeoutSeconds) > 9223372036 {
+		return fmt.Errorf("request_timeout_seconds must be positive and not overflow time.Duration")
 	}
-	if a.Media.Enabled {
-		if a.Media.MaxSizeMB <= 0 {
-			return fmt.Errorf("media.max_size_mb must be positive")
-		}
-		if a.Media.TimeoutSec <= 0 {
-			return fmt.Errorf("media.timeout_sec must be positive")
-		}
-	}
-	// 验证工具调用配置
-	if err := a.ToolCalling.Validate(); err != nil {
-		return fmt.Errorf("tool_calling: %w", err)
+	if a.MaxTokens < 0 || a.RateLimitPerMinute < 0 {
+		return fmt.Errorf("max_tokens and rate_limit_per_minute must be non-negative")
 	}
 	// 验证所有模型别名配置
 	for name, modelCfg := range a.Models {
 		if err := modelCfg.Validate(); err != nil {
 			return fmt.Errorf("models[%s]: %w", name, err)
 		}
+	}
+
+	return nil
+}
+
+// Validate 验证任务限制与上下文预算。
+func (a *AgentConfig) Validate() error {
+	if err := a.ToolCallingConfig.Validate(); err != nil {
+		return err
+	}
+	if a.Context.MaxMessages < 1 || a.Context.MaxTokens < 1 {
+		return fmt.Errorf("context max_messages and max_input_tokens must be positive")
+	}
+	if a.Retry.MaxRetries < 0 || a.Retry.InitialDelayMs < 0 || a.Retry.MaxDelayMs < a.Retry.InitialDelayMs || int64(a.Retry.MaxDelayMs) > 9223372036854 || a.Retry.BackoffFactor < 1 {
+		return fmt.Errorf("invalid retry limits")
+	}
+	if a.Retry.FallbackEnabled && len(a.Retry.FallbackModels) == 0 {
+		return fmt.Errorf("retry.fallback_models is required when fallback is enabled")
 	}
 	// 验证熔断器配置
 	if a.CircuitBreaker.Enabled {
@@ -519,48 +524,14 @@ func (a *AIConfig) Validate() error {
 	return nil
 }
 
-// migrateFromOldFormat 将旧配置格式迁移到新格式。
-// 这允许向后兼容，旧配置会自动转换为新结构。
-func (a *AIConfig) migrateFromOldFormat() {
-	slog.Info("migrating AI config from old format to multi-provider format",
-		"provider", a.Provider)
-
-	// 创建提供商配置
-	providerCfg := ProviderConfig{
-		Type:    a.Provider,
-		BaseURL: a.BaseURL,
-		APIKey:  a.APIKey,
-		Models:  make(map[string]ModelConfig),
-	}
-
-	// 迁移旧模型配置
-	for alias, modelCfg := range a.Models {
-		// 如果模型配置没有指定提供商，使用全局提供商
-		if modelCfg.Provider == "" || modelCfg.Provider == a.Provider {
-			// 将模型添加到提供商配置中
-			modelName := modelCfg.Model
-			if modelName == "" {
-				modelName = alias
-			}
-			providerCfg.Models[modelName] = modelCfg
-		}
-	}
-
-	a.Providers = map[string]ProviderConfig{
-		a.Provider: providerCfg,
-	}
-
-	// 更新 default_model 为完全限定格式
-	// 检查 DefaultModel 是否已经是完全限定格式
-	if _, _, err := ParseModelID(a.DefaultModel); err != nil {
-		a.DefaultModel = FormatModelID(a.Provider, a.DefaultModel)
-	}
-
-	slog.Debug("migration completed", "default_model", a.DefaultModel)
-}
-
 // Validate 验证工具调用配置是否有效
 func (t *ToolCallingConfig) Validate() error {
+	if t.TimeoutSeconds == 0 {
+		t.TimeoutSeconds = 600
+	}
+	if t.MaxToolOutputBytes == 0 {
+		t.MaxToolOutputBytes = 32768
+	}
 	// 防止秒数转换为 time.Duration 纳秒时溢出。
 	if t.TimeoutSeconds < 0 || int64(t.TimeoutSeconds) > 9223372036 {
 		return fmt.Errorf("timeout_seconds must be between 0 and 9223372036")
@@ -569,10 +540,10 @@ func (t *ToolCallingConfig) Validate() error {
 		return fmt.Errorf("max_tool_output_bytes must be 0 or at least 128")
 	}
 	if t.MaxIterations < 1 {
-		return fmt.Errorf("max_iterations must be at least 1")
+		return fmt.Errorf("max_rounds must be at least 1")
 	}
 	if t.MaxIterations > 20 {
-		slog.Warn("max_iterations is very high, this may cause long response times",
+		slog.Warn("max_rounds is very high, this may cause long response times",
 			"value", t.MaxIterations)
 	}
 	return nil
@@ -592,13 +563,16 @@ func (s *ShutdownConfig) Validate() error {
 
 // Validate 验证模型配置是否有效
 func (m *ModelConfig) Validate() error {
+	if m.RequestTimeoutSeconds < 0 || int64(m.RequestTimeoutSeconds) > 9223372036 {
+		return fmt.Errorf("invalid request_timeout_seconds")
+	}
 	if err := ValidateAPI(m.API); err != nil {
 		return err
 	}
 	if m.Model == "" {
 		return fmt.Errorf("model is required in ModelConfig")
 	}
-	if m.Temperature < 0 || m.Temperature > 2 {
+	if m.Temperature != nil && (*m.Temperature < 0 || *m.Temperature > 2) {
 		return fmt.Errorf("temperature must be between 0 and 2")
 	}
 	if m.MaxTokens < 0 {
@@ -697,51 +671,32 @@ func (m *MemeConfig) Validate() error {
 	return nil
 }
 
-// GetModelConfig 获取指定模型的配置。
-//
-// 支持多种格式：
-//   - 完全限定名称（如 openai.gpt-4o-mini）：从 Providers 配置解析
-//   - 别名（如 fast）：从 Models map 获取
-//   - 简单模型名：使用旧的全局配置（向后兼容）
-//
-// 返回值:
-//   - ModelConfig: 合并后的模型配置
-//   - bool: 是否找到了显式配置
+// GetModelConfig 解析完全限定模型名称或显式别名，合并模型、提供商与全局参数。
 func (a *AIConfig) GetModelConfig(modelID string) (ModelConfig, bool) {
-	// 1. 尝试解析为完全限定名称 (provider.model)
 	if provider, model, err := ParseModelID(modelID); err == nil {
-		if providerCfg, ok := a.Providers[provider]; ok {
-			modelCfg, found := providerCfg.GetModelConfig(model)
-			// 补充提供商级别的配置
-			modelCfg = a.mergeProviderConfig(modelCfg, providerCfg)
-			return modelCfg, found
-		}
-	}
-
-	// 2. 尝试从别名 Models map 查找
-	if config, ok := a.Models[modelID]; ok {
-		// 如果别名指定了提供商，尝试从 Providers 获取配置
-		if config.Provider != "" {
-			if providerCfg, ok := a.Providers[config.Provider]; ok {
-				merged := a.mergeProviderConfig(config, providerCfg)
-				return merged, true
+		if p, ok := a.Providers[provider]; ok {
+			if p.Type == "" {
+				p.Type = provider
 			}
+			cfg, found := p.GetModelConfig(model)
+			return a.mergeProviderConfig(cfg, p), found
 		}
-		// 使用旧的全局配置合并（向后兼容）
-		config = a.mergeGlobalConfig(config)
-		return config, true
 	}
-
-	// 3. 向后兼容：使用旧的全局配置
-	return ModelConfig{
-		ReasoningEffort: a.ReasoningEffort,
-		Model:           modelID,
-		Provider:        a.Provider,
-		BaseURL:         a.BaseURL,
-		APIKey:          a.APIKey,
-		MaxTokens:       a.MaxTokens,
-		Temperature:     a.Temperature,
-	}, false
+	if cfg, ok := a.Models[modelID]; ok {
+		provider := cfg.Provider
+		if provider == "" {
+			provider, _, _ = ParseModelID(a.DefaultModel)
+		}
+		if p, ok := a.Providers[provider]; ok {
+			// 别名的 provider 是提供商配置名，客户端使用其 type。
+			cfg.Provider = ""
+			if p.Type == "" {
+				p.Type = provider
+			}
+			return a.mergeProviderConfig(cfg, p), true
+		}
+	}
+	return ModelConfig{}, false
 }
 
 // mergeProviderConfig 合并提供商配置到模型配置。
@@ -772,34 +727,8 @@ func (a *AIConfig) mergeProviderConfig(cfg ModelConfig, providerCfg ProviderConf
 	if cfg.MaxTokens == 0 {
 		cfg.MaxTokens = a.MaxTokens
 	}
-	if cfg.Temperature == 0 {
-		cfg.Temperature = a.Temperature
-	}
-	return cfg
-}
-
-// mergeGlobalConfig 使用旧的全局配置合并模型配置（向后兼容）。
-func (a *AIConfig) mergeGlobalConfig(cfg ModelConfig) ModelConfig {
-	if cfg.RequestTimeoutSeconds == 0 {
-		cfg.RequestTimeoutSeconds = a.TimeoutSeconds
-	}
-	if cfg.ReasoningEffort == "" {
-		cfg.ReasoningEffort = a.ReasoningEffort
-	}
-	if cfg.Provider == "" {
-		cfg.Provider = a.Provider
-	}
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = a.BaseURL
-	}
-	if cfg.APIKey == "" {
-		cfg.APIKey = a.APIKey
-	}
-	if cfg.MaxTokens == 0 {
-		cfg.MaxTokens = a.MaxTokens
-	}
-	if cfg.Temperature == 0 {
-		cfg.Temperature = a.Temperature
+	if cfg.Temperature == nil {
+		cfg.Temperature = new(a.Temperature)
 	}
 	return cfg
 }
@@ -823,10 +752,16 @@ func Load(path string) (*Config, error) {
 
 	cfg := DefaultConfig()
 
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, fmt.Errorf("config must contain exactly one YAML document")
+	}
 	return cfg, nil
 }
 
@@ -846,6 +781,13 @@ func LoadOrDefault(path string) (*Config, error) {
 // DefaultMatrixConfig 返回带有合理默认值的 Matrix 配置
 func DefaultMatrixConfig() MatrixConfig {
 	return MatrixConfig{
+		StreamEdit:             DefaultStreamEditConfig(),
+		DirectChatAutoReply:    true,
+		GroupChatMentionReply:  true,
+		ReplyToBotReply:        true,
+		Proactive:              DefaultProactiveConfig(),
+		Media:                  DefaultMediaConfig(),
+		Meme:                   DefaultMemeConfig(),
 		Homeserver:             "https://matrix.org",
 		UserID:                 "",
 		DeviceID:               "",
@@ -863,7 +805,7 @@ func DefaultMatrixConfig() MatrixConfig {
 // DefaultMCPConfig 返回带有合理默认值的 MCP 配置
 func DefaultMCPConfig() MCPConfig {
 	return MCPConfig{
-		Enabled: true,
+		Enabled: false,
 		Builtin: BuiltinConfig{
 			WebSearch: WebSearchConfig{
 				Instances:      nil,
@@ -878,288 +820,66 @@ func DefaultMCPConfig() MCPConfig {
 // DefaultConfig 返回带有合理默认值的配置
 func DefaultConfig() *Config {
 	return &Config{
-		Server:   HTTPServerConfig{Listen: "127.0.0.1:8320"},
+		Server:   HTTPServerConfig{Listen: "127.0.0.1:8320", TokenFile: ".saber-token"},
+		Agent:    DefaultAgentConfig(),
 		Matrix:   DefaultMatrixConfig(),
 		AI:       DefaultAIConfig(),
 		MCP:      DefaultMCPConfig(),
-		Meme:     DefaultMemeConfig(),
 		Shutdown: DefaultShutdownConfig(),
 	}
 }
 
 // ExampleConfig 返回示例配置内容。
 func ExampleConfig() string {
-	return `server:
-  # 默认常驻本机服务，使用 saber chat 打开 TUI。
+	return `# 默认启动常驻服务：saber；另开终端执行 saber chat。
+server:
   listen: "127.0.0.1:8320"
-  # 首次启动自动创建 0600 令牌文件，相对于配置文件目录。
-  token_file: ".saber-token"
-
-matrix:
-  # 可选聊天入口；接入时改为 true 并填写账号。
-  enabled: false
-  # Matrix 服务器地址
-  homeserver: "https://matrix.org"
-  # 完整的 Matrix 用户 ID（格式：@username:server.org）
-  user_id: ""
-  # 设备标识符（可选，留空则服务器自动生成）
-  device_id: "saber-bot-device"
-  # 设备显示名称（可选）
-  device_name: "Saber Bot"
-  # 认证方式（二选一，access_token 优先级更高）
-  # 方式 1: 使用 Access Token（推荐，更安全）
-  access_token: ""
-  # 方式 2: 使用密码登录（首次登录使用）
-  # password: "your-secure-password"
-  # 启动时自动加入的房间列表（可选）
-  # auto_join_rooms:
-  #   - "!roomid1:matrix.org"
-  #   - "#public-room:matrix.org"
-  # 端到端加密（E2EE）配置
-  enable_e2ee: true  # 启用端到端加密（默认启用）
-  e2ee_session_path: "./saber.session"  # 加密会话文件路径
-  # pickle_key_path: "./saber.session.key"  # pickle 密钥路径（可选，默认为 e2ee_session_path + ".key"）
-  # 最大并发事件处理数（默认 10）
-  max_concurrent_events: 10
+  token_file: ".saber-token" # 首次启动自动创建，相对于配置文件目录
 
 ai:
-  # 启用 AI 功能
-  enabled: false
-  # ==================== 多提供商配置（推荐） ====================
-  # 支持同时配置多个 AI 提供商，使用完全限定名称：提供商.模型名
-  providers:
-    openai:
-      # type: 提供商类型
-      # 可选值:
-      #   - openai: OpenAI 及兼容 API（Ollama、vLLM、LocalAI 等）
-      #   - azure: Azure OpenAI（需配合 extra.api_version）
-      type: "openai"
-      base_url: "https://api.openai.com/v1"
-      api_key: ""
-      models:
-        gpt-4o-mini:
-          model: "gpt-4o-mini"
-        gpt-4o:
-          model: "gpt-4o"
-    # Podlink Responses 示例（选择此模型时同时修改 default_model）
-    # podlink-responses:
-    #   type: "openai"
-    #   api: "openai-responses"
-    #   reasoning_effort: "medium"  # 提供商默认，可在 models 下为单个模型覆盖
-    #   base_url: "http://127.0.0.1:8317/v1"
-    #   api_key: ""
-    #   models:
-    #     gpt-5.6-sol:
-    #       model: "gpt-5.6-sol"
-    #       reasoning_effort: "high"
-    # Ollama 本地模型示例
-    # ollama:
-    #   type: "openai"  # Ollama 兼容 OpenAI API
-    #   base_url: "http://localhost:11434/v1"
-    #   models:
-    #     llama3:
-    #       model: "llama3"
-    # Azure OpenAI 示例
-    # azure:
-    #   type: "azure"
-    #   base_url: "https://your-resource.openai.azure.com"
-    #   api_key: ""
-    #   extra:
-    #     api_version: "2024-02-15-preview"
-    #   models:
-    #     gpt-4:
-    #       model: "gpt-4"
-  # 默认使用的模型（完全限定名称：提供商.模型名）
-  default_model: "openai.gpt-4o-mini"
-  # ==================== 单提供商配置（兼容旧格式） ====================
-  # 以下配置仅在没有配置 providers 时生效，用于向后兼容
-  # AI 提供商（如 openai, azure, anthropic）
-  # provider: "openai"
-  # API 基础 URL
-  # base_url: "https://api.openai.com/v1"
-  # API 密钥
-  # api_key: ""
-  # 思考等级：模型 > 提供商 > 此全局值；留空使用上游默认，不发送参数。
-  # 常见值 low / medium / high；none / minimal / xhigh / max 需模型支持。
-  reasoning_effort: ""
-  # 最大生成 token 数
-  max_tokens: 8192
-  # 生成温度（0-2）
-  temperature: 0.7
-  # 系统提示词（可选，用于自定义 AI 行为）
-  # system_prompt: "You are a helpful assistant."
-  # 每分钟请求限制（0 表示无限制）
-  rate_limit_per_minute: 0
-  # 上下文管理配置
+  enabled: false # 配置提供商及 default_model 后开启
+  providers: {}
+  # providers:
+  #   podlink-responses:
+  #     type: openai
+  #     api: openai-responses
+  #     base_url: "http://127.0.0.1:8317/v1"
+  #     api_key: ""
+  #     models:
+  #       gpt-5.6-sol:
+  #         model: gpt-5.6-sol
+  #         reasoning_effort: high # 按模型支持情况设置；省略则用上游默认
+  default_model: "" # 例如 podlink-responses.gpt-5.6-sol
+  max_tokens: 8192 # 每次生成预算；模型配置可覆盖，并非模型能力上限
+  temperature: 0.7 # Responses 仅在 reasoning_effort: none 时发送
+  request_timeout_seconds: 120 # 单次请求总时限，包含流式读取
+
+agent:
+  stream: true # 模型传输开关，所有接入共同遵守
+  max_rounds: 5 # 包含最终回答
+  timeout_seconds: 600 # 整次任务，包含请求、重试等待与工具执行
+  max_tool_output_bytes: 32768
   context:
     enabled: true
     max_messages: 50
-    max_tokens: 8000
-    expiry_minutes: 60
-    # 不活跃房间清理阈值（小时，默认 24）
-    inactive_room_hours: 24
-  # 是否启用流式响应
-  stream_enabled: true
-  # 流式编辑配置
-  stream_edit:
-    enabled: true
-    char_threshold: 300
-    time_threshold_ms: 3000
-    edit_interval_ms: 500
-    max_edits: 5
-  # 重试配置
+    max_input_tokens: 32768 # 保守估算输入预算，不删除数据库历史
   retry:
     enabled: true
     max_retries: 3
     initial_delay_ms: 1000
     max_delay_ms: 30000
-    backoff_factor: 2.0
-    fallback_enabled: true
+    backoff_factor: 2
+    fallback_enabled: false
     fallback_models: []
-  # 熔断器配置
-  circuit_breaker:
-    enabled: false
-    failure_threshold: 5
-    reset_timeout: 30
-  # 工具调用配置
-  tool_calling:
-    # 最大模型轮数，包含首次请求和最终回答；最后一轮不再执行工具
-    max_iterations: 5
-    # 总运行时长，包含请求、重试等待和工具执行
-    timeout_seconds: 120
-    # 每条工具结果最大字节数，包含截断标记
-    max_tool_output_bytes: 32768
-  # 多模型配置示例
-  models: {}
-    # fast:
-    #   model: "gpt-4o-mini"
-    #   temperature: 0.3
-    # creative:
-    #   model: "gpt-4o"
-    #   temperature: 0.9
-  # 请求超时时间（秒）
-  timeout_seconds: 30
-  # 在私聊中自动回复（无需 !ai 前缀）
-  direct_chat_auto_reply: true
-  # 在群聊中 @mention 时自动回复（无需 !ai 前缀）
-  group_chat_mention_reply: true
-  # 回复机器人消息时自动回复（用于连续对话）
-  reply_to_bot_reply: true
-  # 主动聊天配置
-  proactive:
-    # 是否启用主动聊天
-    enabled: false
-    # 每天最大主动消息数
-    max_messages_per_day: 5
-    # 最小间隔时间（分钟）
-    min_interval_minutes: 60
-    # 静默检测配置
-    silence:
-      enabled: true
-      threshold_minutes: 60
-      check_interval_minutes: 15
-    # 定时聊天配置
-    schedule:
-      enabled: true
-      times: ["09:00", "12:00", "18:00"]
-    # 新成员欢迎配置
-    new_member:
-      enabled: true
-      welcome_prompt: "用友好的方式欢迎新成员加入"
-    # 决策模型配置
-    decision:
-      model: ""
-      temperature: 0.8
-      prompt_template: ""
-      # 是否启用流式请求（默认 true，可更快响应）
-      stream_enabled: true
-  # 媒体文件处理配置
-  media:
-    # 是否启用媒体处理（如图片理解）
-    enabled: true
-    # 最大文件大小（MB）
-    max_size_mb: 10
-    # 处理超时时间（秒）
-    timeout_sec: 30
-    # 图片识别专用模型（留空则使用默认模型）
-    # model: "gpt-4o"
 
-# MCP (Model Context Protocol) 配置
+# 可选接入与执行能力；详细配置见 docs/configuration.md、docs/execution.md。
+matrix:
+  enabled: false
 mcp:
-  # 启用 MCP 功能
-  enabled: true
-  # 外部 MCP 服务器配置（可选）
-  # servers:
-  #   # MCP 服务器类型说明:
-  #   # - builtin: 内置工具（web_search, js_sandbox），通过 mcp.builtin 配置
-  #   # - stdio: 进程通信型服务器，需配置 command/args/env/allowed_commands
-  #   # - http: HTTP 远程服务器，需配置 url/token
-  #
-  #   # stdio 类型服务器示例
-  #   filesystem:
-  #     type: stdio
-  #     enabled: true
-  #     command: "/path/to/mcp-server-filesystem"  # 必需：可执行文件路径
-  #     args: ["--root", "/home/user/documents"]   # 可选：命令参数
-  #     timeout_seconds: 30                        # 可选：超时时间
-  #     # allowed_commands: []                     # 安全：命令白名单（默认禁止所有）
-  #     # env:                                     # 可选：环境变量
-  #     #   DEBUG: "1"
-  #   # http 类型服务器示例
-  #   remote-server:
-  #     type: http
-  #     enabled: false
-  #     url: "https://mcp.example.com/api"  # 必需：服务器地址
-  #     token: "your-bearer-token"          # 可选：Bearer 认证令牌
-  #     timeout_seconds: 30                 # 可选：超时时间
-  # 内置工具配置
-  builtin:
-    # web_search 搜索工具配置
-    web_search:
-      # SearXNG 实例列表（可选，留空使用默认实例）
-      # instances:
-      #   - "https://seek.fyi"
-      #   - "https://search.femboy.ad"
-      # 最大返回结果数（默认 5，最大 10）
-      max_results: 5
-      # 请求超时时间（秒，默认 20）
-      timeout_seconds: 20
-    # js_sandbox JS 沙箱工具配置
-    js_sandbox:
-      # 是否启用 JS 沙箱（默认启用）
-      enabled: true
-      # 执行超时时间（毫秒，默认 5000）
-      timeout_ms: 5000
-      # 最大内存限制 MB（默认 64）
-      max_memory_mb: 64
-      # 最大输出长度（字符，默认 10000）
-      max_output_length: 10000
-
-# 自主执行权限：默认不向任何成员开放命令/文件/MCP 工具。
-# 完整授权与 MCP 能力配置见 docs/execution.md。
+  enabled: false # 开启后仍须 execution 中的身份及工具授权
 execution:
   enabled: false
-  image: "python:3.13-slim"  # 管理员预先拉取的可信镜像，生产建议固定 digest
-  log_dir: "./data/execution"  # 必须在工作区外
-  timeout_seconds: 60
-  workspaces: {}
-  grants: []
-  mcp_requirements: {}
-
-# Meme/GIF 搜索配置（使用 Klipy API）
-meme:
-  # 是否启用 meme 功能
-  enabled: false
-  # Klipy API Key（从 partner.klipy.com 获取）
-  api_key: ""
-  # 最大返回结果数（默认 5）
-  max_results: 5
-  # 请求超时时间（秒，默认 10）
-  timeout_seconds: 10
-
-# 关闭配置
 shutdown:
-  # 关闭超时时间（秒，默认 30）
   timeout_seconds: 30
 `
 }

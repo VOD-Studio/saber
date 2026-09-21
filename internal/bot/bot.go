@@ -270,7 +270,7 @@ func (s *appState) initServices() error {
 	if err := s.cfg.AI.Validate(); err != nil {
 		return fmt.Errorf("AI配置验证失败: %w", err)
 	}
-	secrets := []string{s.cfg.Matrix.AccessToken, s.cfg.Matrix.Password, s.cfg.AI.APIKey}
+	secrets := []string{s.cfg.Matrix.AccessToken, s.cfg.Matrix.Password}
 	for _, provider := range s.cfg.AI.Providers {
 		secrets = append(secrets, provider.APIKey)
 		for _, model := range provider.Models {
@@ -294,11 +294,11 @@ func (s *appState) initServices() error {
 	// 媒体下载仅在 Matrix 接入时初始化。
 	if svc.client != nil {
 		mautrixClient := svc.client.GetClient()
-		maxSizeBytes := int64(s.cfg.AI.Media.MaxSizeMB) * 1024 * 1024
+		maxSizeBytes := int64(s.cfg.Matrix.Media.MaxSizeMB) * 1024 * 1024
 		svc.mediaService = matrix.NewMediaService(mautrixClient, maxSizeBytes)
 	}
 
-	aiService, err := ai.NewService(&s.cfg.AI, svc.commandService, svc.mcpManager, svc.mediaService)
+	aiService, err := ai.NewService(s.cfg, svc.commandService, svc.mcpManager, svc.mediaService)
 	if err != nil {
 		return fmt.Errorf("AI服务初始化失败: %w", err)
 	}
@@ -310,7 +310,6 @@ func (s *appState) initServices() error {
 	}
 
 	slog.Info("AI服务初始化成功",
-		"provider", s.cfg.AI.Provider,
 		"default_model", s.cfg.AI.DefaultModel)
 
 	// 任务运行独立于入口，Matrix 只注册自己的投递器。
@@ -327,7 +326,7 @@ func (s *appState) initServices() error {
 
 	s.registerAICommands()
 
-	if s.cfg.AI.Proactive.Enabled {
+	if s.cfg.Matrix.Proactive.Enabled {
 		mgr, err := s.initProactiveManager()
 		if err != nil {
 			return err
@@ -345,6 +344,9 @@ func (s *appState) initServices() error {
 func (s *appState) initMCPManager() *mcp.Manager {
 	slog.Info("正在初始化MCP管理器...")
 	mgr := mcp.NewManagerWithBuiltin(&s.cfg.MCP)
+	if !s.cfg.MCP.Enabled {
+		return mgr
+	}
 
 	if err := mgr.InitBuiltinServers(context.Background()); err != nil {
 		slog.Warn("MCP内置服务器初始化失败", "error", err)
@@ -383,12 +385,12 @@ func (s *appState) registerAICommands() {
 		cs.RegisterCommandWithDesc(commandName, desc, ai.NewMultiModelAICommand(aiSvc, modelName))
 	}
 
-	if s.cfg.AI.DirectChatAutoReply {
+	if s.cfg.Matrix.DirectChatAutoReply {
 		cs.SetDirectChatAIHandler(ai.NewAICommand(aiSvc))
 		slog.Info("私聊自动回复已启用")
 	}
 
-	if s.cfg.AI.GroupChatMentionReply {
+	if s.cfg.Matrix.GroupChatMentionReply {
 		mautrixClient := svc.client.GetClient()
 		mentionService := matrix.NewMentionService(mautrixClient, svc.client.GetUserID())
 		if err := mentionService.Init(context.Background()); err != nil {
@@ -401,7 +403,7 @@ func (s *appState) registerAICommands() {
 			"display_name", mentionService.GetDisplayName())
 	}
 
-	if s.cfg.AI.ReplyToBotReply {
+	if s.cfg.Matrix.ReplyToBotReply {
 		cs.SetReplyAIHandler(ai.NewAICommand(aiSvc))
 		slog.Info("回复机器人自己的回复已启用",
 			"bot_id", svc.client.GetUserID().String())
@@ -439,11 +441,11 @@ func (s *appState) initPersonaService() {
 
 // initMemeService 初始化 Meme 服务。
 func (s *appState) initMemeService() {
-	if !s.cfg.Meme.Enabled {
+	if !s.cfg.Matrix.Meme.Enabled {
 		return
 	}
 
-	if err := s.cfg.Meme.Validate(); err != nil {
+	if err := s.cfg.Matrix.Meme.Validate(); err != nil {
 		slog.Warn("Meme 配置无效，跳过初始化", "error", err)
 		return
 	}
@@ -451,7 +453,7 @@ func (s *appState) initMemeService() {
 	svc := s.services
 	mautrixClient := svc.client.GetClient()
 
-	memeSvc := meme.NewService(&s.cfg.Meme)
+	memeSvc := meme.NewService(&s.cfg.Matrix.Meme)
 	svc.memeService = memeSvc
 
 	cs := svc.commandService
@@ -472,7 +474,7 @@ func (s *appState) initProactiveManager() (*ai.ProactiveManager, error) {
 	roomService := matrix.NewRoomService(s.services.client)
 
 	mgr, err := ai.NewProactiveManager(
-		&s.cfg.AI.Proactive,
+		&s.cfg.Matrix.Proactive,
 		s.services.aiService,
 		roomService,
 		nil,

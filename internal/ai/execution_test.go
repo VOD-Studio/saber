@@ -138,15 +138,13 @@ func TestTaskAutonomousDockerWorkflow(t *testing.T) {
 	require.NoError(t, err)
 	client.DefaultHTTPRetries = 0
 	commands := matrix.NewCommandService(client, "@bot:test", nil)
-	cfg := config.DefaultAIConfig()
-	cfg.Enabled = true
-	cfg.Provider = "openai"
-	cfg.BaseURL = model.URL
-	cfg.APIKey = "test"
-	cfg.DefaultModel = "local"
-	cfg.StreamEnabled = false
-	cfg.ToolCalling.MaxIterations = 6
-	cfg.ToolCalling.TimeoutSeconds = 30
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: model.URL, APIKey: "test"}}
+	cfg.AI.DefaultModel = "openai.local"
+	cfg.Agent.StreamEnabled = false
+	cfg.Agent.MaxIterations = 6
+	cfg.Agent.TimeoutSeconds = 30
 	service, err := NewService(&cfg, commands, nil, nil)
 	require.NoError(t, err)
 	defer service.Stop()
