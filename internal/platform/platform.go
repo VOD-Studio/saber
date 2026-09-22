@@ -21,6 +21,15 @@ type Platform interface {
 	Stop()
 }
 
+// TaskDelivery 是可选端口：能接收任务与定时计划结果的接入端实现它。
+//
+// 不把它并进 Platform 是因为并非每个入口都有「把一条长任务结果投回会话」的语义，
+// 强制实现只会让接入端编出一个没人调用的方法。
+type TaskDelivery interface {
+	// DeliveryAdapter 返回一次性投递用的出站 adapter。
+	DeliveryAdapter() chat.Adapter
+}
+
 // Registry 管理已注册的平台实现，并保留注册顺序作为启动顺序。
 type Registry struct {
 	platforms map[string]Platform

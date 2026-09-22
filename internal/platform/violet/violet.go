@@ -594,5 +594,8 @@ func jitter(base time.Duration) time.Duration {
 	return base + time.Duration(rand.Float64()*2*spread-spread)
 }
 
-// 确保实现满足平台接口。
-var _ platform.Platform = (*Platform)(nil)
+// 确保实现满足平台接口与可选的任务投递端口。
+var (
+	_ platform.Platform     = (*Platform)(nil)
+	_ platform.TaskDelivery = (*Platform)(nil)
+)

@@ -31,6 +31,7 @@ import (
 	"rua.plus/saber/internal/persona"
 	"rua.plus/saber/internal/platform"
 	platformmatrix "rua.plus/saber/internal/platform/matrix"
+	violetplatform "rua.plus/saber/internal/platform/violet"
 	"rua.plus/saber/internal/server"
 	"rua.plus/saber/internal/tui"
 )
@@ -330,18 +331,31 @@ func (s *appState) initServices() error {
 	if err := aiService.EnableTasks(filepath.Join(configDir, "tasks.db")); err != nil {
 		return fmt.Errorf("任务服务初始化失败: %w", err)
 	}
-	// 可选的 Matrix 功能只在启用该入口时装配。
+	// Matrix 作为平台接入端持有聊天命令入口与任务投递器，ai 核心不再构造平台 adapter。
+	// 命令入口暂时只有 Matrix 能挂：ai.ChatEntrypoint 既是单例 setter，签名又带 mautrix 类型。
+	if svc.client != nil {
+		matrixPlatform := platformmatrix.New(s.cfg, svc.commandService, svc.mediaService, aiService.HandleChatModel)
+		aiService.SetChatEntrypoint(matrixPlatform)
+		if err := s.registerPlatform(matrixPlatform, aiService); err != nil {
+			return err
+		}
+	}
+
+	// Violet 不挂命令入口，只接管「私聊直答 + 群聊被 @」这条最小链路。
+	// 注册必须留在下面 Matrix 专属装配的提前 return 之前：否则关掉 Matrix 就什么都注册不了。
+	if s.cfg.Platforms.Violet.Enabled {
+		if err := s.cfg.Platforms.Violet.Validate(); err != nil {
+			return fmt.Errorf("violet 平台配置无效: %w", err)
+		}
+		if err := s.registerPlatform(violetplatform.New(s.cfg), aiService); err != nil {
+			return err
+		}
+	}
+
+	// 可选的 Matrix 功能（人格、!ai 命令注册、主动聊天、meme）只在启用该入口时装配。
 	if svc.client == nil {
 		return nil
 	}
-
-	// Matrix 作为平台接入端持有聊天命令入口与任务投递器，ai 核心不再构造平台 adapter。
-	matrixPlatform := platformmatrix.New(s.cfg, svc.commandService, svc.mediaService, aiService.HandleChatModel)
-	aiService.SetChatEntrypoint(matrixPlatform)
-	if err := aiService.RegisterTaskDelivery(matrixPlatform.Name(), matrixPlatform.DeliveryAdapter()); err != nil {
-		return fmt.Errorf("matrix 平台任务投递注册失败: %w", err)
-	}
-	svc.platforms.Register(matrixPlatform)
 
 	// 初始化人格服务
 	s.initPersonaService()
@@ -359,6 +373,21 @@ func (s *appState) initServices() error {
 	// 初始化 Meme 服务
 	s.initMemeService()
 
+	return nil
+}
+
+// registerPlatform 接入一个聊天平台：能收任务结果的先注册投递器，然后进注册表等待 Start。
+//
+// 命令入口不在这里挂：那仍由 Matrix 独占（见 ai.ChatEntrypoint 的单例限制），
+// 新平台先按各自的触发规则走 HandleChat。没有实现 platform.TaskDelivery 的平台
+// 只接即时消息，任务与计划结果不会投到它那里。
+func (s *appState) registerPlatform(p platform.Platform, aiService *ai.Service) error {
+	if delivery, ok := p.(platform.TaskDelivery); ok {
+		if err := aiService.RegisterTaskDelivery(p.Name(), delivery.DeliveryAdapter()); err != nil {
+			return fmt.Errorf("%s 平台任务投递注册失败: %w", p.Name(), err)
+		}
+	}
+	s.services.platforms.Register(p)
 	return nil
 }
 
