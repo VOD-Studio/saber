@@ -74,6 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 平台注册不再被 Matrix 启用状态挡死：`internal/bot` 的 `initServices` 原先在 Matrix 客户端为空时提前返回，关掉 Matrix 后平台注册表永远是空的；现在 Matrix 与 Violet 各自按条件注册，人格服务、`!ai` 命令注册、主动聊天与 Meme 仍按原条件装配。新增可选端口 `platform.TaskDelivery`（`DeliveryAdapter`），`registerPlatform` 据此注册任务投递，没有该端口的平台只接即时消息；启用 violet 但 `platforms.violet` 不合法时在启动阶段直接报错，而不是只留一条平台 Start 失败的 warning
+
+
 - 优雅关闭的四路并行停止改用 `sync.WaitGroup.Go`：`internal/bot` 不再手写 `wg.Add(1)`/`defer wg.Done()`，关闭计数由标准库成对管理，消除编辑器/staticcheck 的 WaitGroup.Go 提示，行为与超时语义不变
 
 - 主动聊天的房间元数据改经平台端口 `ai.ProactiveRooms`：会话枚举与元数据统一由新增的 `chat.ConversationInfo` 描述，`internal/platform/matrix` 的 `Rooms` 包装 Matrix 房间服务作为参考实现，`internal/ai/proactive*.go` 不再依赖 `internal/matrix`；未命名会话的名称回退为会话标识，决策提示词与日志不再出现空房间名

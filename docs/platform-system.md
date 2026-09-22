@@ -194,7 +194,14 @@ platforms:
 
 向后兼容：保留顶层 `matrix:` 节作为别名，加载时映射到 `platforms.matrix`。
 
-### 7. HTTP API 增强
+> 实施注记（S6 现状）：落地时只做到了「新平台的配置一律在 `platforms.<name>`，
+> 注册表与启停完全由 `Config.PlatformEnabled` 决定」。Matrix 的明细配置仍在顶层
+> `matrix:` 节，`platforms.matrix` 尚未接管：直接把整节搬过去，会让只写了
+> `platforms.matrix.enabled` 的配置把其余字段的默认值一起覆盖掉，而用 `yaml.Node`
+> 局部解码又会丢掉现有 `KnownFields(true)` 的未知字段检查。这两条语义要先定清楚，
+> 属独立批次；接入端与配置读取仍按 `cfg.Matrix` 取值。
+
+### 7. HTTP API 增强（未实施）
 
 当前 `server.go` 中 `session()` 硬编码 `Platform: "terminal"`。改为支持请求指定平台（向后兼容）：
 
@@ -207,92 +214,40 @@ X-Sender-ID: user-uuid
 
 ## 新增平台适配器示例：Violet
 
-Violet 是一个全栈博客平台，内置聊天系统。Saber 通过 Violet Bot API 以 bot 身份接入。
+Violet 是一个全栈博客平台，内置聊天系统。Saber 通过 Violet Bot API 以 bot 虚拟用户身份接入，实现在 `internal/platform/violet`（包名 `violetplatform`）。端点与语义以 Violet 侧 `/api/v1/openapi.json` 的「聊天 Bot」标签为准：
 
-### 入站：SSE 订阅
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| GET | `/api/v1/chat/bot/profile` | 取 `user_id`/`username`：自回声过滤与被 @ 判定的依据 |
+| GET | `/api/v1/chat/bot/events` | SSE 事件流（入站） |
+| GET | `/api/v1/chat/bot/conversations` | 会话列表，首次连接用来打水位基线与预热形态缓存 |
+| GET | `/api/v1/chat/bot/conversations/{cid}` | 会话详情，主要取 `kind`（`direct`/`room`） |
+| GET | `/api/v1/chat/bot/conversations/{cid}/messages` | 历史（新→旧，cursor 分页），也是断线恢复通道 |
+| POST | `/api/v1/chat/bot/conversations/{cid}/messages` | 发文本消息，`Idempotency-Key` 头必填 |
+| PATCH | `/api/v1/chat/bot/conversations/{cid}/messages/{mid}` | 编辑自己的消息（流式定稿）；路径带 cid 是因为服务端按会话做归属校验 |
+| POST | `/api/v1/chat/bot/conversations/{cid}/typing` | 上报输入状态，204 无响应体 |
 
-Saber 订阅 Violet 的事件流，收到 bot 相关消息后构造 `chat.Message` 调用 `handler`：
+成功响应统一是 `{"data": ..., "meta": {"pagination": ...}}`，失败是 `{"error": CODE, "message": ...}`；接入端把状态码留在 `apiError` 里，因为 401/403（凭据问题，重试无用）与 5xx/网络错误（该退避重连）的处置完全不同。
 
-```go
-// internal/platform/violet/violet.go
+### 入站：SSE 订阅与断线补拉
 
-func (v *VioletPlatform) Start(ctx context.Context, handler chat.Handler) error {
-    go v.subscribeSSE(ctx, handler)
-    return nil
-}
+`violet.go` 的 `supervise` 维持「连接—读帧—退避重连」循环（1s 起、60s 封顶、带抖动），`sse.go` 按规范逐帧解析（多行 `data:` 以 LF 连接，注释与 `id:`/`retry:` 行忽略，未以空行收尾的残帧丢弃）。服务端每 30 秒发一次心跳注释帧，因此 90 秒没有字节就判定链路被掐断并重连。普通 API 请求带 `http_timeout_seconds` 总超时，事件流单独用不设总超时的 client——否则长连接会在超时那一刻被自己掐掉。
 
-func (v *VioletPlatform) subscribeSSE(ctx context.Context, handler chat.Handler) {
-    for {
-        req, _ := http.NewRequestWithContext(ctx, "GET",
-            v.endpoint+"/api/v1/chat/bot/events", nil)
-        req.Header.Set("Authorization", "Bearer "+v.botToken)
+`message.created` 的 data 自带消息全文，规范化成 `chat.Message` 时做四件事：
 
-        resp, err := v.client.Do(req)
-        if err != nil {
-            select {
-            case <-ctx.Done(): return
-            case <-time.After(reconnectDelay): continue
-            }
-        }
+1. `@(username:uuid)` 降级成 `@username`（uuid 对模型是噪声，@name 才是「在跟谁说话」），`@(all:all)` 降级成 `@all`；自定义表情 token `[name:uuid]` 原样保留
+2. 只有提及没有正文的消息（`mentionResidue` 为空）不触发回答
+3. `sender.id == profile.user_id` 的自回声、`type != text`、已删除、缺发送者的消息一律跳过——服务端已不向 bot 投递 bot 自己的消息，这里再挡一道
+4. 会话形态按 `kind` 决定：`direct` 受 `direct_chat_auto_reply` 控制，`room`（含形态查不到的情况）必须被点名且受 `group_chat_mention_reply` 控制。形态取不到时按群聊从严：宁可漏答一条私聊，也不要在没被 @ 的房间里插话
 
-        scanner := bufio.NewScanner(resp.Body)
-        for scanner.Scan() {
-            event := parseSSEEvent(scanner)
-            if event.Type == "message.created" {
-                msg := v.toChatMessage(event)
-                go handler(ctx, msg, v.adapter)
-            }
-        }
-        resp.Body.Close()
-    }
-}
+协议**不写 `id:` 行、不支持 `Last-Event-ID` 补发**，所以恢复通道是消息历史：每个会话记 `created_at` 水位，重连后按水位之后补拉（最多 2 页 × 50 条，超出只补最近部分并告警），反转成时间正序再入队，首次连接只打基线（否则每次启动都会把站内旧消息当新问题回答一遍）。SSE 与补拉必然重叠，因此入站先过一道按消息 ID 的有界去重集，再进 4 worker + 有界队列（满时背压等待而非丢弃）。
 
-func (v *VioletPlatform) toChatMessage(e BotEvent) chat.Message {
-    return chat.Message{
-        Session: chat.Session{
-            Platform:     "violet",
-            Account:       v.account,
-            Conversation:  e.ConversationID,
-        },
-        ID:       e.Message.ID,
-        SenderID: e.Message.SenderID,
-        Text:     e.Message.Content,
-        ReplyTo:  e.Message.ReplyToID,
-    }
-}
-```
+### 出站：`chat.Adapter`
 
-### 出站：`chat.Adapter` 实现
+`adapter.go` 声明 `Edit`/`Typing`/`Reply` 三项能力，`Send` 返回平台消息 ID 供后续编辑，`Reply.TransactionID` 原样作 `Idempotency-Key`（Violet 按 (会话, 发送者, 幂等键) 唯一，同键重发返回同一条消息；超过列宽 128 的键收敛为 SHA-256）。两处平台自己的约束：
 
-```go
-// internal/platform/violet/adapter.go
-
-type VioletAdapter struct {
-    endpoint string
-    token    string
-    client   *http.Client
-}
-
-func (a *VioletAdapter) Capabilities() chat.Capabilities {
-    return chat.Capabilities{Edit: true, Typing: true, Reply: true}
-}
-
-func (a *VioletAdapter) Send(ctx context.Context, reply chat.Reply) (string, error) {
-    // POST /api/v1/chat/bot/conversations/{conversationId}/messages
-    // body: { content, idempotency_key, reply_to_id }
-    // 返回 Violet 消息 ID
-}
-
-func (a *VioletAdapter) Edit(ctx context.Context, messageID string, reply chat.Reply) error {
-    // PATCH /api/v1/chat/bot/messages/{messageId}
-    // body: { content }
-}
-
-func (a *VioletAdapter) SetTyping(ctx context.Context, session chat.Session, active bool) error {
-    // POST /api/v1/chat/bot/conversations/{conversationId}/typing
-    // body: { is_typing: active }
-}
-```
+- 正文按 Unicode 字符截到 10000 以内并留截断标记，空白正文直接拒发（服务端要求去掉空白后非空）
+- 编辑有全局最小间隔节流（`edit_interval_ms`，默认 200ms ≈ 300 次/分钟配额）。超频时**等待**而不是丢弃：`Presenter.Finish` 的最终定稿也走 `Edit`，丢一次编辑就等于丢掉答案
 
 ### 消息流转
 
@@ -300,7 +255,8 @@ func (a *VioletAdapter) SetTyping(ctx context.Context, session chat.Session, act
 Violet SSE: message.created
     │
     ▼
-VioletPlatform.subscribeSSE
+violetplatform.Platform.supervise → connectOnce → readSSEFrames
+    │ admit（去重 + 推水位）→ 4 worker 队列 → normalizeMessage
     │ 构造 chat.Message
     ▼
 aiService.HandleChat(ctx, msg, violetAdapter)
@@ -313,10 +269,10 @@ conversation.Processor.Handle
     ▼
 chat.Presenter (流式回调)
     │
-    ├─ Send()    → POST /bot/.../messages → 创建占位消息
-    ├─ Edit()    → PATCH /bot/messages/{id} → 逐步更新
-    ├─ SetTyping → POST /bot/.../typing
-    └─ Finish()  → 最终 Edit 定稿
+    ├─ Send()    → POST /chat/bot/conversations/{cid}/messages（带 Idempotency-Key）→ 创建占位消息
+    ├─ Edit()    → PATCH /chat/bot/conversations/{cid}/messages/{mid} → 逐步更新（≥edit_interval_ms）
+    ├─ SetTyping → POST /chat/bot/conversations/{cid}/typing
+    └─ Finish()  → 最终 Edit 定稿（同一幂等节流路径，不可丢）
 ```
 
 ## 实施顺序
@@ -346,19 +302,35 @@ go test -tags goolm ./internal/ai -run TestService_HandleChat_MemoryWithoutMatri
 
 # 平台注册与启动
 go test -tags goolm ./internal/platform
+
+# 关掉 Matrix 也能注册并启动 violet（含 run() 起停）
+go test -tags goolm ./internal/bot -run Violet
+
+# Violet 接入端：假服务端覆盖 SSE/补拉/去重/提及剥离/自回声/节流/幂等
+go test -tags goolm -race -cover ./internal/platform/violet
 ```
+
+S8 还需要一台真实 Violet 实例（管理端 `/admin/chat-bots` 注册 bot 并取回明文凭据）做一次联调，逐项确认：
+
+1. 私聊直接提问能被回答，回答是原地编辑定稿的一条消息（不是刷屏多条）
+2. 群聊只有被 `@` 时回答；正文里的 `@(saber:uuid)` 以可读形式出现，不带 uuid
+3. 自己发的消息不会引来自答（自回声）
+4. 回答中途重启 Saber，重连后断线期间的提问被补答且只答一次；启动时不会回放旧消息
+5. 长回答不被限流打断（编辑间隔 ≥ 平台配额），超过 10000 字符的答案被截断而不是发送失败
+6. `!ai xxx` 被当提问回答，`!task`/`!schedule` 在本平台被跳过而不是一本正经地回答命令
 
 ## 新增平台清单
 
 开发者接入新聊天平台时：
 
-1. 在 `internal/platform/<name>/` 创建包
-2. 实现 `chat.Adapter`（出站：`Send`/`Edit`/`SetTyping`/`Capabilities`）
-3. 实现 `Platform.Start`（入站：订阅事件流 / 注册 webhook / sync loop）
-4. 在 `config.yaml` 的 `platforms.<name>` 下添加配置
-5. 在 `bot.go` 中 `reg.Register(<name>.New(cfg))`
-6. 如需 `!ai`/`!task` 等聊天命令：实现 `ai.ChatEntrypoint` 并 `aiService.SetChatEntrypoint(...)` + `aiService.RegisterTaskDelivery(name, adapter)`
-7. 如需主动聊天：实现 `ai.ProactiveRooms`（见下文）并在 `initProactiveManager` 注入
+1. 在 `internal/platform/<name>/` 创建包（包名沿用 `<name>platform`，目录名 `<name>`）
+2. 实现 `chat.Adapter`（出站：`Send`/`Edit`/`SetTyping`/`Capabilities`）。`chat.Reply.Text` 用 Markdown 书写，富文本渲染由 adapter 自己决定；`Reply.TransactionID` 非空时必须当作幂等键使用，任务重发才不会刷两遍屏
+3. 实现 `Platform.Start`（入站：订阅事件流 / 注册 webhook / sync loop）。把平台消息规范化成 `chat.Message` 后调用共享 handler：`ControlText` 只在平台有「引用回退包装」时给出，否则留 nil
+4. 在 `config.yaml` 的 `platforms.<name>` 下添加配置，并在 `config.Config.PlatformEnabled` 登记该平台的开关——注册表只认这个映射，未登记的平台即使注册了也不会启动
+5. 在 `internal/bot/bot.go` 的 `initServices` 里 `s.registerPlatform(<name>platform.New(s.cfg), aiService)`。注册点必须留在 Matrix 专属装配（人格、`!ai` 命令、主动聊天、meme）的提前 return 之前，否则关掉 Matrix 就什么都注册不了
+6. 如需接收任务与定时计划结果：实现可选端口 `platform.TaskDelivery`（`DeliveryAdapter() chat.Adapter`），`registerPlatform` 会据此注册投递器；不实现就只接即时消息
+7. 如需 `!ai`/`!task` 等聊天命令：实现 `ai.ChatEntrypoint` 并 `aiService.SetChatEntrypoint(...)`。当前它是**单例 setter 且签名带 mautrix `id.UserID`/`id.RoomID`**，同一进程只能挂一个平台（现在是 Matrix）；第二平台要挂命令入口，得先把这个端口改成平台无关并按平台名注册
+8. 如需主动聊天：实现 `ai.ProactiveRooms`（见下文）并在 `initProactiveManager` 注入。没有 notice 语义的平台要么把 `SendNotice` 降级成普通文本，要么像 Violet 一样干脆不接
 
 ## 实施进度
 
@@ -368,9 +340,10 @@ go test -tags goolm ./internal/platform
 | S2 解耦 `ai.Service` | 基本完成 | 函数式选项 `WithMatrix`/`WithMCP`；`PromptProvider` 用 `chat.Session`；`chat.Message.ControlText` 承接引用回退剥离；`handleAICommand`、`!task`/`!schedule` 与 `!ai` 子命令回执均经 `ChatEntrypoint`；主动聊天经 `ai.ProactiveRooms`；`ai` 内已无 `matrix.NewChatAdapter`，也不再调用 Matrix 普通消息发送；旧 `ResponseHandler`/`StreamEditor` 死代码已删除 |
 | S3 Matrix 平台接入端 | 进行中 | `internal/platform/matrix` 已持有账号、出站/投递 adapter、会话与事件定位、主动聊天房间端口（`Rooms`），并注册任务投递；同步循环与事件处理器注册仍在 `internal/bot` |
 | S4 Terminal 平台 | 未开始 | HTTP server 仍在 `bot.go` 直接 serve |
-| S5 `bot.go` 按配置启动平台 | 部分 | `run()` 已经过 `Registry.Enabled()` 启动并统一 `Stop`，仅注册了 matrix |
-| S6 配置结构迁移 | 未开始 | 仍为顶层 `matrix:` 节 |
-| S7/S8 Violet 与联调 | 未开始 | — |
+| S5 `bot.go` 按配置启动平台 | 已完成 | `run()` 经 `Registry.Enabled()` 启动并统一 `Stop`；注册表按 `platforms.<name>` 决定启停，注册点不再被 Matrix 的提前 return 挡死，已注册 matrix + violet |
+| S6 配置结构迁移 | 部分 | 新增 `platforms:` 节与 `Config.PlatformEnabled`，`platforms.terminal.enabled`、`platforms.violet.*` 已迁入；Matrix 明细仍在顶层 `matrix:` 节（见下文「配置结构」注） |
+| S7 Violet 适配器 | 已完成 | `internal/platform/violet`：SSE 订阅 + 断线按消息历史补拉 + 提及剥离 + 自回声过滤 + 幂等发送 + 编辑节流；单测覆盖 86.7% |
+| S8 联调验证 | 未开始 | 需要一台开好 Bot 凭据的真实 Violet 实例（`/admin/chat-bots` 注册），验证见文末「验收」 |
 
 `ai` 剩余的 Matrix 触点：`internal/ai/task_logs.go` 的任务文件上传（已由 `identity.Session.Platform == "matrix"` 限定），以及 `internal/ai/service.go` 为注册 Matrix 命令、绑定旧历史账号与上传任务文件而保留的 `WithMatrix`。普通文本消息的发送已全部改经平台端口，`internal/ai/proactive*.go` 也不再引用 `internal/matrix`（房间元数据与主动投递经 `ai.ProactiveRooms`）。
 
@@ -388,7 +361,9 @@ go test -tags goolm ./internal/platform
 | `OutboundAdapter` | 返回带平台展示能力（编辑、媒体）的出站 adapter |
 | `EventID` | 返回触发本次处理的原生事件标识，供回复定位与幂等键使用 |
 
-装配顺序见 `internal/bot/bot.go`：构造平台 → `aiService.SetChatEntrypoint` → `aiService.RegisterTaskDelivery` → `Registry.Register` → `Start(ctx, aiService.HandleChat)`。
+装配顺序见 `internal/bot/bot.go`：构造平台 → （Matrix 才有）`aiService.SetChatEntrypoint` → `s.registerPlatform` 按 `platform.TaskDelivery` 注册任务投递并 `Registry.Register` → `run()` 按 `Registry.Enabled()` 依次 `Start(ctx, aiService.HandleChat)`。
+
+`ai.ProactiveRooms` 与 `ai.ChatEntrypoint` 都是可选端口：Violet 两个都不挂，只走 `HandleChat`。`TaskDelivery`（`DeliveryAdapter`）也是可选端口，matrix 与 violet 都实现了它。
 
 ## 平台端口 `ai.ProactiveRooms`
 
@@ -407,3 +382,10 @@ Matrix 实现见 `internal/platform/matrix/rooms.go` 的 `Rooms`：它包装 `ma
 
 - `ai` 内部仍以 mautrix `id.RoomID` 作状态/频控/缓存键，`ProactiveManager` 对 Matrix 事件侧暴露的方法也仍收 `id.RoomID`，接入第二平台时需把状态键收敛为 `chat.Session`（与同步循环、事件处理器搬迁同批做）。
 - `SendText`/`SendNotice` 暂由本端口提供，因此主动消息还不走 `chat.Adapter` 的 Markdown 渲染；下一步应将投递归并到 `chat.Adapter`（需先给 `chat.Capabilities` 加 notice 能力），本端口只保留枚举与元数据。
+
+Violet 接入带出来的缺口（属有意取舍，不是待修的 bug）：
+
+- `ai.ChatEntrypoint` 是单例 setter 且签名带 mautrix 类型，命令入口目前由 Matrix 独占。Violet 因此只走 `HandleChat`：`!ai <内容>` 剥前缀当提问，`!task`/`!schedule`/上下文命令在本平台被跳过。要消掉这条，需要把端口改成平台无关 + 按平台名注册多个入口。
+- 任务产出的文件不投递：`internal/ai/task_logs.go` 的上传仍按 `Session.Platform == "matrix"` 限定，Violet 的 Bot API 也只开放文本消息，没有媒体上传通道。
+- 主动聊天不接 Violet：`ai.ProactiveRooms.SendNotice` 没有对等语义（Violet 聊天没有低优先级通知类型），房间元数据一侧的 `kind`/成员数虽然够用，接进来也得先决定 notice 怎么降级。
+- Matrix 的同步循环与事件处理器注册仍在 `internal/bot`，Violet 的连接生命周期则在平台接入端内部——两边对称之前，`Platform.Start` 的语义仍不统一（S3 未收尾的部分）。

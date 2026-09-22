@@ -1,6 +1,6 @@
 # Saber
 
-一个使用 Go 构建的 AI Agent，默认运行本机聊天服务，提供 Charm TUI，可选接入 Matrix。
+一个使用 Go 构建的 AI Agent，默认运行本机聊天服务，提供 Charm TUI，可选接入 Matrix 与 Violet 站内聊天。
 
 ## 功能特性
 
@@ -8,6 +8,8 @@
 
 - **Matrix 协议**: 通过 mautrix-go 完整支持 Matrix 协议
 - **端到端加密**: Matrix 可选的 E2EE 支持，使用 goolm（纯 Go 实现，无需 CGO）
+- **Violet 站内聊天**: 以 Bot API 的 bot 虚拟用户身份接入 Violet 博客的聊天系统，SSE 收消息、原地编辑做流式回复、断线按消息历史补拉（默认关闭，接入步骤见 [docs/platform-system.md](docs/platform-system.md)）
+- **可插拔平台层**: 平台按 `platforms.<name>.enabled` 启停，接入新平台不必改注册表与装配代码
 
 ### AI 功能
 
@@ -61,6 +63,10 @@ make build
 ```yaml
 matrix:
   enabled: false  # 可选聊天入口；接入 Matrix 时设为 true
+
+platforms:
+  violet:
+    enabled: false  # 可选聊天入口；endpoint 与 bot_token 在 Violet 管理端签发
 
 ai:
   enabled: true
