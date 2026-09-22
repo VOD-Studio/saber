@@ -256,6 +256,8 @@ func TestModelsCommand_Handle(t *testing.T) {
 			t.Fatalf("NewService error: %v", err)
 		}
 
+		wireMatrixPlatform(t, service, matrixSvc, nil)
+
 		cmd := NewModelsCommand(service)
 
 		ctx := context.Background()
@@ -283,6 +285,8 @@ func TestModelsCommand_Handle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
+
+		wireMatrixPlatform(t, service, matrixSvc, nil)
 
 		cmd := NewModelsCommand(service)
 
@@ -314,6 +318,8 @@ func TestSwitchModelCommand_Handle(t *testing.T) {
 			t.Fatalf("NewService error: %v", err)
 		}
 
+		wireMatrixPlatform(t, service, matrixSvc, nil)
+
 		cmd := NewSwitchModelCommand(service)
 
 		ctx := context.Background()
@@ -341,6 +347,8 @@ func TestSwitchModelCommand_Handle(t *testing.T) {
 			t.Fatalf("NewService error: %v", err)
 		}
 
+		wireMatrixPlatform(t, service, matrixSvc, nil)
+
 		cmd := NewSwitchModelCommand(service)
 
 		ctx := context.Background()
@@ -367,6 +375,8 @@ func TestSwitchModelCommand_Handle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
+
+		wireMatrixPlatform(t, service, matrixSvc, nil)
 
 		cmd := NewSwitchModelCommand(service)
 
@@ -401,6 +411,8 @@ func TestSwitchModelCommand_Handle(t *testing.T) {
 			t.Fatalf("NewService error: %v", err)
 		}
 
+		wireMatrixPlatform(t, service, matrixSvc, nil)
+
 		cmd := NewSwitchModelCommand(service)
 
 		ctx := context.Background()
@@ -432,6 +444,8 @@ func TestCurrentModelCommand_Handle(t *testing.T) {
 			t.Fatalf("NewService error: %v", err)
 		}
 
+		wireMatrixPlatform(t, service, matrixSvc, nil)
+
 		cmd := NewCurrentModelCommand(service)
 
 		ctx := context.Background()
@@ -458,6 +472,8 @@ func TestCurrentModelCommand_Handle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
+
+		wireMatrixPlatform(t, service, matrixSvc, nil)
 
 		// 先切换模型
 		registry := service.GetModelRegistry()

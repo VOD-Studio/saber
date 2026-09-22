@@ -59,7 +59,8 @@ type Service struct {
 
 	// core 是共享核心逻辑。
 	core *Core
-	// matrixService 是 Matrix 命令服务，用于发送消息。
+	// matrixService 保留 Matrix 专属兼容入口：注册 !task/!schedule 命令、取 BotID 作为
+	// 旧历史键的账号，以及上传任务文件；普通文本回执已改经平台端口发送。
 	matrixService *matrix.CommandService
 	// contextManager 是对话上下文管理器。
 	contextManager *ContextManager
@@ -95,7 +96,8 @@ type serviceOptions struct {
 }
 
 // WithMatrix 注入 Matrix 命令与媒体服务，是 Matrix 专属的兼容入口，
-// 后续由 Matrix 平台接入端持有。两者均可传 nil。
+// 仅用于命令注册、旧历史账号与任务文件上传；不再承担普通消息发送。
+// 两者均可传 nil。
 func WithMatrix(matrixService *matrix.CommandService, mediaService *matrix.MediaService) ServiceOption {
 	return func(o *serviceOptions) {
 		o.matrixService = matrixService
@@ -455,6 +457,18 @@ func (s *Service) Session(ctx context.Context, roomID id.RoomID) (chat.Session, 
 		return chat.Session{}, ErrNoChatEntrypoint
 	}
 	return s.entry.Session(ctx, roomID), nil
+}
+
+// replyCommand 经注入的平台入口把一次性回执发回命令所在会话。
+// text 使用 Markdown 书写，具体渲染（如 Matrix 的 HTML 富文本）由平台 adapter 完成；
+// 未接入平台时返回 ErrNoChatEntrypoint。
+func (s *Service) replyCommand(ctx context.Context, userID id.UserID, roomID id.RoomID, command, text string) error {
+	message, adapter, err := s.NormalizeCommand(ctx, userID, roomID, command)
+	if err != nil {
+		return err
+	}
+	_, err = adapter.Send(ctx, chat.Reply{Session: message.Session, ReplyTo: message.ID, Text: text})
+	return err
 }
 
 // HandleChat 是内存或其他聊天 adapter 可复用的统一消息入口。

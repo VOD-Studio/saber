@@ -169,3 +169,100 @@ func TestChatAdapter_RelationsAndAccountGuard(t *testing.T) {
 		t.Fatal("editing disabled but accepted")
 	}
 }
+
+// TestChatAdapter_SendRendersMarkdown 验证通用回复的 Markdown 由 Matrix 接入端渲染：
+// body 保留原文供纯文本客户端回退，formatted_body 承载渲染结果，
+// 正文里的原始 HTML 必须被转义而不是当作可信标记。
+func TestChatAdapter_SendRendersMarkdown(t *testing.T) {
+	var mu sync.Mutex
+	var sent []event.MessageEventContent
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/send/") {
+			var content event.MessageEventContent
+			if err := json.NewDecoder(r.Body).Decode(&content); err != nil {
+				t.Error(err)
+			}
+			mu.Lock()
+			sent = append(sent, content)
+			mu.Unlock()
+			if _, err := fmt.Fprint(w, `{"event_id":"$out"}`); err != nil {
+				t.Error(err)
+			}
+			return
+		}
+		if _, err := fmt.Fprint(w, `{"event_id":"$out"}`); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	client, err := mautrix.NewClient(server.URL, "@bot:local", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := matrix.NewCommandService(client, "@bot:local", &matrix.BuildInfo{})
+	adapter := matrix.NewChatAdapter(commands, nil, config.MediaConfig{}, true, nil)
+	session := chat.Session{Platform: "matrix", Account: "@bot:local", Conversation: "!room:local"}
+	for _, text := range []string{"**粗体** 与 <script>alert(1)</script>", "纯文本一行"} {
+		if _, err := adapter.Send(context.Background(), chat.Reply{Session: session, Text: text}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) != 2 {
+		t.Fatalf("发送条数 = %d, want 2", len(sent))
+	}
+	rich, plain := sent[0], sent[1]
+	if rich.Body != "**粗体** 与 <script>alert(1)</script>" {
+		t.Fatalf("body 应保留 Markdown 原文: %q", rich.Body)
+	}
+	if rich.Format != event.FormatHTML || !strings.Contains(rich.FormattedBody, "<strong>粗体</strong>") {
+		t.Fatalf("formatted_body 未渲染 Markdown: %+v", rich)
+	}
+	if strings.Contains(rich.FormattedBody, "<script>") || !strings.Contains(rich.FormattedBody, "&lt;script&gt;") {
+		t.Fatalf("原始 HTML 未被转义: %q", rich.FormattedBody)
+	}
+	if plain.Format != "" || plain.FormattedBody != "" || plain.Body != "纯文本一行" {
+		t.Fatalf("无标记正文不应产生富文本: %+v", plain)
+	}
+}
+
+// TestChatAdapter_EditRendersMarkdown 验证流式定稿编辑也渲染 Markdown，
+// 否则临时消息有格式、最终消息退回纯文本。
+func TestChatAdapter_EditRendersMarkdown(t *testing.T) {
+	var mu sync.Mutex
+	var sent []event.MessageEventContent
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var content event.MessageEventContent
+		if err := json.NewDecoder(r.Body).Decode(&content); err != nil {
+			t.Error(err)
+		}
+		mu.Lock()
+		sent = append(sent, content)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := fmt.Fprint(w, `{"event_id":"$out"}`); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	client, err := mautrix.NewClient(server.URL, "@bot:local", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := matrix.NewCommandService(client, "@bot:local", &matrix.BuildInfo{})
+	adapter := matrix.NewChatAdapter(commands, nil, config.MediaConfig{}, true, nil)
+	session := chat.Session{Platform: "matrix", Account: "@bot:local", Conversation: "!room:local"}
+	if err := adapter.Edit(context.Background(), "$prev", chat.Reply{Session: session, Text: "| A | B |\n| - | - |\n| 1 | 2 |"}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) != 1 || sent[0].NewContent == nil {
+		t.Fatalf("未发出替换消息: %+v", sent)
+	}
+	if !strings.Contains(sent[0].NewContent.FormattedBody, "<table>") {
+		t.Fatalf("编辑内容未渲染表格: %+v", sent[0].NewContent)
+	}
+}

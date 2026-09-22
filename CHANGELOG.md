@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Matrix 出站消息按 Markdown 渲染：`chat.Adapter` 的回复正文约定为 Markdown，`matrix.ChatAdapter` 用 mautrix 渲染为 `formatted_body`（含表格与删除线），`body` 保留 Markdown 原文供纯文本客户端回退；模型输出里的原始 HTML 一律转义，不会当作可信标记，AI 正文回复与任务投递同样受益
+
 - 新增 `internal/platform/matrix` 平台接入端：持有 Matrix 账号，向 `ai` 注入聊天命令入口（`ai.ChatEntrypoint`）并注册任务结果投递器，Matrix 的 `!ai`/`!task run`/私聊与提及回复不再由 `ai` 核心构造平台 adapter
 
 - 新增 `internal/platform` 包：定义可插拔聊天平台接入端的 `Platform` 接口与 `Registry` 注册表，为后续解耦 `ai.Service` 与 Matrix、接入 Violet 等新平台提供统一入口
@@ -65,6 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 回复任务回执时使用原始正文识别取消等控制指令，控制识别使用去除 Matrix 引用回退后的新正文，避免控制操作排入执行队列
 
 ### Changed
+
+- `!ai clear/context/models/switch/current` 的回执改经平台注入的 `ChatEntrypoint` adapter 发出并以 Markdown 书写：`internal/ai` 不再调用 `matrix.CommandService` 的任何普通消息发送方法，`WithMatrix` 只剩命令注册、旧历史账号与任务文件上传；未接入平台时统一返回 `ai.ErrNoChatEntrypoint`，不再因 nil 命令服务 panic
 
 - 删除 `ai` 中已无调用方的旧响应链路（`ResponseHandler`、`StreamEditor`、`SmartStreamHandler` 与 `ResponseContext`/`ResponseMode`）：自统一 Agent 运行时接入后 `Service.respHandler` 仅构造不使用，流式展示已全部由 `conversation.Processor` 与 `chat.Adapter` 承担；`internal/ai` 因此不再直接发送 Matrix 事件回复、typing 与 `m.replace` 关系
 

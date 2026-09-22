@@ -8,6 +8,7 @@ import (
 
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/format"
 	"maunium.net/go/mautrix/id"
 	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
@@ -110,8 +111,9 @@ func (a *ChatAdapter) Send(ctx context.Context, reply chat.Reply) (string, error
 	if err := a.validate(ctx, reply.Session); err != nil {
 		return "", err
 	}
-	relates := chatReplyRelation(reply)
-	messageID, err := a.service.sendTextWithOptions(ctx, id.RoomID(reply.Session.Conversation), reply.Text, relates, mautrix.ReqSendEvent{TransactionID: reply.TransactionID})
+	content := matrixTextContent(reply.Text)
+	content.RelatesTo = chatReplyRelation(reply)
+	messageID, err := a.service.sendContentWithOptions(ctx, id.RoomID(reply.Session.Conversation), content, mautrix.ReqSendEvent{TransactionID: reply.TransactionID})
 	return string(messageID), err
 }
 
@@ -126,14 +128,30 @@ func (a *ChatAdapter) Edit(ctx context.Context, messageID string, reply chat.Rep
 	if messageID == "" {
 		return errors.New("matrix edit requires a message ID")
 	}
-	// 新内容保留原回复和线程关系，外层仅表示替换哪条消息。
+	// 新内容保留原回复和线程关系并渲染 Markdown；外层只表示替换哪条消息，
+	// 前缀星号在 Markdown 里是列表记号，因此不参与渲染。
+	updated := matrixTextContent(reply.Text)
+	updated.RelatesTo = chatReplyRelation(reply)
 	content := &event.MessageEventContent{
-		MsgType: event.MsgText, Body: "* " + reply.Text,
+		MsgType:    event.MsgText,
+		Body:       "* " + reply.Text,
 		RelatesTo:  &event.RelatesTo{Type: event.RelReplace, EventID: id.EventID(messageID)},
-		NewContent: &event.MessageEventContent{MsgType: event.MsgText, Body: reply.Text, RelatesTo: chatReplyRelation(reply)},
+		NewContent: updated,
 	}
 	_, err := a.service.client.SendMessageEvent(ctx, id.RoomID(reply.Session.Conversation), event.EventMessage, content)
 	return err
+}
+
+// matrixTextContent 把通用回复正文转为 Matrix 消息内容：
+// body 保留 Markdown 原文供不支持富文本的客户端回退，
+// 渲染出的 HTML 放入 formatted_body；正文里的原始 HTML 会被转义，不信任模型输出。
+func matrixTextContent(text string) *event.MessageEventContent {
+	content := &event.MessageEventContent{MsgType: event.MsgText, Body: text}
+	if rendered := format.RenderMarkdown(text, true, false); rendered.FormattedBody != "" {
+		content.Format = rendered.Format
+		content.FormattedBody = rendered.FormattedBody
+	}
+	return content
 }
 
 // SetTyping 将通用输入状态转换为 Matrix typing 请求。

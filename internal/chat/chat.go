@@ -114,11 +114,13 @@ type Reply struct {
 	Session Session
 	// ReplyTo 是被回复的消息 ID。
 	ReplyTo string
-	// Text 是当前完整内容，编辑时也使用完整内容。
+	// Text 是当前完整内容，编辑时也使用完整内容；以 Markdown 书写，
+	// 富文本渲染由平台 adapter 自行决定，内容来自模型或用户时不可当作可信标记。
 	Text string
 }
 
 // Adapter 实现平台发送能力；不支持的可选方法不会被调用。
+// Send 与 Edit 收到的是 Markdown 正文，需要富文本的平台自行渲染并保留纯文本回退。
 type Adapter interface {
 	// Capabilities 返回该账号的展示能力。
 	Capabilities() Capabilities

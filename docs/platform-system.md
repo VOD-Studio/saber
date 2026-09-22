@@ -363,14 +363,16 @@ go test -tags goolm ./internal/platform
 | 阶段 | 状态 | 落点 |
 |---|---|---|
 | S1 `platform` 接口与注册表 | 已完成 | `internal/platform/platform.go` |
-| S2 解耦 `ai.Service` | 基本完成 | 函数式选项 `WithMatrix`/`WithMCP`；`PromptProvider` 用 `chat.Session`；`chat.Message.ControlText` 承接引用回退剥离；`handleAICommand` 与只读命令经 `ChatEntrypoint`；`ai` 内已无 `matrix.NewChatAdapter`；旧 `ResponseHandler`/`StreamEditor` 死代码已删除 |
+| S2 解耦 `ai.Service` | 基本完成 | 函数式选项 `WithMatrix`/`WithMCP`；`PromptProvider` 用 `chat.Session`；`chat.Message.ControlText` 承接引用回退剥离；`handleAICommand`、`!task`/`!schedule` 与 `!ai` 子命令回执均经 `ChatEntrypoint`；`ai` 内已无 `matrix.NewChatAdapter`，也不再调用 Matrix 普通消息发送；旧 `ResponseHandler`/`StreamEditor` 死代码已删除 |
 | S3 Matrix 平台接入端 | 进行中 | `internal/platform/matrix` 已持有账号、出站/投递 adapter、会话与事件定位，并注册任务投递；同步循环与事件处理器注册仍在 `internal/bot` |
 | S4 Terminal 平台 | 未开始 | HTTP server 仍在 `bot.go` 直接 serve |
 | S5 `bot.go` 按配置启动平台 | 部分 | `run()` 已经过 `Registry.Enabled()` 启动并统一 `Stop`，仅注册了 matrix |
 | S6 配置结构迁移 | 未开始 | 仍为顶层 `matrix:` 节 |
 | S7/S8 Violet 与联调 | 未开始 | — |
 
-`ai` 剩余的 Matrix 触点：`internal/ai/commands.go`、`internal/ai/model_commands.go` 的只读命令回执（`SendText`/`SendFormattedText`）、`internal/ai/task_logs.go` 的任务文件上传（已由 `identity.Session.Platform == "matrix"` 限定）、`internal/ai/proactive*.go` 的房间元数据（`RoomService`/`RoomInfo`），以及 `internal/ai/service.go` 为注册 Matrix 命令与取 `BotID` 而保留的 `WithMatrix`。
+`ai` 剩余的 Matrix 触点：`internal/ai/task_logs.go` 的任务文件上传（已由 `identity.Session.Platform == "matrix"` 限定）、`internal/ai/proactive*.go` 的房间元数据（`RoomService`/`RoomInfo`），以及 `internal/ai/service.go` 为注册 Matrix 命令、绑定旧历史账号与上传任务文件而保留的 `WithMatrix`。普通文本消息的发送已全部改经平台端口。
+
+出站正文的格式约定：`chat.Reply.Text` 以 Markdown 书写，渲染由平台 adapter 完成（Matrix 用 `format.RenderMarkdown` 转成 `org.matrix.custom.html`，并把原始 HTML 转义），`ai` 内不再出现任何平台标记语言。
 
 ## 平台端口 `ai.ChatEntrypoint`
 

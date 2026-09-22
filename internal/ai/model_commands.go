@@ -41,50 +41,27 @@ func (c *ModelsCommand) Handle(ctx context.Context, userID id.UserID, roomID id.
 	configDefault := registry.GetConfigDefault()
 
 	if len(models) == 0 {
-		return c.service.matrixService.SendText(ctx, roomID, "没有配置任何模型")
+		return c.service.replyCommand(ctx, userID, roomID, "!ai models", "没有配置任何模型")
 	}
 
-	var htmlRows []string
-	var plainRows []string
+	var rows strings.Builder
 
 	for _, m := range models {
 		status := ""
 		if m.ID == currentDefault {
-			status = " ⭐ 当前默认"
+			status = "⭐ 当前默认"
 		}
 		if m.IsConfigDefault && m.ID != currentDefault {
-			status = " 📝 配置默认"
+			status = "📝 配置默认"
 		}
 
-		htmlRows = append(htmlRows, fmt.Sprintf(
-			`<tr><td><code>%s</code></td><td><code>%s</code></td><td>%s</td></tr>`,
-			m.ID, m.Model, status,
-		))
-		plainRows = append(plainRows, fmt.Sprintf(
-			"• %s → %s%s",
-			m.ID, m.Model, status,
-		))
+		fmt.Fprintf(&rows, "| `%s` | `%s` | %s |\n", m.ID, m.Model, status)
 	}
 
-	html := fmt.Sprintf(`<table>
-<thead><tr><th>模型 ID</th><th>实际模型</th><th>状态</th></tr></thead>
-<tbody>
-%s
-</tbody>
-</table>
-<p>共 %d 个模型 | 配置默认: <code>%s</code></p>`,
-		strings.Join(htmlRows, "\n"),
-		len(models),
-		configDefault,
-	)
-
-	plain := fmt.Sprintf("📋 可用模型列表 (共 %d 个):\n%s\n配置默认: %s",
-		len(models),
-		strings.Join(plainRows, "\n"),
-		configDefault,
-	)
-
-	return c.service.matrixService.SendFormattedText(ctx, roomID, html, plain)
+	return c.service.replyCommand(ctx, userID, roomID, "!ai models", fmt.Sprintf(
+		"**📋 可用模型列表**（共 %d 个）\n\n| 模型 ID | 实际模型 | 状态 |\n| --- | --- | --- |\n%s\n配置默认：`%s`",
+		len(models), rows.String(), configDefault,
+	))
 }
 
 // SwitchModelCommand 处理切换默认模型的命令。
@@ -117,32 +94,21 @@ func (c *SwitchModelCommand) Handle(ctx context.Context, userID id.UserID, roomI
 	registry := c.service.GetModelRegistry()
 
 	if len(args) == 0 || args[0] == "" {
-		html := "<strong>❌ 请指定模型 ID</strong><br>用法: <code>!ai switch &lt;model-id&gt;</code>"
-		plain := "❌ 请指定模型 ID\n用法: !ai switch <model-id>"
-		return c.service.matrixService.SendFormattedText(ctx, roomID, html, plain)
+		return c.service.replyCommand(ctx, userID, roomID, "!ai switch", "**❌ 请指定模型 ID**\n用法：`!ai switch <model-id>`")
 	}
 
 	modelID := args[0]
 	oldDefault := registry.GetDefault()
 
 	if err := registry.SetDefault(modelID); err != nil {
-		html := fmt.Sprintf("<strong>❌ 切换模型失败:</strong> %s", err.Error())
-		plain := fmt.Sprintf("❌ 切换模型失败: %s", err.Error())
-		return c.service.matrixService.SendFormattedText(ctx, roomID, html, plain)
+		return c.service.replyCommand(ctx, userID, roomID, "!ai switch", "**❌ 切换模型失败：** "+err.Error())
 	}
 
 	newDefault := registry.GetDefault()
-	html := fmt.Sprintf(`<strong>✅ 默认模型已切换</strong>
-<table>
-<tr><td>原模型:</td><td><code>%s</code></td></tr>
-<tr><td>新模型:</td><td><code>%s</code></td></tr>
-</table>
-<p><em>注意: 重启后将恢复配置文件中的默认模型</em></p>`,
-		oldDefault, newDefault)
-	plain := fmt.Sprintf("✅ 默认模型已切换\n原模型: %s\n新模型: %s\n注意: 重启后将恢复配置文件中的默认模型",
-		oldDefault, newDefault)
-
-	return c.service.matrixService.SendFormattedText(ctx, roomID, html, plain)
+	return c.service.replyCommand(ctx, userID, roomID, "!ai switch", fmt.Sprintf(
+		"**✅ 默认模型已切换**\n- 原模型：`%s`\n- 新模型：`%s`\n\n*注意：重启后将恢复配置文件中的默认模型*",
+		oldDefault, newDefault,
+	))
 }
 
 // CurrentModelCommand 处理显示当前默认模型的命令。
@@ -180,22 +146,11 @@ func (c *CurrentModelCommand) Handle(ctx context.Context, userID id.UserID, room
 
 	var statusText string
 	if isModified {
-		statusText = " (已修改，重启后恢复)"
+		statusText = "（已修改，重启后恢复）"
 	}
 
-	html := fmt.Sprintf(`<table>
-<thead><tr><th colspan="2">🤖 当前默认模型</th></tr></thead>
-<tbody>
-<tr><td>当前模型:</td><td><code>%s</code></td></tr>
-<tr><td>配置默认:</td><td><code>%s</code></td></tr>
-</tbody>
-</table>`,
-		currentDefault+statusText,
-		configDefault,
-	)
-
-	plain := fmt.Sprintf("🤖 当前默认模型: %s%s\n配置默认: %s",
-		currentDefault, statusText, configDefault)
-
-	return c.service.matrixService.SendFormattedText(ctx, roomID, html, plain)
+	return c.service.replyCommand(ctx, userID, roomID, "!ai current", fmt.Sprintf(
+		"**🤖 当前默认模型**\n- 当前模型：`%s`\n- 配置默认：`%s`",
+		currentDefault+statusText, configDefault,
+	))
 }

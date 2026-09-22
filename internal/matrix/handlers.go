@@ -695,7 +695,6 @@ func (s *CommandService) sendTextWithOptions(ctx context.Context, roomID id.Room
 		MsgType: event.MsgText,
 		Body:    body,
 	}
-
 	if relatesTo != nil {
 		content.RelatesTo = relatesTo
 		if relatesTo.Type == event.RelReplace {
@@ -704,26 +703,32 @@ func (s *CommandService) sendTextWithOptions(ctx context.Context, roomID id.Room
 				Body:    body,
 			}
 		}
-		// 如果是回复消息，自动添加 fallback 文本
-		if relatesTo.InReplyTo != nil {
-			senderID := id.UserID("")
-			originalMsg := ""
+	}
+	return s.sendContentWithOptions(ctx, roomID, content, options...)
+}
 
-			if evt, err := s.client.GetEvent(ctx, roomID, relatesTo.InReplyTo.EventID); err == nil {
-				senderID = evt.Sender
-				if msgContent, ok := evt.Content.Parsed.(*event.MessageEventContent); ok {
-					originalMsg = msgContent.Body
-				}
-			} else {
-				slog.Debug("Failed to get original event for reply fallback",
-					"room", roomID.String(),
-					"event_id", relatesTo.InReplyTo.EventID.String(),
-					"error", err)
-				senderID = id.UserID(relatesTo.InReplyTo.EventID.String())
+// sendContentWithOptions 发送已构造好的消息内容。
+// 引用回复时按 Matrix 规范在纯文本 body 前补齐回退引用，不动已渲染的 formatted_body。
+func (s *CommandService) sendContentWithOptions(ctx context.Context, roomID id.RoomID, content *event.MessageEventContent, options ...mautrix.ReqSendEvent) (id.EventID, error) {
+	// 如果是回复消息，自动添加 fallback 文本
+	if replyTo := content.RelatesTo.GetReplyTo(); replyTo != "" {
+		senderID := id.UserID("")
+		originalMsg := ""
+
+		if evt, err := s.client.GetEvent(ctx, roomID, replyTo); err == nil {
+			senderID = evt.Sender
+			if msgContent, ok := evt.Content.Parsed.(*event.MessageEventContent); ok {
+				originalMsg = msgContent.Body
 			}
-
-			content.Body = CreateReplyFallback(senderID, originalMsg, body)
+		} else {
+			slog.Debug("Failed to get original event for reply fallback",
+				"room", roomID.String(),
+				"event_id", replyTo.String(),
+				"error", err)
+			senderID = id.UserID(replyTo.String())
 		}
+
+		content.Body = CreateReplyFallback(senderID, originalMsg, content.Body)
 	}
 
 	resp, err := s.client.SendMessageEvent(
@@ -734,9 +739,7 @@ func (s *CommandService) sendTextWithOptions(ctx context.Context, roomID id.Room
 		options...,
 	)
 	if err != nil {
-		slog.Error("Failed to send message with relatesTo",
-			"room", roomID.String(),
-			"error", err)
+		slog.Error("Failed to send message", "room", roomID.String(), "error", err)
 		return "", err
 	}
 

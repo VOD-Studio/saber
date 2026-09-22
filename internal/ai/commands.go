@@ -101,7 +101,7 @@ func NewClearContextCommand(service *Service) *ClearContextCommand {
 //   - error: 处理过程中发生的错误
 func (c *ClearContextCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
 	if c.service.contextManager == nil {
-		return c.service.matrixService.SendText(ctx, roomID, "上下文管理未启用")
+		return c.service.replyCommand(ctx, userID, roomID, "!ai clear", "上下文管理未启用")
 	}
 
 	session, err := c.service.Session(ctx, roomID)
@@ -112,9 +112,7 @@ func (c *ClearContextCommand) Handle(ctx context.Context, userID id.UserID, room
 		return err
 	}
 
-	html := "<strong>✅ 对话上下文已清除</strong>"
-	plain := "✅ 对话上下文已清除"
-	return c.service.matrixService.SendFormattedText(ctx, roomID, html, plain)
+	return c.service.replyCommand(ctx, userID, roomID, "!ai clear", "**✅ 对话上下文已清除**")
 }
 
 // ContextInfoCommand 处理查询对话上下文信息的命令。
@@ -145,7 +143,7 @@ func NewContextInfoCommand(service *Service) *ContextInfoCommand {
 //   - error: 处理过程中发生的错误
 func (c *ContextInfoCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
 	if c.service.contextManager == nil {
-		return c.service.matrixService.SendText(ctx, roomID, "上下文管理未启用")
+		return c.service.replyCommand(ctx, userID, roomID, "!ai context", "上下文管理未启用")
 	}
 
 	session, err := c.service.Session(ctx, roomID)
@@ -154,15 +152,8 @@ func (c *ContextInfoCommand) Handle(ctx context.Context, userID id.UserID, roomI
 	}
 	msgCount, tokenCount := c.service.contextManager.history.GetContextSize(session.Key())
 
-	html := `<table>
-<thead><tr><th colspan="2">📊 对话上下文信息</th></tr></thead>
-<tbody>
-<tr><td>消息数量</td><td><strong>%d</strong></td></tr>
-<tr><td>估算令牌数</td><td><strong>%d</strong></td></tr>
-</tbody></table>`
-	html = fmt.Sprintf(html, msgCount, tokenCount)
-
-	plain := fmt.Sprintf("📊 对话上下文信息\n- 消息数量：%d\n- 估算令牌数：%d", msgCount, tokenCount)
-
-	return c.service.matrixService.SendFormattedText(ctx, roomID, html, plain)
+	return c.service.replyCommand(ctx, userID, roomID, "!ai context", fmt.Sprintf(
+		"**📊 对话上下文信息**\n\n| 项目 | 数值 |\n| --- | --- |\n| 消息数量 | `%d` |\n| 估算令牌数 | `%d` |",
+		msgCount, tokenCount,
+	))
 }
