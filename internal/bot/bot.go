@@ -270,6 +270,9 @@ func (s *appState) initCrypto(client *matrix.MatrixClient) {
 // 返回错误而非调用 os.Exit，支持测试和优雅关闭。
 func (s *appState) initServices() error {
 	svc := s.services
+	// 平台注册表与 AI 是否启用无关：run() 与 shutdown() 都会遍历它，
+	// 缺少这一步时关闭 AI 会拿到 nil 注册表并 panic。
+	svc.platforms = platform.NewRegistry()
 
 	if !s.cfg.AI.Enabled {
 		return nil
@@ -326,7 +329,6 @@ func (s *appState) initServices() error {
 	if err := aiService.EnableTasks(filepath.Join(configDir, "tasks.db")); err != nil {
 		return fmt.Errorf("任务服务初始化失败: %w", err)
 	}
-	svc.platforms = platform.NewRegistry()
 	// 可选的 Matrix 功能只在启用该入口时装配。
 	if svc.client == nil {
 		return nil

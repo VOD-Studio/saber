@@ -43,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `ai.enabled: false` 时启动不再 panic：`initServices` 提前返回使平台注册表保持 nil，`run()` 调用 `Registry.Enabled` 会空指针崩溃（同时带走 `internal/bot` 整包测试），现无论 AI 是否启用先建注册表
+
 - 上下文预算应用于持久化续聊和每次模型调用，按完整轮次裁剪并同步清理 Responses 推理数据；保留数据库历史，当前输入过大时明确终止
 - 模型温度支持显式零值，备用模型使用自己的输出预算和温度；熔断状态跨任务保留，MCP 关闭时不加载内置服务器
 

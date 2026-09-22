@@ -52,6 +52,20 @@ func TestServer_SharedServicesWithoutMatrix(t *testing.T) {
 	require.NotNil(t, state.services.aiService.Tasks())
 }
 
+// TestInitServices_PlatformRegistryWithoutAI 验证关闭 AI 时平台注册表仍就绪：
+// run() 会在 initServices 后直接遍历 Enabled()，注册表为 nil 时会 panic。
+func TestInitServices_PlatformRegistryWithoutAI(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.AI.Enabled = false
+	cfg.Matrix.Enabled = false
+	state := &appState{cfg: cfg, flags: &cli.Flags{ConfigPath: filepath.Join(t.TempDir(), "config.yaml")}, services: &services{}}
+
+	require.NoError(t, state.initServices())
+	require.NotNil(t, state.services.platforms)
+	require.Empty(t, state.services.platforms.Enabled(cfg))
+	state.shutdown(func() {})
+}
+
 func TestExampleConfig_DefaultsToServer(t *testing.T) {
 	path := createTestConfigFile(t, config.ExampleConfig())
 	cfg, err := config.Load(path)
