@@ -3,9 +3,9 @@ package bot
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -129,177 +129,92 @@ func TestBuildInfo_PartialValues(t *testing.T) {
 	}
 }
 
-// TestRun_VersionFlag 使用子进程测试 version 标志的处理。
-// 由于 Run 函数调用 os.Exit，我们需要通过子进程来测试退出码。
+// TestRun_VersionFlag 验证 version 标志打印构建信息并以 0 退出。
+//
+// initConfig 返回 ExitCodeError 而非调用 os.Exit，因此直接在进程内调用即可断言，
+// 不再「go build 出 ad-hoc 签名二进制再 exec」——该模式在 macOS 上会被 AMFI 与
+// 终端安全软件间歇 SIGKILL（退出码 -1、无任何输出），导致本机测试抖动。
 func TestRun_VersionFlag(t *testing.T) {
-	// 跳过短测试模式，因为子进程测试较慢
-	if testing.Short() {
-		t.Skip("跳过子进程测试")
+	state := &appState{info: matrix.BuildInfo{
+		Version:       "9.9.9-test",
+		GitCommit:     "abc123",
+		GitBranch:     "test",
+		BuildTime:     "2024-01-01",
+		GoVersion:     "go1.27.1",
+		BuildPlatform: "linux/arm64",
+	}}
+
+	var out bytes.Buffer
+	err := state.initConfig([]string{"-version"}, &out)
+
+	code, ok := IsExitCode(err)
+	if !ok || code != 0 {
+		t.Fatalf("version 标志应返回退出码 0，实际 err=%v", err)
 	}
-
-	// 构建测试二进制文件
-	tmpDir := t.TempDir()
-	binaryPath := filepath.Join(tmpDir, "saber-test")
-
-	// 编译测试程序
-	buildCmd := exec.Command("go", "build", "-tags", "goolm", "-o", binaryPath, ".")
-	buildCmd.Dir = filepath.Join("..", "..")
-	if output, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("构建测试二进制文件失败: %v\n输出: %s", err, output)
-	}
-
-	tests := []struct {
-		name           string
-		args           []string
-		expectedExit   int
-		outputContains string
-	}{
-		{
-			name:           "version 标志",
-			args:           []string{"-version"},
-			expectedExit:   0,
-			outputContains: "Saber v",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cmd := exec.Command(binaryPath, tt.args...)
-			output, err := cmd.CombinedOutput()
-
-			// 检查退出码
-			if err == nil {
-				// 命令成功执行，退出码为 0
-				if tt.expectedExit != 0 {
-					t.Errorf("退出码 = 0, 期望 %d", tt.expectedExit)
-				}
-			} else if exitErr, ok := err.(*exec.ExitError); ok {
-				// 命令以非零退出码结束
-				if exitErr.ExitCode() != tt.expectedExit {
-					t.Errorf("退出码 = %d, 期望 %d", exitErr.ExitCode(), tt.expectedExit)
-				}
-			} else {
-				// 其他类型的错误（如命令无法启动）
-				t.Fatalf("执行命令失败: %v", err)
-			}
-
-			// 检查输出内容
-			outputStr := string(output)
-			if !strings.Contains(outputStr, tt.outputContains) {
-				t.Errorf("输出应包含 %q，实际输出:\n%s", tt.outputContains, outputStr)
-			}
-		})
+	got := out.String()
+	for _, want := range []string{"Saber v9.9.9-test", "Git: abc123 (test)", "Built: 2024-01-01"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("输出应包含 %q，实际输出:\n%s", want, got)
+		}
 	}
 }
 
-// TestRun_GenerateConfigFlag 使用子进程测试 generate-config 标志的处理。
+// TestRun_GenerateConfigFlag 验证 generate-config 将示例配置输出到 stdout 或指定文件。
 func TestRun_GenerateConfigFlag(t *testing.T) {
-	if testing.Short() {
-		t.Skip("跳过子进程测试")
-	}
+	t.Run("默认输出到 stdout", func(t *testing.T) {
+		state := &appState{info: matrix.BuildInfo{}}
+		var out bytes.Buffer
+		err := state.initConfig([]string{"-generate-config"}, &out)
 
-	// 构建测试二进制文件
-	tmpDir := t.TempDir()
-	binaryPath := filepath.Join(tmpDir, "saber-test")
+		if code, ok := IsExitCode(err); !ok || code != 0 {
+			t.Fatalf("generate-config 应返回退出码 0，实际 err=%v", err)
+		}
+		if !strings.Contains(out.String(), "matrix:") {
+			t.Errorf("输出应包含 %q，实际输出:\n%s", "matrix:", out.String())
+		}
+	})
 
-	buildCmd := exec.Command("go", "build", "-tags", "goolm", "-o", binaryPath, ".")
-	buildCmd.Dir = filepath.Join("..", "..")
-	if output, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("构建测试二进制文件失败: %v\n输出: %s", err, output)
-	}
+	t.Run("输出到指定文件", func(t *testing.T) {
+		configPath := filepath.Join(t.TempDir(), "config.example.yaml")
+		state := &appState{info: matrix.BuildInfo{}}
+		var out bytes.Buffer
+		err := state.initConfig([]string{"-generate-config", "-o", configPath}, &out)
 
-	tests := []struct {
-		name           string
-		args           []string
-		workDir        string
-		expectedExit   int
-		outputContains string
-		expectFile     string // 期望生成的文件路径（可选）
-	}{
-		{
-			name:           "generate-config 默认输出到 stdout",
-			args:           []string{"-generate-config"},
-			workDir:        t.TempDir(),
-			expectedExit:   0,
-			outputContains: "matrix:", // 输出配置内容
-			expectFile:     "",        // 不生成文件
-		},
-		{
-			name:           "generate-config 输出到指定文件",
-			args:           []string{"-generate-config", "-o", "config.example.yaml"},
-			workDir:        t.TempDir(),
-			expectedExit:   0,
-			outputContains: "Example configuration generated",
-			expectFile:     "config.example.yaml",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cmd := exec.Command(binaryPath, tt.args...)
-			cmd.Dir = tt.workDir
-			output, err := cmd.CombinedOutput()
-
-			if err == nil {
-				// 命令成功执行，退出码为 0
-				if tt.expectedExit != 0 {
-					t.Errorf("退出码 = 0, 期望 %d", tt.expectedExit)
-				}
-			} else if exitErr, ok := err.(*exec.ExitError); ok {
-				// 命令以非零退出码结束
-				if exitErr.ExitCode() != tt.expectedExit {
-					t.Errorf("退出码 = %d, 期望 %d", exitErr.ExitCode(), tt.expectedExit)
-				}
-			} else {
-				// 其他类型的错误（如命令无法启动）
-				t.Fatalf("执行命令失败: %v", err)
-			}
-
-			outputStr := string(output)
-			if !strings.Contains(outputStr, tt.outputContains) {
-				t.Errorf("输出应包含 %q，实际输出:\n%s", tt.outputContains, outputStr)
-			}
-
-			// 验证文件生成（如果期望）
-			if tt.expectFile != "" {
-				configPath := filepath.Join(tt.workDir, tt.expectFile)
-				if _, err := os.Stat(configPath); os.IsNotExist(err) {
-					t.Errorf("期望生成配置文件 %s，但文件不存在", tt.expectFile)
-				}
-			}
-		})
-	}
+		if code, ok := IsExitCode(err); !ok || code != 0 {
+			t.Fatalf("generate-config 应返回退出码 0，实际 err=%v", err)
+		}
+		if !strings.Contains(out.String(), "Example configuration generated") {
+			t.Errorf("输出应包含 %q，实际输出:\n%s", "Example configuration generated", out.String())
+		}
+		if _, statErr := os.Stat(configPath); statErr != nil {
+			t.Errorf("期望生成配置文件 %s，但文件不存在: %v", configPath, statErr)
+		}
+	})
 }
 
-// TestRun_ConfigLoadFailure 测试配置加载失败的场景。
+// withArgs 在测试生命周期内替换 os.Args，使 run() 可在进程内模拟命令行启动。
+func withArgs(t *testing.T, args ...string) {
+	t.Helper()
+	old := os.Args
+	t.Cleanup(func() { os.Args = old })
+	os.Args = append([]string{"saber"}, args...)
+}
+
+// TestRun_ConfigLoadFailure 测试配置加载失败与 Matrix 客户端创建失败的场景。
+//
+// 这些路径返回普通错误（非 ExitCodeError），由 main 统一映射为退出码 1。
 func TestRun_ConfigLoadFailure(t *testing.T) {
-	if testing.Short() {
-		t.Skip("跳过子进程测试")
-	}
-
-	// 构建测试二进制文件
-	tmpDir := t.TempDir()
-	binaryPath := filepath.Join(tmpDir, "saber-test")
-
-	buildCmd := exec.Command("go", "build", "-tags", "goolm", "-o", binaryPath, ".")
-	buildCmd.Dir = filepath.Join("..", "..")
-	if output, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("构建测试二进制文件失败: %v\n输出: %s", err, output)
-	}
-
 	tests := []struct {
-		name           string
-		setupConfig    func(string) string // 返回配置文件路径
-		expectedExit   int
-		outputContains string
+		name        string
+		setupConfig func(string) string // 返回配置文件路径
+		expectError string
 	}{
 		{
 			name: "配置文件不存在",
 			setupConfig: func(dir string) string {
 				return filepath.Join(dir, "nonexistent.yaml")
 			},
-			expectedExit:   1,
-			outputContains: "加载配置失败",
+			expectError: "加载配置失败",
 		},
 		{
 			name: "无效的 YAML 格式",
@@ -309,8 +224,7 @@ func TestRun_ConfigLoadFailure(t *testing.T) {
 				_ = os.WriteFile(configPath, []byte(invalidYAML), 0o600)
 				return configPath
 			},
-			expectedExit:   1,
-			outputContains: "加载配置失败",
+			expectError: "加载配置失败",
 		},
 		{
 			name: "缺少必需字段",
@@ -326,8 +240,7 @@ matrix:
 				_ = os.WriteFile(configPath, []byte(incompleteConfig), 0o600)
 				return configPath
 			},
-			expectedExit:   1,
-			outputContains: "创建 Matrix 客户端失败",
+			expectError: "创建 Matrix 客户端失败",
 		},
 	}
 
@@ -336,28 +249,17 @@ matrix:
 			workDir := t.TempDir()
 			configPath := tt.setupConfig(workDir)
 
-			cmd := exec.Command(binaryPath, "-c", configPath)
-			cmd.Dir = workDir
-			output, err := cmd.CombinedOutput()
+			withArgs(t, "-c", configPath)
+			err := run(context.Background(), matrix.BuildInfo{Version: "test"})
 
 			if err == nil {
-				// 命令成功执行，退出码为 0
-				if tt.expectedExit != 0 {
-					t.Errorf("退出码 = 0, 期望 %d\n输出: %s", tt.expectedExit, output)
-				}
-			} else if exitErr, ok := err.(*exec.ExitError); ok {
-				// 命令以非零退出码结束
-				if exitErr.ExitCode() != tt.expectedExit {
-					t.Errorf("退出码 = %d, 期望 %d\n输出: %s", exitErr.ExitCode(), tt.expectedExit, output)
-				}
-			} else {
-				// 其他类型的错误（如命令无法启动）
-				t.Fatalf("执行命令失败: %v", err)
+				t.Fatalf("期望错误包含 %q，实际返回 nil", tt.expectError)
 			}
-
-			outputStr := string(output)
-			if !strings.Contains(outputStr, tt.outputContains) {
-				t.Errorf("输出应包含 %q，实际输出:\n%s", tt.outputContains, outputStr)
+			if _, ok := IsExitCode(err); ok {
+				t.Errorf("致命错误应返回普通 error 交由 main 映射退出码，实际是 ExitCodeError: %v", err)
+			}
+			if !strings.Contains(err.Error(), tt.expectError) {
+				t.Errorf("错误应包含 %q，实际: %v", tt.expectError, err)
 			}
 		})
 	}
@@ -365,21 +267,7 @@ matrix:
 
 // TestRun_ValidConfigButNoServer 测试有效配置但服务器不可达的场景。
 func TestRun_ValidConfigButNoServer(t *testing.T) {
-	if testing.Short() {
-		t.Skip("跳过子进程测试")
-	}
-
-	tmpDir := t.TempDir()
-	binaryPath := filepath.Join(tmpDir, "saber-test")
-
-	buildCmd := exec.Command("go", "build", "-tags", "goolm", "-o", binaryPath, ".")
-	buildCmd.Dir = filepath.Join("..", "..")
-	if output, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("构建测试二进制文件失败: %v\n输出: %s", err, output)
-	}
-
-	workDir := t.TempDir()
-	configPath := filepath.Join(workDir, "config.yaml")
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
 
 	// 创建有效的配置文件，但使用虚假的服务器地址
 	validConfig := `server:
@@ -394,23 +282,14 @@ matrix:
 		t.Fatalf("写入配置文件失败: %v", err)
 	}
 
-	cmd := exec.Command(binaryPath, "-c", configPath)
-	cmd.Dir = workDir
-
-	// 设置超时，因为网络请求可能需要较长时间
-	output, err := cmd.CombinedOutput()
+	withArgs(t, "-c", configPath)
+	err := run(context.Background(), matrix.BuildInfo{Version: "test"})
 
 	// 预期会因为网络错误而失败
 	if err == nil {
 		t.Error("期望连接到不存在的服务器时返回错误")
-	}
-
-	// 输出应该包含错误信息
-	outputStr := string(output)
-	if !strings.Contains(outputStr, "Failed to create Matrix client") &&
-		!strings.Contains(outputStr, "Login verification failed") {
-		// 如果包含其他错误也是可以接受的
-		t.Logf("输出内容: %s", outputStr)
+	} else {
+		t.Logf("错误内容: %v", err)
 	}
 }
 

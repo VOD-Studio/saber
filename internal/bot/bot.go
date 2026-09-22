@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -69,7 +70,7 @@ func Run(info matrix.BuildInfo) error {
 func run(parent context.Context, info matrix.BuildInfo) error {
 	state := &appState{info: info}
 
-	if err := state.initConfig(); err != nil {
+	if err := state.initConfig(os.Args[1:], os.Stdout); err != nil {
 		return err
 	}
 
@@ -134,23 +135,23 @@ func run(parent context.Context, info matrix.BuildInfo) error {
 
 // initConfig 处理配置初始化。
 //
+// args 为命令行参数（不含程序名），stdout 接收版本与示例配置输出。
 // 返回错误而非调用 os.Exit，支持测试和优雅关闭。
-func (s *appState) initConfig() error {
-	s.flags = cli.Parse()
-	if s.flags.ParseError != nil {
-		if errors.Is(s.flags.ParseError, flag.ErrHelp) {
+func (s *appState) initConfig(args []string, stdout io.Writer) error {
+	flags, err := cli.ParseArgs(args)
+	s.flags = flags
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
 			return ExitSuccess()
 		}
-		return ExitError(2, s.flags.ParseError)
+		return ExitError(2, err)
 	}
 
 	if s.flags.ShowVersion {
-		fmt.Printf("Saber v%s\n", s.info.Version)
-		fmt.Printf("  Git: %s (%s)\n", s.info.GitCommit, s.info.GitBranch)
-		fmt.Printf("  Built: %s\n", s.info.BuildTime)
-		fmt.Printf("  Go: %s\n", s.info.GoVersion)
-		fmt.Printf("  Build Platform: %s\n", s.info.BuildPlatform)
-		fmt.Printf("  Runtime Platform: %s\n", s.info.RuntimePlatform())
+		text := fmt.Sprintf("Saber v%s\n  Git: %s (%s)\n  Built: %s\n  Go: %s\n  Build Platform: %s\n  Runtime Platform: %s\n",
+			s.info.Version, s.info.GitCommit, s.info.GitBranch, s.info.BuildTime,
+			s.info.GoVersion, s.info.BuildPlatform, s.info.RuntimePlatform())
+		_, _ = fmt.Fprint(stdout, text)
 		return ExitSuccess()
 	}
 
@@ -160,10 +161,10 @@ func (s *appState) initConfig() error {
 			if err := config.GenerateExample(s.flags.OutputPath); err != nil {
 				return ExitError(1, fmt.Errorf("生成配置文件失败: %w", err))
 			}
-			fmt.Printf("Example configuration generated: %s\n", s.flags.OutputPath)
+			_, _ = fmt.Fprintf(stdout, "Example configuration generated: %s\n", s.flags.OutputPath)
 		} else {
 			// 输出到 stdout
-			fmt.Print(config.ExampleConfig())
+			_, _ = fmt.Fprint(stdout, config.ExampleConfig())
 		}
 		return ExitSuccess()
 	}

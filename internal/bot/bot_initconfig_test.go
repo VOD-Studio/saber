@@ -2,85 +2,53 @@
 package bot
 
 import (
+	"bytes"
 	"os"
+	"strings"
 	"testing"
 
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/matrix"
 )
 
-// TestInitConfig_VersionFlag 测试版本标志处理。
-func TestInitConfig_VersionFlag(t *testing.T) {
-	// 由于 initConfig 调用 cli.Parse() 会读取 os.Args，
-	// 我们只能在测试中使用注释验证逻辑
+// TestInitConfig_FlagErrors 测试标志解析错误到退出码的映射：
+// 未知标志返回退出码 2，-h/--help 视为正常退出（码 0）。
+func TestInitConfig_FlagErrors(t *testing.T) {
 	tests := []struct {
-		name        string
-		showVersion bool
-		shouldExit  bool
-		exitCode    int
+		name     string
+		args     []string
+		exitCode int
 	}{
-		{
-			name:        "显示版本",
-			showVersion: true,
-			shouldExit:  true,
-			exitCode:    0,
-		},
-		{
-			name:        "正常启动",
-			showVersion: false,
-			shouldExit:  false,
-			exitCode:    0,
-		},
+		{"未知标志", []string{"-no-such-flag"}, 2},
+		{"帮助标志按成功退出", []string{"-h"}, 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// 验证逻辑正确性
-			if tt.showVersion {
-				// 版本显示逻辑：打印版本信息后返回 ExitSuccess()
-				exitErr := ExitSuccess()
-				if exitErr.Code != tt.exitCode {
-					t.Errorf("exit code = %d, want %d", exitErr.Code, tt.exitCode)
-				}
+			state := &appState{info: matrix.BuildInfo{Version: "test"}}
+			var out bytes.Buffer
+			err := state.initConfig(tt.args, &out)
+
+			code, ok := IsExitCode(err)
+			if !ok {
+				t.Fatalf("期望 ExitCodeError，实际 err=%v", err)
+			}
+			if code != tt.exitCode {
+				t.Errorf("退出码 = %d，期望 %d", code, tt.exitCode)
 			}
 		})
 	}
 }
 
-// TestInitConfig_GenerateConfigFlag 测试配置生成标志。
-func TestInitConfig_GenerateConfigFlag(t *testing.T) {
-	tests := []struct {
-		name           string
-		generateConfig bool
-		outputPath     string
-		shouldExit     bool
-		exitCode       int
-	}{
-		{
-			name:           "生成配置到 stdout",
-			generateConfig: true,
-			outputPath:     "",
-			shouldExit:     true,
-			exitCode:       0,
-		},
-		{
-			name:           "生成配置到文件",
-			generateConfig: true,
-			outputPath:     "/tmp/config.yaml",
-			shouldExit:     true,
-			exitCode:       0,
-		},
+// TestInitConfig_StdoutWriter 测试 -version 输出写入注入的 writer 而非 os.Stdout。
+func TestInitConfig_StdoutWriter(t *testing.T) {
+	state := &appState{info: matrix.BuildInfo{Version: "1.2.3"}}
+	var out bytes.Buffer
+	if _, ok := IsExitCode(state.initConfig([]string{"-version"}, &out)); !ok {
+		t.Fatal("-version 应返回 ExitCodeError")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.generateConfig {
-				exitErr := ExitSuccess()
-				if exitErr.Code != tt.exitCode {
-					t.Errorf("exit code = %d, want %d", exitErr.Code, tt.exitCode)
-				}
-			}
-		})
+	if !strings.Contains(out.String(), "Saber v1.2.3") {
+		t.Errorf("输出应包含版本号，实际:\n%s", out.String())
 	}
 }
 
@@ -149,39 +117,8 @@ func TestInitConfig_BuildInfoDisplay(t *testing.T) {
 	}
 }
 
-// TestInitConfig_ConfigLoadError 测试配置加载错误。
-func TestInitConfig_ConfigLoadError(t *testing.T) {
-	// 测试配置加载失败的处理
-	// 由于无法直接调用 initConfig（依赖 os.Args），这里验证错误处理逻辑
-
-	tests := []struct {
-		name        string
-		configPath  string
-		expectError bool
-		errorType   string
-	}{
-		{
-			name:        "配置文件不存在",
-			configPath:  "/nonexistent/config.yaml",
-			expectError: true,
-			errorType:   "config",
-		},
-		{
-			name:        "空配置路径",
-			configPath:  "",
-			expectError: true,
-			errorType:   "config",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// 验证配置加载逻辑
-			// 实际测试在 bot_run_test.go 中使用子进程完成
-			_ = tt.configPath
-		})
-	}
-}
+// TestInitConfig_ConfigLoadError 的场景已由 bot_run_test.go 中的
+// TestRun_ConfigLoadFailure 在进程内真实调用 run() 覆盖，此处不再保留静态验证。
 
 // TestInitConfig_InfoFields 测试构建信息字段。
 func TestInitConfig_InfoFields(t *testing.T) {
