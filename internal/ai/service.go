@@ -73,8 +73,6 @@ type Service struct {
 	entry ChatEntrypoint
 	// chatProcessor 是所有聊天平台共享的消息处理链路。
 	chatProcessor *conversation.Processor
-	// respHandler 是响应处理器。
-	respHandler *ResponseHandler
 	// toolExecutor 是工具执行器。
 	toolExecutor *ToolExecutor
 	// tasks 在应用启动时绑定，接收聊天任务并负责后台生命周期。
@@ -155,15 +153,13 @@ func NewService(appConfig *config.Config, opts ...ServiceOption) (*Service, erro
 		contextManager: contextManager,
 		mcpManager:     o.mcpManager,
 		mediaService:   o.mediaService,
-		respHandler:    NewResponseHandler(nil), // 将在下面重新初始化
-		toolExecutor:   NewToolExecutor(nil),    // 将在下面重新初始化
+		toolExecutor:   NewToolExecutor(nil), // 将在下面重新初始化
 	}
 	if c := appConfig.Agent.CircuitBreaker; c.Enabled {
 		service.circuitBreaker = NewCircuitBreaker(c.FailureThreshold, time.Duration(c.ResetTimeout)*time.Second)
 	}
 
-	// 重新初始化处理器（需要 Service 实例）
-	service.respHandler = NewResponseHandler(service)
+	// 历史作用域账号取自平台注入的命令服务，未接入 Matrix 时留空
 	var history *conversation.ContextManager
 	if contextManager != nil {
 		if o.matrixService != nil {

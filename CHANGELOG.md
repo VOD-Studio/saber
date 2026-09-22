@@ -66,6 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 删除 `ai` 中已无调用方的旧响应链路（`ResponseHandler`、`StreamEditor`、`SmartStreamHandler` 与 `ResponseContext`/`ResponseMode`）：自统一 Agent 运行时接入后 `Service.respHandler` 仅构造不使用，流式展示已全部由 `conversation.Processor` 与 `chat.Adapter` 承担；`internal/ai` 因此不再直接发送 Matrix 事件回复、typing 与 `m.replace` 关系
+
 - `ai` 不再构造任何平台 adapter：`ChatEntrypoint` 增设 `OutboundAdapter`/`EventID`，`runAgentReply` 与任务日志的来源事件定位改由平台端口提供，`internal/ai/agent.go`、`internal/ai/task_logs.go` 去掉 `internal/matrix` 依赖
 
 - `!ai clear`/`!ai context` 的会话作用域改由平台端口 `ChatEntrypoint.Session` 解析，`internal/ai/commands.go` 不再硬编码 `Platform: "matrix"` 与 Matrix 线程上下文键
