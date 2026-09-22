@@ -132,8 +132,8 @@ func taskInput(message chat.Message) openai.ChatCompletionMessage {
 
 func (s *Service) submitTask(ctx context.Context, message chat.Message, req agent.Request, reply chat.Adapter) error {
 	continuation := message
-	if body, ok := matrix.GetReplyBody(ctx); ok {
-		continuation.Text = body
+	if message.ControlText != nil {
+		continuation.Text = *message.ControlText
 	}
 	req.Messages = append(req.Messages, taskInput(continuation))
 	dir := s.taskDir

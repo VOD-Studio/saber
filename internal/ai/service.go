@@ -420,11 +420,7 @@ func (s *Service) handleChat(ctx context.Context, message chat.Message, reply ch
 		return agent.Result{}, err
 	}
 	if s.tasks != nil {
-		text := message.Text
-		if body, ok := matrix.GetReplyBody(ctx); ok {
-			text = body
-		}
-		if action, taskID, ok := naturalTaskCommand(text); ok {
+		if action, taskID, ok := naturalTaskCommand(message.CommandText()); ok {
 			return agent.Result{}, s.replyTaskCommand(ctx, message, reply, action, taskID)
 		}
 	} else {

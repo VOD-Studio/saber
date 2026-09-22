@@ -37,6 +37,10 @@ func (a *ChatAdapter) Session(ctx context.Context, roomID id.RoomID) chat.Sessio
 // Message 在接入层解析图片和引用关系，核心无需理解 MXC 或 Matrix SDK。
 func (a *ChatAdapter) Message(ctx context.Context, userID id.UserID, roomID id.RoomID, text string) chat.Message {
 	message := chat.Message{Session: a.Session(ctx, roomID), ID: string(GetEventID(ctx)), SenderID: string(userID), Text: text, ReplyTo: string(GetReplyToID(ctx))}
+	// 引用机器人消息时，Matrix 会在正文前加上回退引用；控制指令只看用户自己写的那部分。
+	if control, ok := a.controlText(ctx, text); ok {
+		message.ControlText = &control
+	}
 	if a.media == nil || !a.mediaConfig.Enabled {
 		return message
 	}
@@ -59,12 +63,6 @@ func (a *ChatAdapter) Receive(ctx context.Context, userID id.UserID, roomID id.R
 	if a.service == nil || a.handler == nil {
 		return agent.Result{}, errors.New("matrix chat adapter is not configured")
 	}
-	// 私聊没有 handleReply 的引用包装，保留原文并单独传递控制指令使用的新正文。
-	if _, ok := GetReplyBody(ctx); !ok && GetReplyToID(ctx) != "" {
-		if body := event.TrimReplyFallbackText(text); body != text {
-			ctx = context.WithValue(ctx, replyBodyKey, body)
-		}
-	}
 	return a.handler(ctx, a.Message(ctx, userID, roomID, text), a)
 }
 
@@ -72,6 +70,21 @@ func (a *ChatAdapter) Receive(ctx context.Context, userID id.UserID, roomID id.R
 func (a *ChatAdapter) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
 	_, err := a.Receive(ctx, userID, roomID, strings.Join(args, " "))
 	return err
+}
+
+// controlText 返回剥离引用回退后的用户正文。handleReply 已解析时直接沿用，
+// 私聊等未预解析的路径在这里就地剥离，避免核心链路读取 Matrix 上下文。
+func (a *ChatAdapter) controlText(ctx context.Context, text string) (string, bool) {
+	if body, ok := getReplyBody(ctx); ok {
+		return body, true
+	}
+	if GetReplyToID(ctx) == "" {
+		return "", false
+	}
+	if body := event.TrimReplyFallbackText(text); body != text {
+		return body, true
+	}
+	return "", false
 }
 
 // Capabilities 声明当前 Matrix 展示配置。

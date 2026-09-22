@@ -59,10 +59,22 @@ type Message struct {
 	SenderID string
 	// Text 是去掉平台命令或提及前缀后的内容。
 	Text string
+	// ControlText 是接入端剥离平台引用回退后的用户原文，用于识别控制指令；
+	// nil 表示该平台没有引用包装，按 Text 识别。指向空串表示用户只引用未发言。
+	ControlText *string
 	// ReplyTo 是入站消息所引用的消息 ID。
 	ReplyTo string
 	// Attachments 包含当前消息及 adapter 已解析的引用附件。
 	Attachments []Attachment
+}
+
+// CommandText 返回识别控制指令时应使用的正文：优先接入端给出的用户原文，
+// 避免把引用回退里的历史文本误判成本轮指令。
+func (m Message) CommandText() string {
+	if m.ControlText != nil {
+		return *m.ControlText
+	}
+	return m.Text
 }
 
 // Validate 验证通用必填项，平台 ID 格式校验由 adapter 负责。

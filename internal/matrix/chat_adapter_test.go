@@ -124,9 +124,12 @@ func TestChatAdapter_RelationsAndAccountGuard(t *testing.T) {
 	}
 	body := "> <@bot:local> 已接收，任务 #1\n\n取消任务 #1"
 	adapter := matrix.NewChatAdapter(matrix.NewCommandService(client, "@bot:local", &matrix.BuildInfo{}), nil, config.MediaConfig{}, false, func(ctx context.Context, msg chat.Message, _ chat.Adapter) (agent.Result, error) {
-		text, ok := matrix.GetReplyBody(ctx)
-		if !ok || text != "取消任务 #1" || msg.Text != body {
-			t.Fatalf("reply/control text lost: body=%q control=%q", msg.Text, text)
+		// 核心只读 chat.Message，Matrix 引用回退的剥离必须已经落在 ControlText 上。
+		if msg.ControlText == nil || *msg.ControlText != "取消任务 #1" || msg.Text != body {
+			t.Fatalf("reply/control text lost: body=%q control=%v", msg.Text, msg.ControlText)
+		}
+		if got := msg.CommandText(); got != "取消任务 #1" {
+			t.Fatalf("CommandText() = %q", got)
 		}
 		return agent.Result{}, nil
 	})
@@ -134,6 +137,22 @@ func TestChatAdapter_RelationsAndAccountGuard(t *testing.T) {
 	message := adapter.Message(ctx, "@user:local", "!room:local", body)
 	if message.Text != body {
 		t.Fatalf("quoted reply text lost: %q", message.Text)
+	}
+	if message.ControlText == nil || *message.ControlText != "取消任务 #1" {
+		t.Fatalf("control text not normalized: %v", message.ControlText)
+	}
+	// 只引用不发言时，控制文本是空串而不是回退里的历史内容，避免误判成取消指令。
+	quoteOnly := "> <@bot:local> 取消任务 #1\n\n"
+	trimmed := adapter.Message(ctx, "@user:local", "!room:local", quoteOnly)
+	if trimmed.ControlText == nil || *trimmed.ControlText != "" {
+		t.Fatalf("quote-only control text = %v, want empty", trimmed.ControlText)
+	}
+	if got := trimmed.CommandText(); got != "" {
+		t.Fatalf("quote-only CommandText() = %q, want empty", got)
+	}
+	plain := adapter.Message(ctx, "@user:local", "!room:local", "普通消息")
+	if plain.ControlText != nil || plain.CommandText() != "普通消息" {
+		t.Fatalf("plain message control text = %v", plain.ControlText)
 	}
 	if _, err := adapter.Receive(ctx, "@user:local", "!room:local", body); err != nil {
 		t.Fatal(err)
