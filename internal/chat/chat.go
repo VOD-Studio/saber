@@ -37,6 +37,20 @@ func (s Session) Key() SessionID {
 	return SessionID("[" + strconv.Quote(s.Platform) + "," + strconv.Quote(s.Account) + "," + strconv.Quote(s.Conversation) + "," + strconv.Quote(s.Thread) + "]")
 }
 
+// ConversationInfo 是接入端提供的会话元数据快照，用于主动聊天这类没有入站消息、
+// 却需要知道“发给谁、用什么语气”的场景。平台没有的语义保持零值，不跨平台臆造：
+// 调用方按 MemberCount 是否为 2 推断私聊，因此拿不到成员数的平台只会被当作群聊处理。
+type ConversationInfo struct {
+	// Conversation 是平台原生会话标识，与 Session.Conversation 同源。
+	Conversation string
+	// Name 是会话展示名；平台未命名时由接入端回退为会话标识。
+	Name string
+	// MemberCount 是会话成员数，用于区分私聊与群聊；平台未提供时为 0。
+	MemberCount int
+	// Encrypted 表示会话是否端到端加密；没有该概念的平台保持 false。
+	Encrypted bool
+}
+
 // Attachment 是 adapter 已解析的附件，不包含平台 SDK 对象。
 type Attachment struct {
 	// Kind 当前支持 image；其他附件由上层能力决定是否接受。

@@ -7,27 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"maunium.net/go/mautrix/id"
-
 	"rua.plus/saber/internal/config"
-	"rua.plus/saber/internal/matrix"
 )
-
-type mockRoomService struct {
-	rooms []matrix.RoomInfo
-}
-
-func (m *mockRoomService) SendMessage(ctx context.Context, roomID, text string) (id.EventID, error) {
-	return id.EventID("$test_event"), nil
-}
-
-func (m *mockRoomService) SendNotice(ctx context.Context, roomID, text string) (id.EventID, error) {
-	return id.EventID("$test_notice"), nil
-}
-
-func (m *mockRoomService) GetJoinedRooms(ctx context.Context) ([]matrix.RoomInfo, error) {
-	return m.rooms, nil
-}
 
 func TestProactiveManagerLifecycleIntegration(t *testing.T) {
 	t.Parallel()
@@ -49,7 +30,7 @@ func TestProactiveManagerLifecycleIntegration(t *testing.T) {
 			WelcomePrompt: "欢迎新成员",
 		},
 	}
-	mockRoomSVC := &matrix.RoomService{}
+	mockRoomSVC := &FakeProactiveRooms{}
 	stateTracker := NewStateTracker()
 	globalAIConfig := &config.AIConfig{}
 	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker, globalAIConfig)
@@ -81,7 +62,7 @@ func TestProactiveManagerShutdownGracefulIntegration(t *testing.T) {
 			WelcomePrompt: "欢迎",
 		},
 	}
-	mockRoomSVC := &matrix.RoomService{}
+	mockRoomSVC := &FakeProactiveRooms{}
 	stateTracker := NewStateTracker()
 	globalAIConfig := &config.AIConfig{}
 	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker, globalAIConfig)
@@ -109,7 +90,7 @@ func TestProactiveManagerShutdownGracefulIntegration(t *testing.T) {
 func TestProactiveManagerDisabledInstanceIntegration(t *testing.T) {
 	t.Parallel()
 	cfg := &config.ProactiveConfig{Enabled: false}
-	mockRoomSVC := &matrix.RoomService{}
+	mockRoomSVC := &FakeProactiveRooms{}
 	globalAIConfig := &config.AIConfig{}
 	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, nil, globalAIConfig)
 	if err != nil {
@@ -136,7 +117,7 @@ func TestProactiveManagerBackgroundTasksExitIntegration(t *testing.T) {
 			Times:   []string{"09:00"},
 		},
 	}
-	mockRoomSVC := &matrix.RoomService{}
+	mockRoomSVC := &FakeProactiveRooms{}
 	stateTracker := NewStateTracker()
 	globalAIConfig := &config.AIConfig{}
 	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker, globalAIConfig)
@@ -161,7 +142,7 @@ func TestProactiveManagerConcurrencyIntegration(t *testing.T) {
 		MaxMessagesPerDay:  100,
 		MinIntervalMinutes: 1,
 	}
-	mockRoomSVC := &matrix.RoomService{}
+	mockRoomSVC := &FakeProactiveRooms{}
 	stateTracker := NewStateTracker()
 	globalAIConfig := &config.AIConfig{}
 	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker, globalAIConfig)
@@ -194,7 +175,7 @@ func TestProactiveManagerWithCancelContextIntegration(t *testing.T) {
 			CheckIntervalMinutes: 1,
 		},
 	}
-	mockRoomSVC := &matrix.RoomService{}
+	mockRoomSVC := &FakeProactiveRooms{}
 	stateTracker := NewStateTracker()
 	globalAIConfig := &config.AIConfig{}
 	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker, globalAIConfig)
@@ -230,7 +211,7 @@ func TestProactiveManagerEmptyRoomsIntegration(t *testing.T) {
 			CheckIntervalMinutes: 1,
 		},
 	}
-	mockRoomSVC := &matrix.RoomService{}
+	mockRoomSVC := &FakeProactiveRooms{}
 	stateTracker := NewStateTracker()
 	globalAIConfig := &config.AIConfig{}
 	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker, globalAIConfig)
@@ -249,7 +230,7 @@ func TestProactiveManagerWithNilStateTrackerIntegration(t *testing.T) {
 		MaxMessagesPerDay:  5,
 		MinIntervalMinutes: 1,
 	}
-	mockRoomSVC := &matrix.RoomService{}
+	mockRoomSVC := &FakeProactiveRooms{}
 	globalAIConfig := &config.AIConfig{}
 	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, nil, globalAIConfig)
 	if err != nil {
@@ -272,7 +253,7 @@ func TestProactiveManagerLongRunningIntegration(t *testing.T) {
 			CheckIntervalMinutes: 1,
 		},
 	}
-	mockRoomSVC := &matrix.RoomService{}
+	mockRoomSVC := &FakeProactiveRooms{}
 	stateTracker := NewStateTracker()
 	globalAIConfig := &config.AIConfig{}
 	manager, err := NewProactiveManager(cfg, &Service{}, mockRoomSVC, stateTracker, globalAIConfig)
@@ -311,9 +292,7 @@ func TestTriggerCoordinatorIntegration(t *testing.T) {
 		},
 	}
 	stateTracker := NewStateTracker()
-	mockRoomSVC := &mockRoomService{
-		rooms: []matrix.RoomInfo{},
-	}
+	mockRoomSVC := &FakeProactiveRooms{}
 	silenceTrigger, err := NewSilenceTrigger(&cfg.Silence, stateTracker, mockRoomSVC)
 	if err != nil {
 		t.Fatalf("NewSilenceTrigger() error = %v", err)

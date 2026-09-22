@@ -15,13 +15,14 @@ Matrix 命令/消息 ── ChatAdapter ──┐
 
 `task`、`agent`、`chat`、`conversation`、`model`、`mcp` 均不依赖 Matrix 类型或 SDK，包括间接依赖。
 `ai.Service` 当前作为应用装配和 Matrix 专用命令兼容层：`HandleChat` 可由任意 adapter 调用，模型实际实现已迁到 `model`。
-已有 Matrix 命令、人格服务和主动聊天功能保留平台适配职责，不进入通用核心。
+Matrix 命令与人格服务保留平台适配职责，不进入通用核心；主动聊天只需平台实现 `ai.ProactiveRooms`（会话枚举、元数据与主动投递，见 [平台接入系统](platform-system.md)）。
 当前二进制启动仍使用现有 Matrix 配置；终端及其他实际平台的启动入口属于下一阶段。
 
 ## 消息与会话
 
 `chat.Message` 包含 `Session`、消息 ID、发送者 ID、正文、引用 ID 和附件。
 `Session` 由 `Platform`、`Account`、`Conversation`、可选 `Thread` 组成。核心将原生 ID 视为不透明字符串，格式校验归接入端。
+`chat.ConversationInfo` 是接入端给出的会话元数据快照（标识、展示名、成员数、是否加密），只供主动聊天这类无入站消息的场景；平台没有的语义保持零值。
 `Session.Key()` 对各字段明确编码，不能用字符串分隔符拼接代替。
 
 同名会话在不同平台或账号之间不会共享历史；线程与主会话也各自独立。

@@ -490,12 +490,13 @@ func (s *appState) initMemeService() {
 // 返回管理器实例和错误，支持测试和优雅关闭。
 func (s *appState) initProactiveManager() (*ai.ProactiveManager, error) {
 	slog.Info("正在初始化主动聊天管理器...")
-	roomService := matrix.NewRoomService(s.services.client)
+	// Matrix 房间服务由平台接入端包装成通用会话端口，ai 核心不直接依赖 internal/matrix。
+	rooms := platformmatrix.NewRooms(matrix.NewRoomService(s.services.client))
 
 	mgr, err := ai.NewProactiveManager(
 		&s.cfg.Matrix.Proactive,
 		s.services.aiService,
-		roomService,
+		rooms,
 		nil,
 		&s.cfg.AI,
 	)

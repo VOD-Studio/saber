@@ -4,13 +4,14 @@ package ai
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"maunium.net/go/mautrix/id"
 
+	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
-	"rua.plus/saber/internal/matrix"
 )
 
 func TestNewProactiveManager(t *testing.T) {
@@ -20,7 +21,7 @@ func TestNewProactiveManager(t *testing.T) {
 		name           string
 		config         *config.ProactiveConfig
 		aiService      *Service
-		roomService    *matrix.RoomService
+		roomService    ProactiveRooms
 		globalAIConfig *config.AIConfig
 		wantErr        bool
 		errContains    string
@@ -44,19 +45,19 @@ func TestNewProactiveManager(t *testing.T) {
 			errContains:    "AI 服务不能为空",
 		},
 		{
-			name:           "空房间服务",
+			name:           "空房间端口",
 			config:         &config.ProactiveConfig{},
 			aiService:      &Service{},
 			roomService:    nil,
 			globalAIConfig: nil,
 			wantErr:        true,
-			errContains:    "matrix 房间服务不能为空",
+			errContains:    "主动聊天房间端口不能为空",
 		},
 		{
 			name:           "空全局 AI 配置",
 			config:         &config.ProactiveConfig{},
 			aiService:      &Service{},
-			roomService:    &matrix.RoomService{},
+			roomService:    &FakeProactiveRooms{},
 			globalAIConfig: nil,
 			wantErr:        true,
 			errContains:    "全局 AI 配置不能为空",
@@ -69,7 +70,7 @@ func TestNewProactiveManager(t *testing.T) {
 				MinIntervalMinutes: 60,
 			},
 			aiService:      &Service{},
-			roomService:    &matrix.RoomService{},
+			roomService:    &FakeProactiveRooms{},
 			globalAIConfig: &config.AIConfig{},
 			wantErr:        false,
 		},
@@ -130,7 +131,7 @@ func TestProactiveManagerLifecycle(t *testing.T) {
 	}
 
 	aiService := &Service{}
-	roomService := &matrix.RoomService{}
+	roomService := &FakeProactiveRooms{}
 	globalAIConfig := &config.AIConfig{}
 
 	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
@@ -155,7 +156,7 @@ func TestProactiveManagerDisabled(t *testing.T) {
 	}
 
 	aiService := &Service{}
-	roomService := &matrix.RoomService{}
+	roomService := &FakeProactiveRooms{}
 	globalAIConfig := &config.AIConfig{}
 
 	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
@@ -195,7 +196,7 @@ func TestProactiveManagerShutdown(t *testing.T) {
 	}
 
 	aiService := &Service{}
-	roomService := &matrix.RoomService{}
+	roomService := &FakeProactiveRooms{}
 	globalAIConfig := &config.AIConfig{}
 
 	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
@@ -235,7 +236,7 @@ func TestProactiveManagerShutdownWithContext(t *testing.T) {
 	}
 
 	aiService := &Service{}
-	roomService := &matrix.RoomService{}
+	roomService := &FakeProactiveRooms{}
 	globalAIConfig := &config.AIConfig{}
 
 	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
@@ -292,7 +293,7 @@ func TestOnNewMember_Disabled(t *testing.T) {
 	}
 
 	aiService := &Service{}
-	roomService := &matrix.RoomService{}
+	roomService := &FakeProactiveRooms{}
 	globalAIConfig := &config.AIConfig{}
 
 	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
@@ -321,7 +322,7 @@ func TestOnNewMember_NewMemberDisabled(t *testing.T) {
 	}
 
 	aiService := &Service{}
-	roomService := &matrix.RoomService{}
+	roomService := &FakeProactiveRooms{}
 	globalAIConfig := &config.AIConfig{}
 
 	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
@@ -353,7 +354,7 @@ func TestOnNewMember_RateLimited(t *testing.T) {
 	}
 
 	aiService := &Service{}
-	roomService := &matrix.RoomService{}
+	roomService := &FakeProactiveRooms{}
 	stateTracker := NewStateTracker()
 	globalAIConfig := &config.AIConfig{}
 
@@ -392,7 +393,7 @@ func TestCanSendMessage_DailyLimit(t *testing.T) {
 	}
 
 	aiService := &Service{}
-	roomService := &matrix.RoomService{}
+	roomService := &FakeProactiveRooms{}
 	stateTracker := NewStateTracker()
 	globalAIConfig := &config.AIConfig{}
 
@@ -433,7 +434,7 @@ func TestCanSendMessage_MinInterval(t *testing.T) {
 	}
 
 	aiService := &Service{}
-	roomService := &matrix.RoomService{}
+	roomService := &FakeProactiveRooms{}
 	stateTracker := NewStateTracker()
 	globalAIConfig := &config.AIConfig{}
 
@@ -467,7 +468,7 @@ func TestGenerateWelcomeMessage_AIDisabled(t *testing.T) {
 	}
 
 	aiService := &Service{}
-	roomService := &matrix.RoomService{}
+	roomService := &FakeProactiveRooms{}
 	globalAIConfig := &config.AIConfig{}
 
 	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
@@ -500,7 +501,7 @@ func TestTriggerCoordinator_NewCoordinator(t *testing.T) {
 	}
 
 	stateTracker := NewStateTracker()
-	roomService := &matrix.RoomService{}
+	roomService := &FakeProactiveRooms{}
 
 	silenceTrigger, err := NewSilenceTrigger(&cfg.Silence, stateTracker, roomService)
 	if err != nil {
@@ -546,7 +547,7 @@ func TestTriggerCoordinator_NilParameters(t *testing.T) {
 
 	cfg := &config.ProactiveConfig{}
 	stateTracker := NewStateTracker()
-	roomService := &matrix.RoomService{}
+	roomService := &FakeProactiveRooms{}
 
 	// 为测试创建有效的默认触发器
 	defaultSilence, _ := NewSilenceTrigger(&cfg.Silence, stateTracker, roomService)
@@ -663,7 +664,7 @@ func TestTriggerCoordinator_CheckAndTrigger(t *testing.T) {
 	}
 
 	stateTracker := NewStateTracker()
-	mockRL := &mockRoomListerTest{rooms: []matrix.RoomInfo{}}
+	mockRL := &mockRoomListerTest{rooms: []chat.ConversationInfo{}}
 
 	silenceTrigger, err := NewSilenceTrigger(&cfg.Silence, stateTracker, mockRL)
 	if err != nil {
@@ -723,9 +724,9 @@ func TestTriggerCoordinator_HandleSilenceTrigger(t *testing.T) {
 	}
 
 	stateTracker := NewStateTracker()
-	mockRL := &mockRoomListerTest{rooms: []matrix.RoomInfo{}}
+	mockRL := &mockRoomListerTest{rooms: []chat.ConversationInfo{}}
 	aiService := &Service{}
-	roomService := &matrix.RoomService{}
+	roomService := &FakeProactiveRooms{}
 	globalAIConfig := &config.AIConfig{}
 
 	manager, err := NewProactiveManager(cfg, aiService, roomService, stateTracker, globalAIConfig)
@@ -777,7 +778,7 @@ func TestTriggerCoordinator_HandleScheduleTrigger(t *testing.T) {
 
 	stateTracker := NewStateTracker()
 	aiService := &Service{}
-	roomService := &matrix.RoomService{}
+	roomService := &FakeProactiveRooms{}
 	globalAIConfig := &config.AIConfig{}
 
 	manager, err := NewProactiveManager(cfg, aiService, roomService, stateTracker, globalAIConfig)
@@ -791,12 +792,12 @@ func TestTriggerCoordinator_HandleScheduleTrigger(t *testing.T) {
 	manager.handleScheduleTrigger(ctx)
 }
 
-// mockRoomListerTest 实现 RoomLister 接口，用于 proactive_test.go 中的测试。
+// mockRoomListerTest 实现 ConversationLister 接口，用于 proactive_test.go 中的测试。
 type mockRoomListerTest struct {
-	rooms []matrix.RoomInfo
+	rooms []chat.ConversationInfo
 }
 
-func (m *mockRoomListerTest) GetJoinedRooms(ctx context.Context) ([]matrix.RoomInfo, error) {
+func (m *mockRoomListerTest) ListConversations(ctx context.Context) ([]chat.ConversationInfo, error) {
 	return m.rooms, nil
 }
 
@@ -815,7 +816,7 @@ func TestGenerateDefaultProactiveMessage_IsDirect(t *testing.T) {
 	}
 
 	aiService := &Service{}
-	roomService := &matrix.RoomService{}
+	roomService := &FakeProactiveRooms{}
 	globalAIConfig := &config.AIConfig{}
 
 	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
@@ -939,7 +940,7 @@ func TestGenerateWelcomeMessage_IsDirect(t *testing.T) {
 		t.Fatal(coreErr)
 	}
 	aiService := &Service{core: core}
-	roomService := &matrix.RoomService{}
+	roomService := &FakeProactiveRooms{}
 	globalAIConfig := &config.AIConfig{}
 
 	manager, err := NewProactiveManager(cfg, aiService, roomService, nil, globalAIConfig)
@@ -1103,7 +1104,7 @@ func TestSilenceTrigger_Methods(t *testing.T) {
 	}
 	stateTracker := NewStateTracker()
 
-	// 创建 mock RoomLister
+	// 创建 mock ConversationLister
 	mockRL := &mockRoomListerTest{}
 
 	trigger, err := NewSilenceTrigger(cfg, stateTracker, mockRL)
@@ -1199,4 +1200,338 @@ func TestSilenceTrigger_Check(t *testing.T) {
 	// 验证方法不会 panic
 	_ = silentRooms
 	_ = err
+}
+
+// TestProactiveManager_SendMessage_RoutesThroughPort 断言主动投递按 isNotice 选择端口方法、
+// 带上正确的会话标识，并且只有发送成功才计入频控。
+func TestProactiveManager_SendMessage_RoutesThroughPort(t *testing.T) {
+	ctx := context.Background()
+	roomID := TestRoomID(7)
+
+	for _, tt := range []struct {
+		name   string
+		notice bool
+	}{
+		{name: "普通消息走 SendText", notice: false},
+		{name: "通知消息走 SendNotice", notice: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rooms := &FakeProactiveRooms{}
+			manager := newProactiveManagerForSendTest(t, rooms)
+
+			if err := manager.SendMessage(ctx, roomID, "主动内容", tt.notice); err != nil {
+				t.Fatalf("SendMessage() error = %v", err)
+			}
+
+			if len(rooms.Sent) != 1 {
+				t.Fatalf("Sent 长度 = %d, want 1", len(rooms.Sent))
+			}
+			sent := rooms.Sent[0]
+			if sent.Conversation != roomID.String() {
+				t.Errorf("Conversation = %q, want %q", sent.Conversation, roomID.String())
+			}
+			if sent.Text != "主动内容" {
+				t.Errorf("Text = %q, want 主动内容", sent.Text)
+			}
+			if sent.Notice != tt.notice {
+				t.Errorf("Notice = %v, want %v", sent.Notice, tt.notice)
+			}
+			if got := manager.stateTracker.GetState(roomID).MessagesToday; got != 1 {
+				t.Errorf("MessagesToday = %d, want 1", got)
+			}
+		})
+	}
+
+	t.Run("空正文不投递", func(t *testing.T) {
+		rooms := &FakeProactiveRooms{}
+		manager := newProactiveManagerForSendTest(t, rooms)
+
+		if err := manager.SendMessage(ctx, roomID, "", false); err == nil {
+			t.Error("SendMessage() 空正文应返回错误")
+		}
+		if len(rooms.Sent) != 0 {
+			t.Errorf("Sent = %+v, want 空", rooms.Sent)
+		}
+	})
+
+	t.Run("投递失败不计频控", func(t *testing.T) {
+		rooms := &FakeProactiveRooms{SendErr: errors.New("homeserver 不可达")}
+		manager := newProactiveManagerForSendTest(t, rooms)
+
+		if err := manager.SendMessage(ctx, roomID, "主动内容", false); err == nil {
+			t.Error("SendMessage() 端口报错时应返回错误")
+		}
+		if len(rooms.Sent) != 0 {
+			t.Errorf("Sent = %+v, want 空", rooms.Sent)
+		}
+		if got := manager.stateTracker.GetState(roomID).MessagesToday; got != 0 {
+			t.Errorf("MessagesToday = %d, want 0", got)
+		}
+	})
+}
+
+// newProactiveManagerForSendTest 构造一个只依赖房间端口替身的主动聊天管理器。
+func newProactiveManagerForSendTest(t *testing.T, rooms ProactiveRooms) *ProactiveManager {
+	t.Helper()
+
+	core, err := NewCore(&config.AIConfig{Enabled: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manager, err := NewProactiveManager(
+		&config.ProactiveConfig{
+			Enabled:            true,
+			MaxMessagesPerDay:  5,
+			MinIntervalMinutes: 1,
+			NewMember:          config.NewMemberConfig{Enabled: true, WelcomePrompt: "欢迎新成员"},
+		},
+		&Service{core: core},
+		rooms,
+		nil,
+		&config.AIConfig{},
+	)
+	if err != nil {
+		t.Fatalf("NewProactiveManager() error = %v", err)
+	}
+	return manager
+}
+
+// TestProactiveManager_OnNewMember_WelcomesThroughPort 断言新成员欢迎按会话元数据选择语气、
+// 投递到正确会话，并在元数据缺失时降级为群聊而不是静默失败。
+func TestProactiveManager_OnNewMember_WelcomesThroughPort(t *testing.T) {
+	ctx := context.Background()
+	roomID := TestRoomID(8)
+	userID := TestUserID(8)
+
+	tests := []struct {
+		name            string
+		info            chat.ConversationInfo
+		infoErr         error
+		wantContains    string
+		wantNotContains string
+	}{
+		{
+			name:            "两人会话按私聊语气",
+			info:            chat.ConversationInfo{Conversation: roomID.String(), Name: "私聊", MemberCount: 2},
+			wantContains:    "很高兴认识你",
+			wantNotContains: "加入",
+		},
+		{
+			name:            "多人会话按群聊语气",
+			info:            chat.ConversationInfo{Conversation: roomID.String(), Name: "群聊", MemberCount: 5},
+			wantContains:    "加入",
+			wantNotContains: "很高兴认识你",
+		},
+		{
+			name:            "元数据不可得降级为群聊",
+			infoErr:         errors.New("房间服务不可用"),
+			wantContains:    "加入",
+			wantNotContains: "很高兴认识你",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rooms := &FakeProactiveRooms{Info: tt.info, InfoErr: tt.infoErr}
+			manager := newProactiveManagerForSendTest(t, rooms)
+
+			if err := manager.OnNewMember(ctx, roomID, userID); err != nil {
+				t.Fatalf("OnNewMember() error = %v", err)
+			}
+
+			sent, ok := rooms.SentTo(roomID.String())
+			if !ok {
+				t.Fatalf("Sent = %+v, want 投递到 %s", rooms.Sent, roomID)
+			}
+			if !contains(sent.Text, tt.wantContains) {
+				t.Errorf("欢迎消息 = %q, want 含 %q", sent.Text, tt.wantContains)
+			}
+			if tt.wantNotContains != "" && contains(sent.Text, tt.wantNotContains) {
+				t.Errorf("欢迎消息 = %q, 不应含 %q", sent.Text, tt.wantNotContains)
+			}
+			if sent.Notice {
+				t.Error("欢迎消息应以普通消息投递")
+			}
+			if got := manager.stateTracker.GetState(roomID).MessagesToday; got != 1 {
+				t.Errorf("MessagesToday = %d, want 1", got)
+			}
+		})
+	}
+}
+
+// TestSilenceTrigger_Check_MapsConversationsToRoomIDs 断言静默检测把平台会话标识映射回
+// 状态跟踪器使用的房间 ID，并且只报告超过阈值的会话。
+func TestSilenceTrigger_Check_MapsConversationsToRoomIDs(t *testing.T) {
+	silentRoom := id.RoomID("!silent:example.com")
+	activeRoom := id.RoomID("!active:example.com")
+
+	rooms := &FakeProactiveRooms{Conversations: []chat.ConversationInfo{
+		{Conversation: silentRoom.String(), Name: "沉默房间"},
+		{Conversation: activeRoom.String(), Name: "活跃房间"},
+	}}
+	stateTracker := NewStateTracker()
+	stateTracker.RecordUserMessage(activeRoom)
+
+	trigger, err := NewSilenceTrigger(&config.SilenceConfig{
+		Enabled:              true,
+		ThresholdMinutes:     5,
+		CheckIntervalMinutes: 1,
+	}, stateTracker, rooms)
+	if err != nil {
+		t.Fatalf("NewSilenceTrigger() error = %v", err)
+	}
+
+	silent, err := trigger.Check(context.Background())
+	if err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	if len(silent) != 1 {
+		t.Fatalf("Check() = %+v, want 仅 1 个静默会话", silent)
+	}
+	if silent[0].RoomID != silentRoom {
+		t.Errorf("RoomID = %q, want %q", silent[0].RoomID, silentRoom)
+	}
+	if silent[0].SilentDuration <= 0 {
+		t.Errorf("SilentDuration = %v, want 正值", silent[0].SilentDuration)
+	}
+}
+
+// TestSilenceTrigger_Check_ListError 断言会话枚举失败时错误向上冒泡并保留上下文。
+func TestSilenceTrigger_Check_ListError(t *testing.T) {
+	rooms := &FakeProactiveRooms{ListErr: errors.New("网络中断")}
+
+	trigger, err := NewSilenceTrigger(&config.SilenceConfig{
+		Enabled:              true,
+		ThresholdMinutes:     5,
+		CheckIntervalMinutes: 1,
+	}, NewStateTracker(), rooms)
+	if err != nil {
+		t.Fatalf("NewSilenceTrigger() error = %v", err)
+	}
+
+	if _, err := trigger.Check(context.Background()); err == nil {
+		t.Fatal("Check() 应返回错误")
+	} else if !contains(err.Error(), "获取会话列表失败") {
+		t.Errorf("Check() error = %v, want 含「获取会话列表失败」", err)
+	}
+}
+
+// TestTriggerCoordinator_CheckScheduleTrigger_MapsConversations 断言定时触发按会话枚举产出结果，
+// 并对超频会话给出被速率限制阻止的结论。
+func TestTriggerCoordinator_CheckScheduleTrigger_MapsConversations(t *testing.T) {
+	limitedRoom := id.RoomID("!limited:example.com")
+	openRoom := id.RoomID("!open:example.com")
+
+	rooms := &FakeProactiveRooms{Conversations: []chat.ConversationInfo{
+		{Conversation: limitedRoom.String(), Name: "已超频"},
+		{Conversation: openRoom.String(), Name: "可说话"},
+	}}
+	cfg := &config.ProactiveConfig{
+		Enabled:           true,
+		MaxMessagesPerDay: 1,
+		Silence: config.SilenceConfig{
+			Enabled:              false,
+			ThresholdMinutes:     5,
+			CheckIntervalMinutes: 1,
+		},
+	}
+	stateTracker := NewStateTracker()
+	stateTracker.RecordProactiveMessage(limitedRoom)
+
+	silenceTrigger, err := NewSilenceTrigger(&cfg.Silence, stateTracker, rooms)
+	if err != nil {
+		t.Fatalf("NewSilenceTrigger() error = %v", err)
+	}
+	rateLimiter, err := NewRateLimiter(cfg, stateTracker)
+	if err != nil {
+		t.Fatalf("NewRateLimiter() error = %v", err)
+	}
+
+	// 定时触发只在当前分钟命中，跨分钟重建一次以免误判。
+	var results []TriggerResult
+	for attempt := 0; attempt < 3 && len(results) == 0; attempt++ {
+		scheduleTrigger, err := NewScheduleTrigger(&config.ScheduleConfig{
+			Enabled: true,
+			Times:   []string{time.Now().Format("15:04")},
+		})
+		if err != nil {
+			t.Fatalf("NewScheduleTrigger() error = %v", err)
+		}
+		coordinator, err := NewTriggerCoordinator(cfg, silenceTrigger, scheduleTrigger, rateLimiter, stateTracker, rooms)
+		if err != nil {
+			t.Fatalf("NewTriggerCoordinator() error = %v", err)
+		}
+		results = coordinator.checkScheduleTrigger(context.Background())
+	}
+
+	if len(results) != 2 {
+		t.Fatalf("checkScheduleTrigger() = %+v, want 2 条结果", results)
+	}
+
+	byRoom := make(map[id.RoomID]TriggerResult, len(results))
+	for _, r := range results {
+		byRoom[r.RoomID] = r
+	}
+	if got, ok := byRoom[openRoom]; !ok {
+		t.Errorf("结果缺少会话 %s，得到 %+v", openRoom, results)
+	} else if !got.ShouldTrigger {
+		t.Errorf("%s ShouldTrigger = false, want true（Reason=%q）", openRoom, got.Reason)
+	}
+	if got, ok := byRoom[limitedRoom]; !ok {
+		t.Errorf("结果缺少会话 %s，得到 %+v", limitedRoom, results)
+	} else if got.ShouldTrigger {
+		t.Errorf("%s ShouldTrigger = true, want false（已达每日上限）", limitedRoom)
+	} else if !contains(got.Reason, "速率限制") {
+		t.Errorf("%s Reason = %q, want 说明被速率限制阻止", limitedRoom, got.Reason)
+	}
+}
+
+// TestProactiveManager_HandleProactiveTrigger_UsesCachedDecision 断言缓存决策命中时不会再调用
+// 决策模型，并直接把缓存正文投递到触发的会话。
+func TestProactiveManager_HandleProactiveTrigger_UsesCachedDecision(t *testing.T) {
+	ctx := context.Background()
+	roomID := TestRoomID(9)
+
+	tests := []struct {
+		name        string
+		shouldSpeak bool
+		wantSent    bool
+	}{
+		{name: "命中且决定发言", shouldSpeak: true, wantSent: true},
+		{name: "命中但决定沉默", shouldSpeak: false, wantSent: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rooms := &FakeProactiveRooms{Info: chat.ConversationInfo{Name: "群聊", MemberCount: 5}}
+			manager := newProactiveManagerForSendTest(t, rooms)
+			threshold := manager.config.Silence.ThresholdMinutes
+
+			decisionCtx, err := GatherDecisionContext(ctx, roomID, manager.stateTracker, rooms, TriggerScheduled, threshold)
+			if err != nil {
+				t.Fatalf("GatherDecisionContext() error = %v", err)
+			}
+			manager.decisionCache.Set(roomID, decisionCtx, &DecisionResponse{
+				ShouldSpeak: tt.shouldSpeak,
+				Content:     "缓存的主动消息",
+				Reason:      "测试缓存",
+			})
+
+			if err := manager.handleProactiveTrigger(ctx, roomID, TriggerScheduled); err != nil {
+				t.Fatalf("handleProactiveTrigger() error = %v", err)
+			}
+
+			sent, ok := rooms.SentTo(roomID.String())
+			if ok != tt.wantSent {
+				t.Fatalf("Sent = %+v, want 投递=%v", rooms.Sent, tt.wantSent)
+			}
+			if tt.wantSent && sent.Text != "缓存的主动消息" {
+				t.Errorf("Text = %q, want 缓存的主动消息", sent.Text)
+			}
+			if tt.wantSent && sent.Notice {
+				t.Error("缓存决策正文应以普通消息投递")
+			}
+		})
+	}
 }

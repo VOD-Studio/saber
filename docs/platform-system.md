@@ -357,20 +357,22 @@ go test -tags goolm ./internal/platform
 3. 实现 `Platform.Start`（入站：订阅事件流 / 注册 webhook / sync loop）
 4. 在 `config.yaml` 的 `platforms.<name>` 下添加配置
 5. 在 `bot.go` 中 `reg.Register(<name>.New(cfg))`
+6. 如需 `!ai`/`!task` 等聊天命令：实现 `ai.ChatEntrypoint` 并 `aiService.SetChatEntrypoint(...)` + `aiService.RegisterTaskDelivery(name, adapter)`
+7. 如需主动聊天：实现 `ai.ProactiveRooms`（见下文）并在 `initProactiveManager` 注入
 
 ## 实施进度
 
 | 阶段 | 状态 | 落点 |
 |---|---|---|
 | S1 `platform` 接口与注册表 | 已完成 | `internal/platform/platform.go` |
-| S2 解耦 `ai.Service` | 基本完成 | 函数式选项 `WithMatrix`/`WithMCP`；`PromptProvider` 用 `chat.Session`；`chat.Message.ControlText` 承接引用回退剥离；`handleAICommand`、`!task`/`!schedule` 与 `!ai` 子命令回执均经 `ChatEntrypoint`；`ai` 内已无 `matrix.NewChatAdapter`，也不再调用 Matrix 普通消息发送；旧 `ResponseHandler`/`StreamEditor` 死代码已删除 |
-| S3 Matrix 平台接入端 | 进行中 | `internal/platform/matrix` 已持有账号、出站/投递 adapter、会话与事件定位，并注册任务投递；同步循环与事件处理器注册仍在 `internal/bot` |
+| S2 解耦 `ai.Service` | 基本完成 | 函数式选项 `WithMatrix`/`WithMCP`；`PromptProvider` 用 `chat.Session`；`chat.Message.ControlText` 承接引用回退剥离；`handleAICommand`、`!task`/`!schedule` 与 `!ai` 子命令回执均经 `ChatEntrypoint`；主动聊天经 `ai.ProactiveRooms`；`ai` 内已无 `matrix.NewChatAdapter`，也不再调用 Matrix 普通消息发送；旧 `ResponseHandler`/`StreamEditor` 死代码已删除 |
+| S3 Matrix 平台接入端 | 进行中 | `internal/platform/matrix` 已持有账号、出站/投递 adapter、会话与事件定位、主动聊天房间端口（`Rooms`），并注册任务投递；同步循环与事件处理器注册仍在 `internal/bot` |
 | S4 Terminal 平台 | 未开始 | HTTP server 仍在 `bot.go` 直接 serve |
 | S5 `bot.go` 按配置启动平台 | 部分 | `run()` 已经过 `Registry.Enabled()` 启动并统一 `Stop`，仅注册了 matrix |
 | S6 配置结构迁移 | 未开始 | 仍为顶层 `matrix:` 节 |
 | S7/S8 Violet 与联调 | 未开始 | — |
 
-`ai` 剩余的 Matrix 触点：`internal/ai/task_logs.go` 的任务文件上传（已由 `identity.Session.Platform == "matrix"` 限定）、`internal/ai/proactive*.go` 的房间元数据（`RoomService`/`RoomInfo`），以及 `internal/ai/service.go` 为注册 Matrix 命令、绑定旧历史账号与上传任务文件而保留的 `WithMatrix`。普通文本消息的发送已全部改经平台端口。
+`ai` 剩余的 Matrix 触点：`internal/ai/task_logs.go` 的任务文件上传（已由 `identity.Session.Platform == "matrix"` 限定），以及 `internal/ai/service.go` 为注册 Matrix 命令、绑定旧历史账号与上传任务文件而保留的 `WithMatrix`。普通文本消息的发送已全部改经平台端口，`internal/ai/proactive*.go` 也不再引用 `internal/matrix`（房间元数据与主动投递经 `ai.ProactiveRooms`）。
 
 出站正文的格式约定：`chat.Reply.Text` 以 Markdown 书写，渲染由平台 adapter 完成（Matrix 用 `format.RenderMarkdown` 转成 `org.matrix.custom.html`，并把原始 HTML 转义），`ai` 内不再出现任何平台标记语言。
 
@@ -387,3 +389,21 @@ go test -tags goolm ./internal/platform
 | `EventID` | 返回触发本次处理的原生事件标识，供回复定位与幂等键使用 |
 
 装配顺序见 `internal/bot/bot.go`：构造平台 → `aiService.SetChatEntrypoint` → `aiService.RegisterTaskDelivery` → `Registry.Register` → `Start(ctx, aiService.HandleChat)`。
+
+## 平台端口 `ai.ProactiveRooms`
+
+主动聊天没有入站消息可依据，需要平台提供四个能力；端口边界上一律使用字符串会话标识（`chat.ConversationInfo.Conversation`）：
+
+| 方法 | 作用 |
+|---|---|
+| `ListConversations` | 枚举可主动投递的会话，静默检测与定时触发以此为扫描范围 |
+| `ConversationInfo` | 读取单个会话的元数据（名称、成员数、是否端到端加密），用于决策上下文与欢迎语气 |
+| `SendText` | 以普通消息投递主动内容，返回平台消息标识 |
+| `SendNotice` | 以低优先级通知投递主动内容，返回平台消息标识 |
+
+Matrix 实现见 `internal/platform/matrix/rooms.go` 的 `Rooms`：它包装 `matrix.RoomService`，把房间快照收敛成 `chat.ConversationInfo`（未命名房间的名称回退为房间 ID，`rooms_test.go` 的字段漂移测试强制新字段要么映射要么显式丢弃）；`ai` 侧拿不到元数据时用 `degradedConversation` 降级为普通群聊，不阻断决策。装配见 `internal/bot/bot.go` 的 `initProactiveManager`。
+
+已知残留（不影响端口使用，列入后续阶段）：
+
+- `ai` 内部仍以 mautrix `id.RoomID` 作状态/频控/缓存键，`ProactiveManager` 对 Matrix 事件侧暴露的方法也仍收 `id.RoomID`，接入第二平台时需把状态键收敛为 `chat.Session`（与同步循环、事件处理器搬迁同批做）。
+- `SendText`/`SendNotice` 暂由本端口提供，因此主动消息还不走 `chat.Adapter` 的 Markdown 渲染；下一步应将投递归并到 `chat.Adapter`（需先给 `chat.Capabilities` 加 notice 能力），本端口只保留枚举与元数据。

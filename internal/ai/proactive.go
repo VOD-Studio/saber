@@ -11,7 +11,6 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"rua.plus/saber/internal/config"
-	"rua.plus/saber/internal/matrix"
 )
 
 // ProactiveManager 管理 AI 主动聊天功能。
@@ -24,7 +23,7 @@ import (
 type ProactiveManager struct {
 	config         *config.ProactiveConfig
 	aiService      *Service
-	roomService    *matrix.RoomService
+	rooms          ProactiveRooms
 	stateTracker   *StateTracker
 	triggerCoord   *TriggerCoordinator
 	decisionEngine *DecisionEngine
@@ -40,7 +39,7 @@ type ProactiveManager struct {
 // 参数:
 //   - cfg: 主动聊天配置（必须非 nil）
 //   - aiService: AI 服务实例（必须非 nil）
-//   - roomService: Matrix 房间服务实例（必须非 nil）
+//   - rooms: 平台房间端口（必须非 nil），提供会话元数据与主动投递能力
 //   - stateTracker: 状态跟踪器实例（可选，为 nil 时使用默认值）
 //   - globalAIConfig: 全局 AI 配置（必须非 nil）
 //
@@ -50,7 +49,7 @@ type ProactiveManager struct {
 func NewProactiveManager(
 	cfg *config.ProactiveConfig,
 	aiService *Service,
-	roomService *matrix.RoomService,
+	rooms ProactiveRooms,
 	stateTracker *StateTracker,
 	globalAIConfig *config.AIConfig,
 ) (*ProactiveManager, error) {
@@ -62,8 +61,8 @@ func NewProactiveManager(
 		return nil, fmt.Errorf("AI 服务不能为空")
 	}
 
-	if roomService == nil {
-		return nil, fmt.Errorf("matrix 房间服务不能为空")
+	if rooms == nil {
+		return nil, fmt.Errorf("主动聊天房间端口不能为空")
 	}
 
 	if globalAIConfig == nil {
@@ -80,7 +79,7 @@ func NewProactiveManager(
 	}
 
 	// 创建触发器
-	silenceTrigger, err := NewSilenceTrigger(&cfg.Silence, stateTracker, roomService)
+	silenceTrigger, err := NewSilenceTrigger(&cfg.Silence, stateTracker, rooms)
 	if err != nil {
 		return nil, fmt.Errorf("创建静默触发器失败：%w", err)
 	}
@@ -96,7 +95,7 @@ func NewProactiveManager(
 	}
 
 	// 创建触发协调器
-	triggerCoord, err := NewTriggerCoordinator(cfg, silenceTrigger, scheduleTrigger, rateLimiter, stateTracker, roomService)
+	triggerCoord, err := NewTriggerCoordinator(cfg, silenceTrigger, scheduleTrigger, rateLimiter, stateTracker, rooms)
 	if err != nil {
 		return nil, fmt.Errorf("创建触发协调器失败：%w", err)
 	}
@@ -113,7 +112,7 @@ func NewProactiveManager(
 	manager := &ProactiveManager{
 		config:         cfg,
 		aiService:      aiService,
-		roomService:    roomService,
+		rooms:          rooms,
 		stateTracker:   stateTracker,
 		triggerCoord:   triggerCoord,
 		decisionEngine: decisionEngine,
@@ -327,7 +326,7 @@ func (m *ProactiveManager) handleProactiveTrigger(ctx context.Context, roomID id
 
 	// 收集决策上下文
 	silenceThreshold := m.config.Silence.ThresholdMinutes
-	decisionCtx, err := GatherDecisionContext(ctx, roomID, m.stateTracker, m.roomService, triggerType, silenceThreshold)
+	decisionCtx, err := GatherDecisionContext(ctx, roomID, m.stateTracker, m.rooms, triggerType, silenceThreshold)
 	if err != nil {
 		return fmt.Errorf("收集决策上下文失败: %w", err)
 	}
@@ -470,10 +469,10 @@ func (m *ProactiveManager) OnNewMember(ctx context.Context, roomID id.RoomID, us
 	logger.Info("处理新成员欢迎")
 
 	// 获取房间信息以判断房间类型
-	roomInfo, err := m.roomService.GetRoomInfo(ctx, roomID.String())
+	roomInfo, err := m.rooms.ConversationInfo(ctx, roomID.String())
 	if err != nil {
 		logger.Debug("获取房间信息失败，使用默认群聊语气", "error", err)
-		roomInfo = &matrix.RoomInfo{ID: roomID, MemberCount: 0}
+		roomInfo = degradedConversation(roomID.String())
 	}
 
 	// 判断是否为私聊房间（成员数为2）
@@ -604,7 +603,7 @@ func (m *ProactiveManager) generateWelcomeMessage(ctx context.Context, userID id
 // 返回值:
 //   - error: 发送过程中发生的错误
 func (m *ProactiveManager) sendWelcomeMessage(ctx context.Context, roomID id.RoomID, message string) error {
-	_, err := m.roomService.SendMessage(ctx, roomID.String(), message)
+	_, err := m.rooms.SendText(ctx, roomID.String(), message)
 	if err != nil {
 		return fmt.Errorf("发送消息到房间 %s 失败：%w", roomID, err)
 	}
@@ -634,12 +633,12 @@ func (m *ProactiveManager) SendMessage(ctx context.Context, roomID id.RoomID, me
 	logger.Debug("准备发送主动消息")
 
 	// 根据消息类型选择发送方法
-	var eventID id.EventID
+	var eventID string
 	var err error
 	if isNotice {
-		eventID, err = m.roomService.SendNotice(ctx, roomID.String(), message)
+		eventID, err = m.rooms.SendNotice(ctx, roomID.String(), message)
 	} else {
-		eventID, err = m.roomService.SendMessage(ctx, roomID.String(), message)
+		eventID, err = m.rooms.SendText(ctx, roomID.String(), message)
 	}
 
 	if err != nil {
@@ -680,7 +679,7 @@ type TriggerCoordinator struct {
 	scheduleTrigger *ScheduleTrigger
 	rateLimiter     *RateLimiter
 	stateTracker    *StateTracker
-	roomLister      RoomLister // 新增：用于获取房间列表
+	conversations   ConversationLister // 用于枚举可主动投递的会话
 }
 
 // NewTriggerCoordinator 创建并返回一个新的触发协调器实例。
@@ -691,7 +690,7 @@ type TriggerCoordinator struct {
 //   - scheduleTrigger: 定时触发器（必须非 nil）
 //   - rateLimiter: 速率限制器（必须非 nil）
 //   - stateTracker: 状态跟踪器（必须非 nil）
-//   - roomLister: 房间列表获取接口（必须非 nil）
+//   - conversations: 会话枚举端口（必须非 nil）
 //
 // 返回值:
 //   - *TriggerCoordinator: 创建的触发协调器
@@ -702,7 +701,7 @@ func NewTriggerCoordinator(
 	scheduleTrigger *ScheduleTrigger,
 	rateLimiter *RateLimiter,
 	stateTracker *StateTracker,
-	roomLister RoomLister, // 新增参数
+	conversations ConversationLister,
 ) (*TriggerCoordinator, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("主动聊天配置不能为空")
@@ -724,8 +723,8 @@ func NewTriggerCoordinator(
 		return nil, fmt.Errorf("状态跟踪器不能为空")
 	}
 
-	if roomLister == nil {
-		return nil, fmt.Errorf("房间列表获取接口不能为空")
+	if conversations == nil {
+		return nil, fmt.Errorf("会话列表获取端口不能为空")
 	}
 
 	coordinator := &TriggerCoordinator{
@@ -734,7 +733,7 @@ func NewTriggerCoordinator(
 		scheduleTrigger: scheduleTrigger,
 		rateLimiter:     rateLimiter,
 		stateTracker:    stateTracker,
-		roomLister:      roomLister, // 新增
+		conversations:   conversations,
 	}
 
 	slog.Debug("触发协调器初始化完成",
@@ -831,25 +830,26 @@ func (tc *TriggerCoordinator) checkScheduleTrigger(ctx context.Context) []Trigge
 		return results
 	}
 
-	// 获取所有已加入的房间
-	rooms, err := tc.roomLister.GetJoinedRooms(ctx)
+	// 获取所有可主动投递的会话
+	rooms, err := tc.conversations.ListConversations(ctx)
 	if err != nil {
-		slog.Error("获取已加入房间失败", "error", err)
+		slog.Error("获取可主动投递会话失败", "error", err)
 		return results
 	}
 
-	slog.Debug("定时触发器触发，检查房间列表",
+	slog.Debug("定时触发器触发，检查会话列表",
 		"room_count", len(rooms),
 		"scheduled_times", tc.scheduleTrigger.GetScheduledTimes())
 
 	for _, room := range rooms {
+		roomID := id.RoomID(room.Conversation)
 		result := TriggerResult{
 			TriggerType: "schedule",
-			RoomID:      room.ID,
+			RoomID:      roomID,
 		}
 
 		// 应用速率限制
-		if !tc.rateLimiter.CanSpeak(room.ID) {
+		if !tc.rateLimiter.CanSpeak(roomID) {
 			result.ShouldTrigger = false
 			result.Reason = "被速率限制阻止"
 			results = append(results, result)

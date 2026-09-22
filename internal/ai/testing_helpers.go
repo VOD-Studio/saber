@@ -4,12 +4,14 @@
 package ai
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
 
 	"maunium.net/go/mautrix/id"
 
+	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
 )
 
@@ -119,3 +121,79 @@ func AssertNever(t *testing.T, condition func() bool, duration time.Duration, me
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// ProactiveSend 记录一次主动投递，便于断言目标会话与消息类型。
+type ProactiveSend struct {
+	// Conversation 是收到消息的平台会话标识。
+	Conversation string
+	// Text 是投递的正文。
+	Text string
+	// Notice 表示是否以通知消息投递。
+	Notice bool
+}
+
+// FakeProactiveRooms 是 ProactiveRooms 的共享测试替身：
+// 返回预设的会话元数据，并记录每一次主动投递。
+type FakeProactiveRooms struct {
+	// Conversations 是 ListConversations 的返回值。
+	Conversations []chat.ConversationInfo
+	// Info 是 ConversationInfo 的返回值；未填会话标识时回退为被查询的标识。
+	Info chat.ConversationInfo
+	// ListErr / InfoErr / SendErr 分别让枚举、元数据与投递失败，用于验证降级分支。
+	ListErr error
+	InfoErr error
+	SendErr error
+	// Sent 按调用顺序记录投递。
+	Sent []ProactiveSend
+}
+
+// ListConversations 返回预设的会话列表。
+func (f *FakeProactiveRooms) ListConversations(context.Context) ([]chat.ConversationInfo, error) {
+	if f.ListErr != nil {
+		return nil, f.ListErr
+	}
+	return f.Conversations, nil
+}
+
+// ConversationInfo 返回预设的会话元数据。
+func (f *FakeProactiveRooms) ConversationInfo(_ context.Context, conversationID string) (chat.ConversationInfo, error) {
+	if f.InfoErr != nil {
+		return chat.ConversationInfo{}, f.InfoErr
+	}
+	info := f.Info
+	if info.Conversation == "" {
+		info.Conversation = conversationID
+	}
+	return info, nil
+}
+
+// SendText 记录一次普通消息投递。
+func (f *FakeProactiveRooms) SendText(_ context.Context, conversationID, text string) (string, error) {
+	return f.send(conversationID, text, false)
+}
+
+// SendNotice 记录一次通知消息投递。
+func (f *FakeProactiveRooms) SendNotice(_ context.Context, conversationID, text string) (string, error) {
+	return f.send(conversationID, text, true)
+}
+
+func (f *FakeProactiveRooms) send(conversationID, text string, notice bool) (string, error) {
+	if f.SendErr != nil {
+		return "", f.SendErr
+	}
+	f.Sent = append(f.Sent, ProactiveSend{Conversation: conversationID, Text: text, Notice: notice})
+	return "$fake_event", nil
+}
+
+// SentTo 返回发往指定会话的第一条投递，没有则返回 false。
+func (f *FakeProactiveRooms) SentTo(conversationID string) (ProactiveSend, bool) {
+	for _, s := range f.Sent {
+		if s.Conversation == conversationID {
+			return s, true
+		}
+	}
+	return ProactiveSend{}, false
+}
+
+// 确保共享替身满足主动聊天房间端口。
+var _ ProactiveRooms = (*FakeProactiveRooms)(nil)

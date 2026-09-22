@@ -11,7 +11,6 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"rua.plus/saber/internal/config"
-	"rua.plus/saber/internal/matrix"
 )
 
 // RateLimiter 管理主动聊天的速率限制。
@@ -345,13 +344,6 @@ func (t *ScheduleTrigger) IsTriggeredToday(timeStr string) bool {
 	return t.triggeredToday[timeStr]
 }
 
-// RoomLister 定义获取已加入房间的接口。
-//
-// 该接口用于解耦 SilenceTrigger 与具体的 RoomService 实现，便于测试。
-type RoomLister interface {
-	GetJoinedRooms(ctx context.Context) ([]matrix.RoomInfo, error)
-}
-
 // SilentRoom 表示一个处于静默状态的房间。
 type SilentRoom struct {
 	// RoomID 是房间的唯一标识符。
@@ -370,9 +362,9 @@ type SilentRoom struct {
 // - 计算静默时长并判断是否超过阈值
 // - 返回需要触发主动消息的房间列表
 type SilenceTrigger struct {
-	config       *config.SilenceConfig
-	stateTracker *StateTracker
-	roomLister   RoomLister
+	config        *config.SilenceConfig
+	stateTracker  *StateTracker
+	conversations ConversationLister
 }
 
 // NewSilenceTrigger 创建并返回一个新的静默触发器实例。
@@ -380,7 +372,7 @@ type SilenceTrigger struct {
 // 参数:
 //   - cfg: 静默检测配置（必须非 nil）
 //   - stateTracker: 状态跟踪器实例（必须非 nil）
-//   - roomLister: 房间列表获取接口（必须非 nil）
+//   - conversations: 会话枚举端口（必须非 nil）
 //
 // 返回值:
 //   - *SilenceTrigger: 创建的静默触发器
@@ -388,7 +380,7 @@ type SilenceTrigger struct {
 func NewSilenceTrigger(
 	cfg *config.SilenceConfig,
 	stateTracker *StateTracker,
-	roomLister RoomLister,
+	conversations ConversationLister,
 ) (*SilenceTrigger, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("静默检测配置不能为空")
@@ -398,14 +390,14 @@ func NewSilenceTrigger(
 		return nil, fmt.Errorf("状态跟踪器不能为空")
 	}
 
-	if roomLister == nil {
-		return nil, fmt.Errorf("房间列表获取接口不能为空")
+	if conversations == nil {
+		return nil, fmt.Errorf("会话列表获取端口不能为空")
 	}
 
 	trigger := &SilenceTrigger{
-		config:       cfg,
-		stateTracker: stateTracker,
-		roomLister:   roomLister,
+		config:        cfg,
+		stateTracker:  stateTracker,
+		conversations: conversations,
 	}
 
 	slog.Debug("静默触发器初始化完成",
@@ -416,7 +408,7 @@ func NewSilenceTrigger(
 	return trigger, nil
 }
 
-// Check 检查所有已加入的房间，返回处于静默状态的房间列表。
+// Check 检查所有可主动投递的会话，返回处于静默状态的会话列表。
 //
 // 它执行以下步骤：
 // 1. 获取机器人已加入的所有房间
@@ -431,9 +423,9 @@ func NewSilenceTrigger(
 //   - []SilentRoom: 处于静默状态的房间列表
 //   - error: 检查过程中的错误
 func (t *SilenceTrigger) Check(ctx context.Context) ([]SilentRoom, error) {
-	rooms, err := t.roomLister.GetJoinedRooms(ctx)
+	rooms, err := t.conversations.ListConversations(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("获取已加入房间失败：%w", err)
+		return nil, fmt.Errorf("获取会话列表失败：%w", err)
 	}
 
 	slog.Debug("开始静默检测", "room_count", len(rooms))
@@ -450,8 +442,11 @@ func (t *SilenceTrigger) Check(ctx context.Context) ([]SilentRoom, error) {
 		default:
 		}
 
+		// 会话标识在平台侧是字符串，状态跟踪器按房间 ID 维标
+		roomID := id.RoomID(room.Conversation)
+
 		// 获取房间状态
-		state := t.stateTracker.GetState(room.ID)
+		state := t.stateTracker.GetState(roomID)
 
 		// 计算静默时长
 		var silentDuration time.Duration
@@ -466,13 +461,13 @@ func (t *SilenceTrigger) Check(ctx context.Context) ([]SilentRoom, error) {
 		// 检查是否超过阈值
 		if silentDuration >= threshold {
 			silentRooms = append(silentRooms, SilentRoom{
-				RoomID:          room.ID,
+				RoomID:          roomID,
 				SilentDuration:  silentDuration,
 				LastMessageTime: state.LastMessageTime,
 			})
 
 			slog.Debug("检测到静默房间",
-				"room_id", room.ID,
+				"room_id", roomID,
 				"silent_duration", silentDuration.Round(time.Minute),
 				"threshold", threshold)
 		}

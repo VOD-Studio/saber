@@ -15,7 +15,6 @@ import (
 	"maunium.net/go/mautrix/id"
 
 	"rua.plus/saber/internal/config"
-	"rua.plus/saber/internal/matrix"
 )
 
 // TriggerType 表示触发主动聊天的原因类型。
@@ -77,23 +76,16 @@ type RoomStateProvider interface {
 	GetState(roomID id.RoomID) *RoomState
 }
 
-// RoomInfoProvider 定义获取房间信息的接口。
-//
-// 此接口用于解耦 RoomService 和决策上下文收集逻辑。
-type RoomInfoProvider interface {
-	GetRoomInfo(ctx context.Context, roomID string) (*matrix.RoomInfo, error)
-}
-
 // GatherDecisionContext 收集指定房间的 AI 决策上下文。
 //
-// 它从 StateTracker 获取状态信息，从 RoomService 获取房间元数据，
+// 它从 StateTracker 获取状态信息，从平台房间端口获取会话元数据，
 // 并计算活动水平等派生指标。
 //
 // 参数:
 //   - ctx: 用于取消和超时的上下文
 //   - roomID: 要收集上下文的房间 ID
 //   - stateProvider: 提供房间状态的接口
-//   - roomInfoProvider: 提供房间信息的接口
+//   - infoProvider: 提供会话元数据的接口
 //   - triggerType: 触发此次决策的原因
 //   - silenceThresholdMinutes: 静默检测阈值（分钟），用于决策判断
 //
@@ -104,7 +96,7 @@ func GatherDecisionContext(
 	ctx context.Context,
 	roomID id.RoomID,
 	stateProvider RoomStateProvider,
-	roomInfoProvider RoomInfoProvider,
+	infoProvider ConversationInfoProvider,
 	triggerType TriggerType,
 	silenceThresholdMinutes int,
 ) (*DecisionContext, error) {
@@ -120,16 +112,11 @@ func GatherDecisionContext(
 		minutesSinceLast = calculateMinutesSinceLast(state.LastMessageTime)
 	}
 
-	// 从房间服务获取房间元数据
-	roomInfo, err := roomInfoProvider.GetRoomInfo(ctx, roomID.String())
+	// 从平台房间端口获取会话元数据
+	roomInfo, err := infoProvider.ConversationInfo(ctx, roomID.String())
 	if err != nil {
-		// 如果获取房间信息失败，使用默认值继续
-		roomInfo = &matrix.RoomInfo{
-			ID:          roomID,
-			Name:        roomID.String(),
-			MemberCount: 0,
-			IsEncrypted: false,
-		}
+		// 平台未提供元数据时降级为普通群聊，不阻断决策
+		roomInfo = degradedConversation(roomID.String())
 	}
 
 	// 计算活动水平
@@ -147,7 +134,7 @@ func GatherDecisionContext(
 		TriggerType:             triggerType,
 		MemberCount:             roomInfo.MemberCount,
 		IsDirect:                isDirect,
-		IsEncrypted:             roomInfo.IsEncrypted,
+		IsEncrypted:             roomInfo.Encrypted,
 		SilenceThresholdMinutes: silenceThresholdMinutes,
 	}, nil
 }

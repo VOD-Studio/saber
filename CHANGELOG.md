@@ -68,6 +68,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 主动聊天的房间元数据改经平台端口 `ai.ProactiveRooms`：会话枚举与元数据统一由新增的 `chat.ConversationInfo` 描述，`internal/platform/matrix` 的 `Rooms` 包装 Matrix 房间服务作为参考实现，`internal/ai/proactive*.go` 不再依赖 `internal/matrix`；未命名会话的名称回退为会话标识，决策提示词与日志不再出现空房间名
+
 - `!ai clear/context/models/switch/current` 的回执改经平台注入的 `ChatEntrypoint` adapter 发出并以 Markdown 书写：`internal/ai` 不再调用 `matrix.CommandService` 的任何普通消息发送方法，`WithMatrix` 只剩命令注册、旧历史账号与任务文件上传；未接入平台时统一返回 `ai.ErrNoChatEntrypoint`，不再因 nil 命令服务 panic
 
 - 删除 `ai` 中已无调用方的旧响应链路（`ResponseHandler`、`StreamEditor`、`SmartStreamHandler` 与 `ResponseContext`/`ResponseMode`）：自统一 Agent 运行时接入后 `Service.respHandler` 仅构造不使用，流式展示已全部由 `conversation.Processor` 与 `chat.Adapter` 承担；`internal/ai` 因此不再直接发送 Matrix 事件回复、typing 与 `m.replace` 关系

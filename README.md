@@ -638,7 +638,7 @@ saber/
     chat/                          # 通用消息、会话、回复与展示能力契约
       memory/                      # 无网络聊天 adapter
     platform/                      # 可插拔平台接入端接口与注册表
-      matrix/                      # Matrix 平台接入端：聊天命令入口与任务投递
+      matrix/                      # Matrix 平台接入端：聊天命令入口、任务投递与主动聊天房间端口
     conversation/                  # 平台无关的历史、串行调度与回复交付
     task/                          # SQLite 任务与定时计划、执行日志、目录互斥和结果重试
     execution/                     # 容器命令/文件工具、权限检查、日志与交付文件
@@ -694,13 +694,11 @@ saber/
       model_compat.go              # 旧模型名称兼容，不包含重复实现
       commands.go                  # Matrix AI 命令路由
       context_manager.go           # Matrix 历史命令适配通用存储
-      stream_handler.go            # 旧流式处理入口
-      stream_editor.go             # 旧 Matrix 编辑器
       proactive.go                 # 主动聊天管理器
+      proactive_rooms.go           # 主动聊天的平台房间端口与会话降级
       proactive_triggers.go        # 触发器实现（静默/定时）
       proactive_state.go           # 房间状态跟踪
       proactive_decision.go        # AI 决策引擎
-      response.go                  # 响应处理
       tools.go                     # 工具管理
     mcp/
       manager.go                   # MCP 管理器

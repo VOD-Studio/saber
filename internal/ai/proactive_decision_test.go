@@ -9,8 +9,8 @@ import (
 
 	"maunium.net/go/mautrix/id"
 
+	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
-	"rua.plus/saber/internal/matrix"
 )
 
 // mockStateProvider 是 RoomStateProvider 的模拟实现。
@@ -22,13 +22,16 @@ func (m *mockStateProvider) GetState(roomID id.RoomID) *RoomState {
 	return m.state
 }
 
-// mockRoomInfoProvider 是 RoomInfoProvider 的模拟实现。
+// mockRoomInfoProvider 是 ConversationInfoProvider 的模拟实现。
 type mockRoomInfoProvider struct {
-	info *matrix.RoomInfo
+	info chat.ConversationInfo
 	err  error
+	// queriedID 记录最后一次被查询的会话标识，用于断言调用方传参正确。
+	queriedID string
 }
 
-func (m *mockRoomInfoProvider) GetRoomInfo(ctx context.Context, roomID string) (*matrix.RoomInfo, error) {
+func (m *mockRoomInfoProvider) ConversationInfo(ctx context.Context, conversationID string) (chat.ConversationInfo, error) {
+	m.queriedID = conversationID
 	return m.info, m.err
 }
 
@@ -38,7 +41,7 @@ func TestGatherDecisionContext(t *testing.T) {
 	tests := []struct {
 		name                 string
 		state                *RoomState
-		roomInfo             *matrix.RoomInfo
+		roomInfo             chat.ConversationInfo
 		providerErr          error
 		triggerType          TriggerType
 		wantRoomName         string
@@ -53,11 +56,11 @@ func TestGatherDecisionContext(t *testing.T) {
 				LastMessageTime: time.Now().Add(-30 * time.Minute),
 				MessagesToday:   2,
 			},
-			roomInfo: &matrix.RoomInfo{
-				ID:          roomID,
-				Name:        "测试房间",
-				MemberCount: 5,
-				IsEncrypted: true,
+			roomInfo: chat.ConversationInfo{
+				Conversation: roomID.String(),
+				Name:         "测试房间",
+				MemberCount:  5,
+				Encrypted:    true,
 			},
 			triggerType:          TriggerInactivity,
 			wantRoomName:         "测试房间",
@@ -72,7 +75,7 @@ func TestGatherDecisionContext(t *testing.T) {
 				LastMessageTime: time.Now().Add(-120 * time.Minute),
 				MessagesToday:   1,
 			},
-			roomInfo:             nil,
+			roomInfo:             chat.ConversationInfo{},
 			providerErr:          fmt.Errorf("获取房间信息失败"),
 			triggerType:          TriggerScheduled,
 			wantRoomName:         roomID.String(),
@@ -87,11 +90,11 @@ func TestGatherDecisionContext(t *testing.T) {
 				LastMessageTime: time.Time{},
 				MessagesToday:   0,
 			},
-			roomInfo: &matrix.RoomInfo{
-				ID:          roomID,
-				Name:        "新房间",
-				MemberCount: 2,
-				IsEncrypted: false,
+			roomInfo: chat.ConversationInfo{
+				Conversation: roomID.String(),
+				Name:         "新房间",
+				MemberCount:  2,
+				Encrypted:    false,
 			},
 			triggerType:          TriggerNewUser,
 			wantRoomName:         "新房间",
@@ -113,6 +116,11 @@ func TestGatherDecisionContext(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GatherDecisionContext() error = %v, wantErr %v", err, tt.wantErr)
 				return
+			}
+
+			// 端口必须以平台会话字符串标识收到查询，而不是房间名、空值或错房间。
+			if roomInfoProvider.queriedID != roomID.String() {
+				t.Errorf("ConversationInfo() 收到会话标识 = %q, want %q", roomInfoProvider.queriedID, roomID.String())
 			}
 
 			if dc.RoomName != tt.wantRoomName {
@@ -1221,11 +1229,11 @@ func TestGatherDecisionContext_IsDirect(t *testing.T) {
 				},
 			}
 			roomInfoProvider := &mockRoomInfoProvider{
-				info: &matrix.RoomInfo{
-					ID:          roomID,
-					Name:        "测试房间",
-					MemberCount: tt.memberCount,
-					IsEncrypted: false,
+				info: chat.ConversationInfo{
+					Conversation: roomID.String(),
+					Name:         "测试房间",
+					MemberCount:  tt.memberCount,
+					Encrypted:    false,
 				},
 			}
 
