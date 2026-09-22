@@ -61,6 +61,16 @@ func (p *Platform) DeliveryAdapter() chat.Adapter {
 	return matrix.NewChatAdapter(p.commands, p.media, p.cfg.Matrix.Media, false, nil)
 }
 
+// NormalizeCommand 实现 ai.ChatEntrypoint：把平台命令文本规范化为通用消息，
+// 返回的 adapter 只做一次性发送，供 !task list 这类只读命令回执。
+func (p *Platform) NormalizeCommand(ctx context.Context, userID id.UserID, roomID id.RoomID, text string) (chat.Message, chat.Adapter, error) {
+	if p.commands == nil {
+		return chat.Message{}, nil, errors.New("matrix 平台缺少命令服务，无法规范化命令")
+	}
+	adapter := matrix.NewChatAdapter(p.commands, nil, p.cfg.Matrix.Media, false, nil)
+	return adapter.Message(ctx, userID, roomID, text), adapter, nil
+}
+
 // HandleCommand 实现 ai.ChatEntrypoint：规范化平台命令后按指定模型走共享聊天链路。
 // modelName 为空时退回 Start 记录的通用入口，由其选择默认模型。
 func (p *Platform) HandleCommand(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string, modelName string) error {

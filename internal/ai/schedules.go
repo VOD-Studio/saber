@@ -13,7 +13,6 @@ import (
 	"github.com/sashabaranov/go-openai"
 	"maunium.net/go/mautrix/id"
 	"rua.plus/saber/internal/chat"
-	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/task"
 )
 
@@ -44,8 +43,10 @@ type scheduleCommand struct{ service *Service }
 
 func (c *scheduleCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
 	s := c.service
-	adapter := matrix.NewChatAdapter(s.matrixService, nil, s.config.Matrix.Media, false, nil)
-	msg := adapter.Message(ctx, userID, roomID, "!schedule "+strings.Join(args, " "))
+	msg, adapter, err := s.NormalizeCommand(ctx, userID, roomID, "!schedule "+strings.Join(args, " "))
+	if err != nil {
+		return err
+	}
 	in := scheduleInput{}
 	if len(args) == 1 && args[0] == "list" {
 		in.Action = "list"

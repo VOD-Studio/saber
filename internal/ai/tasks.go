@@ -19,7 +19,6 @@ import (
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/execution"
-	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/task"
 )
 
@@ -176,8 +175,10 @@ func (c *taskCommand) Handle(ctx context.Context, userID id.UserID, roomID id.Ro
 	if len(args) > 1 && args[0] == "run" {
 		return s.handleAICommand(ctx, userID, roomID, s.GetModelRegistry().GetDefault(), args[1:])
 	}
-	adapter := matrix.NewChatAdapter(s.matrixService, nil, s.config.Matrix.Media, false, nil)
-	message := adapter.Message(ctx, userID, roomID, "!task "+strings.Join(args, " "))
+	message, adapter, err := s.NormalizeCommand(ctx, userID, roomID, "!task "+strings.Join(args, " "))
+	if err != nil {
+		return err
+	}
 	action := ""
 	var taskID int64
 	if len(args) == 1 && args[0] == "list" {

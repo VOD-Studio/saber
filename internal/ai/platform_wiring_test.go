@@ -26,6 +26,12 @@ func (e matrixEntrypoint) HandleCommand(ctx context.Context, userID id.UserID, r
 	return adapter.Handle(ctx, userID, roomID, args)
 }
 
+// NormalizeCommand 与生产实现一致：不解析媒体、不做流式编辑。
+func (e matrixEntrypoint) NormalizeCommand(ctx context.Context, userID id.UserID, roomID id.RoomID, text string) (chat.Message, chat.Adapter, error) {
+	adapter := matrix.NewChatAdapter(e.service.matrixService, nil, e.service.config.Matrix.Media, false, nil)
+	return adapter.Message(ctx, userID, roomID, text), adapter, nil
+}
+
 // wireMatrixPlatform 模拟 Matrix 平台接入端的装配：注入聊天入口并注册任务结果投递。
 // 任务未启用时只装配聊天入口。
 func wireMatrixPlatform(t *testing.T, service *Service, commands *matrix.CommandService, media *matrix.MediaService) {

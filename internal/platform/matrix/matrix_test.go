@@ -218,3 +218,25 @@ func TestPlatformDeliveryAdapterSends(t *testing.T) {
 		t.Fatalf("未使用幂等事务发送: %s", path)
 	}
 }
+
+// TestPlatformNormalizeCommand 验证只读命令复用同一套会话作用域，且回执 adapter 不做流式编辑。
+func TestPlatformNormalizeCommand(t *testing.T) {
+	p, _ := newPlatform(t, nil, true)
+	ctx := matrix.WithMessageRelations(matrix.WithEventID(context.Background(), "$cmd"), "$parent", "$thread")
+	message, adapter, err := p.NormalizeCommand(ctx, "@user:local", "!room:local", "!task list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.Text != "!task list" || message.ID != "$cmd" || message.ReplyTo != "$parent" {
+		t.Fatalf("命令规范化失败: %+v", message)
+	}
+	if message.Session.Conversation != "!room:local" || message.Session.Platform != "matrix" {
+		t.Fatalf("会话作用域失败: %+v", message.Session)
+	}
+	if got := adapter.Capabilities(); got.Edit {
+		t.Fatalf("只读命令回执不应流式编辑: %+v", got)
+	}
+	if _, _, err := platformmatrix.New(config.DefaultConfig(), nil, nil, nil).NormalizeCommand(ctx, "@user:local", "!room:local", "!task list"); err == nil {
+		t.Fatal("缺少命令服务时仍规范化了命令")
+	}
+}

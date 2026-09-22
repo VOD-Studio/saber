@@ -66,6 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `ai` 的只读命令（`!task list/status/cancel/logs`、`!schedule ...`）改经平台注入的 `ChatEntrypoint.NormalizeCommand` 取得通用消息与回执 adapter，`ai/tasks.go`、`ai/schedules.go` 不再 import `internal/matrix`；`ChatEntrypoint` 未注入时统一返回 `ai.ErrNoChatEntrypoint`
+
 - `chat.Message` 新增 `ControlText` 与 `CommandText()`：Matrix 引用回退的剥离改由接入层 adapter 完成，`ai` 识别任务控制指令时不再读取 Matrix 上下文键，`matrix.GetReplyBody` 收敛为包内私有
 
 - `ai.NewService` 改为函数式选项签名 `NewService(cfg, opts...)`：Matrix 命令与媒体服务经 `WithMatrix` 注入、MCP 管理器经 `WithMCP` 注入，不带选项即可构造无平台依赖的 AI 服务，对应 `docs/platform-system.md` S2 的解耦步骤

@@ -4,6 +4,7 @@ package ai
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -30,12 +31,18 @@ type PromptProvider interface {
 }
 
 // ChatEntrypoint 是平台接入端注入的聊天命令入口。
-// 实现负责把该平台的原生命令参数规范化为 chat.Message，并携带 adapter 交给 Service 处理，
+// 实现负责把该平台的原生命令规范化为 chat.Message，并携带 adapter 交给 Service 处理，
 // 因此 ai 核心无需知道具体平台的 adapter 构造方式。
 type ChatEntrypoint interface {
 	// HandleCommand 处理平台聊天命令，modelName 为空时使用默认模型。
 	HandleCommand(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string, modelName string) error
+	// NormalizeCommand 把平台命令文本（含 "!task list" 这样的前缀）规范化为通用消息，
+	// 并返回面向该会话的出站 adapter，供只读命令复用同一套会话作用域与回复能力。
+	NormalizeCommand(ctx context.Context, userID id.UserID, roomID id.RoomID, text string) (chat.Message, chat.Adapter, error)
 }
+
+// ErrNoChatEntrypoint 表示当前没有平台接入端接管聊天命令。
+var ErrNoChatEntrypoint = errors.New("未接入聊天平台，无法处理聊天命令")
 
 // Service 装配模型、通用聊天处理器以及旧 Matrix 命令兼容入口。
 type Service struct {
@@ -418,9 +425,17 @@ func (s *Service) GenerateStreamingSimpleResponse(ctx context.Context, modelName
 // handleAICommand 把平台聊天命令交给注入的入口处理，ai 自身不再构造平台 adapter。
 func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID id.RoomID, modelName string, args []string) error {
 	if s.entry == nil {
-		return fmt.Errorf("未接入聊天平台，无法处理聊天命令")
+		return ErrNoChatEntrypoint
 	}
 	return s.entry.HandleCommand(ctx, userID, roomID, args, modelName)
+}
+
+// NormalizeCommand 由注入的平台入口把命令文本规范化为通用消息与出站 adapter。
+func (s *Service) NormalizeCommand(ctx context.Context, userID id.UserID, roomID id.RoomID, text string) (chat.Message, chat.Adapter, error) {
+	if s.entry == nil {
+		return chat.Message{}, nil, ErrNoChatEntrypoint
+	}
+	return s.entry.NormalizeCommand(ctx, userID, roomID, text)
 }
 
 // HandleChat 是内存或其他聊天 adapter 可复用的统一消息入口。
