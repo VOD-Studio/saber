@@ -20,7 +20,7 @@ func TestNewService_WithMCPManager(t *testing.T) {
 	}
 	mcpManager := mcp.NewManager(mcpCfg)
 
-	service, err := NewService(&cfg, nil, mcpManager, nil)
+	service, err := NewService(&cfg, WithMCP(mcpManager))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

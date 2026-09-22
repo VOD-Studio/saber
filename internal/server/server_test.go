@@ -55,7 +55,7 @@ func TestServer_ChatReconnectHistoryAndIsolation(t *testing.T) {
 	cfg.AI.DefaultModel = "openai.local"
 	cfg.AI.ReasoningEffort = "medium"
 	cfg.Agent.Retry.MaxRetries = 0
-	service, err := ai.NewService(&cfg, nil, nil, nil)
+	service, err := ai.NewService(&cfg)
 	require.NoError(t, err)
 	defer service.Stop()
 	require.NoError(t, service.EnableTasks(filepath.Join(t.TempDir(), "tasks.db")))

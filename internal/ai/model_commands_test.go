@@ -64,7 +64,7 @@ func TestModelsCommand_Registry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			service, err := NewService(tt.cfg, nil, nil, nil)
+			service, err := NewService(tt.cfg)
 			if err != nil {
 				t.Fatalf("NewService error: %v", err)
 			}
@@ -95,7 +95,7 @@ func TestSwitchModelCommand_Registry(t *testing.T) {
 	cfg.AI.DefaultModel = "openai.gpt-4o-mini"
 
 	t.Run("switch to existing model", func(t *testing.T) {
-		service, err := NewService(cfg, nil, nil, nil)
+		service, err := NewService(cfg)
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
@@ -114,7 +114,7 @@ func TestSwitchModelCommand_Registry(t *testing.T) {
 	})
 
 	t.Run("switch to any model", func(t *testing.T) {
-		service, err := NewService(cfg, nil, nil, nil)
+		service, err := NewService(cfg)
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
@@ -133,7 +133,7 @@ func TestSwitchModelCommand_Registry(t *testing.T) {
 	})
 
 	t.Run("config default preserved", func(t *testing.T) {
-		service, err := NewService(cfg, nil, nil, nil)
+		service, err := NewService(cfg)
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
@@ -162,7 +162,7 @@ func TestCurrentModelCommand_Registry(t *testing.T) {
 	cfg.AI.DefaultModel = "openai.gpt-4o-mini"
 
 	t.Run("initial state", func(t *testing.T) {
-		service, err := NewService(cfg, nil, nil, nil)
+		service, err := NewService(cfg)
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
@@ -181,7 +181,7 @@ func TestCurrentModelCommand_Registry(t *testing.T) {
 	})
 
 	t.Run("after switch", func(t *testing.T) {
-		service, err := NewService(cfg, nil, nil, nil)
+		service, err := NewService(cfg)
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
@@ -251,7 +251,7 @@ func TestModelsCommand_Handle(t *testing.T) {
 		cfg := createTestMultiProviderAIConfig()
 		cfg.AI.DefaultModel = "openai.gpt-4"
 
-		service, err := NewService(cfg, matrixSvc, nil, nil)
+		service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
@@ -279,7 +279,7 @@ func TestModelsCommand_Handle(t *testing.T) {
 		cfg.AI.DefaultModel = "openai.gpt-4"
 		cfg.AI.Models = map[string]config.ModelConfig{} // 空模型列表
 
-		service, err := NewService(cfg, matrixSvc, nil, nil)
+		service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
@@ -309,7 +309,7 @@ func TestSwitchModelCommand_Handle(t *testing.T) {
 		cfg := createTestMultiProviderAIConfig()
 		cfg.AI.DefaultModel = "openai.gpt-4"
 
-		service, err := NewService(cfg, matrixSvc, nil, nil)
+		service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
@@ -336,7 +336,7 @@ func TestSwitchModelCommand_Handle(t *testing.T) {
 		cfg := createTestMultiProviderAIConfig()
 		cfg.AI.DefaultModel = "openai.gpt-4"
 
-		service, err := NewService(cfg, matrixSvc, nil, nil)
+		service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
@@ -363,7 +363,7 @@ func TestSwitchModelCommand_Handle(t *testing.T) {
 		cfg := createTestMultiProviderAIConfig()
 		cfg.AI.DefaultModel = "openai.gpt-4"
 
-		service, err := NewService(cfg, matrixSvc, nil, nil)
+		service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
@@ -396,7 +396,7 @@ func TestSwitchModelCommand_Handle(t *testing.T) {
 		cfg := createTestMultiProviderAIConfig()
 		cfg.AI.DefaultModel = "openai.gpt-4"
 
-		service, err := NewService(cfg, matrixSvc, nil, nil)
+		service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
@@ -427,7 +427,7 @@ func TestCurrentModelCommand_Handle(t *testing.T) {
 		cfg := createTestMultiProviderAIConfig()
 		cfg.AI.DefaultModel = "openai.gpt-4"
 
-		service, err := NewService(cfg, matrixSvc, nil, nil)
+		service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}
@@ -454,7 +454,7 @@ func TestCurrentModelCommand_Handle(t *testing.T) {
 		cfg := createTestMultiProviderAIConfig()
 		cfg.AI.DefaultModel = "openai.gpt-4"
 
-		service, err := NewService(cfg, matrixSvc, nil, nil)
+		service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 		if err != nil {
 			t.Fatalf("NewService error: %v", err)
 		}

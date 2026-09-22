@@ -64,6 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `ai.NewService` 改为函数式选项签名 `NewService(cfg, opts...)`：Matrix 命令与媒体服务经 `WithMatrix` 注入、MCP 管理器经 `WithMCP` 注入，不带选项即可构造无平台依赖的 AI 服务，对应 `docs/platform-system.md` S2 的解耦步骤
+
 - TUI 快捷键调整：Esc 停止当前会话正在执行或排队的任务，菜单内优先返回；Ctrl+C 有输入时清空、菜单内先清空并关闭菜单、空输入时退出，保留 Ctrl+Q 和 `/quit`；退出不取消服务端任务
 
 - TUI 参考 Crush 重绘视觉：深紫灰面板、渐变字标和欢迎页、带状态的会话列表；移除输入区与选择器的整圈边框，将多行底栏收敛为输入区内的模型信息和简短操作提示，并修复嵌套 ANSI 样式造成的面板底色断层

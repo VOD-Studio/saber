@@ -145,7 +145,7 @@ func TestTaskAutonomousDockerWorkflow(t *testing.T) {
 	cfg.Agent.StreamEnabled = false
 	cfg.Agent.MaxIterations = 6
 	cfg.Agent.TimeoutSeconds = 30
-	service, err := NewService(&cfg, commands, nil, nil)
+	service, err := NewService(&cfg, WithMatrix(commands, nil))
 	require.NoError(t, err)
 	defer service.Stop()
 	workdir, logs := t.TempDir(), t.TempDir()

@@ -45,7 +45,7 @@ func TestService_ChatTaskConfiguration(t *testing.T) {
 				Type: "openai", API: api, BaseURL: server.URL, ReasoningEffort: "none",
 				Models: map[string]config.ModelConfig{"model": {Model: "model", MaxTokens: 1234, Temperature: new(float64(0))}},
 			}}
-			s, err := NewService(&cfg, nil, nil, nil)
+			s, err := NewService(&cfg)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -89,7 +89,7 @@ func TestService_CircuitBreakerAcrossTasks(t *testing.T) {
 	cfg.AI.Providers = map[string]config.ProviderConfig{"test": {Type: "openai", BaseURL: upstream.URL}}
 	cfg.Agent.Retry.Enabled = false
 	cfg.Agent.CircuitBreaker.Enabled, cfg.Agent.CircuitBreaker.FailureThreshold = true, 1
-	s, err := NewService(cfg, nil, nil, nil)
+	s, err := NewService(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

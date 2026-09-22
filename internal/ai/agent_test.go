@@ -37,7 +37,7 @@ func TestService_RunAgentWithoutMatrix(t *testing.T) {
 	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: server.URL, APIKey: "test"}}
 	cfg.AI.DefaultModel = "openai.local"
 	cfg.Agent.Context.Enabled = false
-	service, err := NewService(&cfg, nil, nil, nil)
+	service, err := NewService(&cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestService_RunAgentMCPFailure(t *testing.T) {
 	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: modelServer.URL, APIKey: "test"}}
 	cfg.AI.DefaultModel = "openai.local"
 	cfg.Agent.Context.Enabled = false
-	service, err := NewService(&cfg, nil, manager, nil)
+	service, err := NewService(&cfg, WithMCP(manager))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestService_RunAgentReply(t *testing.T) {
 				cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "http://unused.invalid", APIKey: "test"}}
 				cfg.AI.DefaultModel = "openai.local"
 				cfg.Matrix.StreamEdit.CharThreshold = 1
-				service, err := NewService(&cfg, matrix.NewCommandService(client, id.UserID("@bot:local"), &matrix.BuildInfo{}), nil, nil)
+				service, err := NewService(&cfg, WithMatrix(matrix.NewCommandService(client, id.UserID("@bot:local"), &matrix.BuildInfo{}), nil))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -240,7 +240,7 @@ func TestService_HandleChat_MemoryWithoutMatrix(t *testing.T) {
 	cfg.AI.DefaultModel = "openai.local"
 	cfg.Agent.StreamEnabled = false
 	cfg.AI.SystemPrompt = "base prompt"
-	service, err := NewService(&cfg, nil, nil, nil)
+	service, err := NewService(&cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

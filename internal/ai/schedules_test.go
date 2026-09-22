@@ -85,7 +85,7 @@ func TestSchedules_CommandsRestartReportAndNaturalTool(t *testing.T) {
 	workdir, logs, dbdir := t.TempDir(), t.TempDir(), t.TempDir()
 	execCfg := config.ExecutionConfig{Enabled: true, LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"project": {Path: workdir}}, Grants: []config.ExecutionGrant{{Platform: "matrix", Account: "@bot:test", Room: "!room:test", Users: []string{"@alice:test"}, Workspace: "project", Tools: []string{"read_file"}}}}
 	start := func() *Service {
-		s, err := NewService(&cfg, commands, nil, nil)
+		s, err := NewService(&cfg, WithMatrix(commands, nil))
 		require.NoError(t, err)
 		// 此测试不执行容器工具；容器生命周期有独立真实 Docker 验收。
 		s.executor, err = execution.New(execCfg, nil, nil)

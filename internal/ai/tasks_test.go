@@ -95,7 +95,7 @@ func TestTasks_MatrixReceiptIsolationCommandsAndRetry(t *testing.T) {
 	cfg.AI.DefaultModel = "openai.local"
 	cfg.Agent.StreamEnabled = false
 	cfg.AI.SystemPrompt = "task system"
-	service, err := NewService(&cfg, commands, nil, nil)
+	service, err := NewService(&cfg, WithMatrix(commands, nil))
 	require.NoError(t, err)
 	defer service.Stop()
 	defer close(release)
@@ -172,7 +172,7 @@ func TestTasks_MatrixReceiptIsolationCommandsAndRetry(t *testing.T) {
 	mu.Unlock()
 	service.Stop()
 	// 重启接回同一数据库，命令仍能查到旧任务及原消息。
-	service2, err := NewService(&cfg, commands, nil, nil)
+	service2, err := NewService(&cfg, WithMatrix(commands, nil))
 	require.NoError(t, err)
 	defer service2.Stop()
 	require.NoError(t, service2.EnableTasks(path))
@@ -269,7 +269,7 @@ func TestTasks_MatrixReplyKeepsQuoteUnlessContinuingTask(t *testing.T) {
 			cfg.AI.DefaultModel = "openai.local"
 			cfg.Agent.StreamEnabled = false
 			cfg.AI.SystemPrompt = "system"
-			service, err := NewService(&cfg, commands, nil, nil)
+			service, err := NewService(&cfg, WithMatrix(commands, nil))
 			require.NoError(t, err)
 			defer service.Stop()
 			require.NoError(t, service.EnableTasks(filepath.Join(t.TempDir(), "tasks.db")))
@@ -326,7 +326,7 @@ func TestService_EnableTasksWithoutMatrix(t *testing.T) {
 	cfg.AI.Enabled = true
 	cfg.AI.DefaultModel = "openai.local"
 	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", APIKey: "test", BaseURL: "http://127.0.0.1:1/v1"}}
-	service, err := NewService(&cfg, nil, nil, nil)
+	service, err := NewService(&cfg)
 	require.NoError(t, err)
 	defer service.Stop()
 	require.NoError(t, service.EnableTasks(filepath.Join(t.TempDir(), "tasks.db")))

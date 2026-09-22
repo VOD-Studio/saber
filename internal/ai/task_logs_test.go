@@ -73,7 +73,7 @@ func TestTaskLogs_FailedTimedOutCancelledAndInterrupted(t *testing.T) {
 	require.NoError(t, err)
 	commands := matrix.NewCommandService(client, "bot", nil)
 	cfg := *config.DefaultConfig()
-	s, err := NewService(&cfg, commands, nil, nil)
+	s, err := NewService(&cfg, WithMatrix(commands, nil))
 	require.NoError(t, err)
 	defer s.Stop()
 	dir, logs := t.TempDir(), t.TempDir()

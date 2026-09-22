@@ -50,7 +50,7 @@ func TestAICommand_Handle(t *testing.T) {
 		cfg.AI.Models = map[string]config.ModelConfig{"gpt-4": {Model: "gpt-4"}}
 
 		mcpMgr := mcp.NewManager(&config.MCPConfig{})
-		service, err := NewService(&cfg, nil, mcpMgr, nil)
+		service, err := NewService(&cfg, WithMCP(mcpMgr))
 		if err != nil {
 			t.Fatalf("NewService failed: %v", err)
 		}
@@ -75,7 +75,7 @@ func TestMultiModelAICommand_Handle(t *testing.T) {
 		}
 
 		mcpMgr := mcp.NewManager(&config.MCPConfig{})
-		service, err := NewService(&cfg, nil, mcpMgr, nil)
+		service, err := NewService(&cfg, WithMCP(mcpMgr))
 		if err != nil {
 			t.Fatalf("NewService failed: %v", err)
 		}
@@ -200,7 +200,7 @@ func TestModelsCommand(t *testing.T) {
 		}
 
 		mcpMgr := mcp.NewManager(&config.MCPConfig{})
-		service, err := NewService(&cfg, nil, mcpMgr, nil)
+		service, err := NewService(&cfg, WithMCP(mcpMgr))
 		if err != nil {
 			t.Fatalf("NewService failed: %v", err)
 		}
@@ -258,7 +258,7 @@ func TestAICommand_Handle_Disabled(t *testing.T) {
 	cfg := createTestMultiProviderAIConfig()
 	cfg.AI.Enabled = false // AI 禁用
 
-	service, err := NewService(cfg, matrixSvc, nil, nil)
+	service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 	if err != nil {
 		t.Fatalf("NewService failed: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestAICommand_Handle_EmptyInput(t *testing.T) {
 
 	cfg := createTestMultiProviderAIConfig()
 
-	service, err := NewService(cfg, matrixSvc, nil, nil)
+	service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 	if err != nil {
 		t.Fatalf("NewService failed: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestMultiModelAICommand_Handle_Disabled(t *testing.T) {
 	cfg := createTestMultiProviderAIConfig()
 	cfg.AI.Enabled = false // AI 禁用
 
-	service, err := NewService(cfg, matrixSvc, nil, nil)
+	service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 	if err != nil {
 		t.Fatalf("NewService failed: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestMultiModelAICommand_Handle_EmptyInput(t *testing.T) {
 
 	cfg := createTestMultiProviderAIConfig()
 
-	service, err := NewService(cfg, matrixSvc, nil, nil)
+	service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 	if err != nil {
 		t.Fatalf("NewService failed: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestClearContextCommand_Handle(t *testing.T) {
 		cfg := createTestMultiProviderAIConfig()
 		cfg.Agent.Context.Enabled = false // 禁用上下文管理
 
-		service, err := NewService(cfg, matrixSvc, nil, nil)
+		service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 		if err != nil {
 			t.Fatalf("NewService failed: %v", err)
 		}
@@ -404,7 +404,7 @@ func TestClearContextCommand_Handle(t *testing.T) {
 		cfg := createTestMultiProviderAIConfig()
 		cfg.Agent.Context.Enabled = true
 
-		service, err := NewService(cfg, matrixSvc, nil, nil)
+		service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 		if err != nil {
 			t.Fatalf("NewService failed: %v", err)
 		}
@@ -443,7 +443,7 @@ func TestContextInfoCommand_Handle(t *testing.T) {
 		cfg := createTestMultiProviderAIConfig()
 		cfg.Agent.Context.Enabled = false
 
-		service, err := NewService(cfg, matrixSvc, nil, nil)
+		service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 		if err != nil {
 			t.Fatalf("NewService failed: %v", err)
 		}
@@ -470,7 +470,7 @@ func TestContextInfoCommand_Handle(t *testing.T) {
 		cfg := createTestMultiProviderAIConfig()
 		cfg.Agent.Context.Enabled = true
 
-		service, err := NewService(cfg, matrixSvc, nil, nil)
+		service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 		if err != nil {
 			t.Fatalf("NewService failed: %v", err)
 		}
@@ -503,7 +503,7 @@ func TestAICommandRouter_Handle_WithSubcommand(t *testing.T) {
 		matrixSvc := matrix.NewCommandService(client, id.UserID("@bot:example.com"), nil)
 
 		cfg := createTestMultiProviderAIConfig()
-		service, err := NewService(cfg, matrixSvc, nil, nil)
+		service, err := NewService(cfg, WithMatrix(matrixSvc, nil))
 		if err != nil {
 			t.Fatalf("NewService failed: %v", err)
 		}

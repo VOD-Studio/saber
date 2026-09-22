@@ -20,7 +20,7 @@ func TestNewToolExecutor(t *testing.T) {
 	cfg.AI.DefaultModel = "openai.gpt-4"
 
 	mcpMgr := mcp.NewManager(&config.MCPConfig{})
-	service, err := NewService(&cfg, nil, mcpMgr, nil)
+	service, err := NewService(&cfg, WithMCP(mcpMgr))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestToolExecutor_ExecuteToolCallingLoop_NoToolCalls(t *testing.T) {
 	cfg.Agent.MaxIterations = 5
 
 	mcpMgr := mcp.NewManager(&config.MCPConfig{})
-	service, err := NewService(&cfg, nil, mcpMgr, nil)
+	service, err := NewService(&cfg, WithMCP(mcpMgr))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestToolExecutor_MaxIterations(t *testing.T) {
 	cfg.Agent.MaxIterations = 3
 
 	mcpMgr := mcp.NewManager(&config.MCPConfig{})
-	service, err := NewService(&cfg, nil, mcpMgr, nil)
+	service, err := NewService(&cfg, WithMCP(mcpMgr))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestToolExecutor_CancelledContext(t *testing.T) {
 	cfg.AI.DefaultModel = "openai.gpt-4"
 
 	mcpMgr := mcp.NewManager(&config.MCPConfig{})
-	service, err := NewService(&cfg, nil, mcpMgr, nil)
+	service, err := NewService(&cfg, WithMCP(mcpMgr))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestToolExecutor_DefaultMaxIterations(t *testing.T) {
 	// 不设置 ToolCalling.MaxIterations，使用配置默认值
 
 	mcpMgr := mcp.NewManager(&config.MCPConfig{})
-	service, err := NewService(&cfg, nil, mcpMgr, nil)
+	service, err := NewService(&cfg, WithMCP(mcpMgr))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

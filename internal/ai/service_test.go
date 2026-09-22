@@ -12,6 +12,8 @@ import (
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
 	ruacontext "rua.plus/saber/internal/context"
+	"rua.plus/saber/internal/matrix"
+	"rua.plus/saber/internal/mcp"
 )
 
 // createTestAIConfig 创建使用显式提供商的测试配置。
@@ -45,7 +47,7 @@ func createTestMultiProviderAIConfig() *config.Config {
 
 // TestNewService_NilConfig 测试空配置错误。
 func TestNewService_NilConfig(t *testing.T) {
-	_, err := NewService(nil, nil, nil, nil)
+	_, err := NewService(nil)
 	if err == nil {
 		t.Error("expected error for nil config")
 	}
@@ -57,7 +59,7 @@ func TestNewService_InvalidConfig(t *testing.T) {
 	cfg.AI.Enabled = true
 	cfg.AI.Providers = nil
 
-	_, err := NewService(&cfg, nil, nil, nil)
+	_, err := NewService(&cfg)
 	if err == nil {
 		t.Error("expected error for invalid config")
 	}
@@ -68,7 +70,7 @@ func TestNewService_DisabledConfig(t *testing.T) {
 	cfg := *config.DefaultConfig()
 	cfg.AI.Enabled = false
 
-	service, err := NewService(&cfg, nil, nil, nil)
+	service, err := NewService(&cfg)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -81,7 +83,7 @@ func TestNewService_DisabledConfig(t *testing.T) {
 func TestNewService_ValidConfig(t *testing.T) {
 	cfg := createTestAIConfig()
 
-	service, err := NewService(cfg, nil, nil, nil)
+	service, err := NewService(cfg)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -98,7 +100,7 @@ func TestNewService_ContextEnabled(t *testing.T) {
 	cfg := createTestAIConfig()
 	cfg.Agent.Context.Enabled = true
 
-	service, err := NewService(cfg, nil, nil, nil)
+	service, err := NewService(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -113,7 +115,7 @@ func TestNewService_ContextDisabled(t *testing.T) {
 	cfg := createTestAIConfig()
 	cfg.Agent.Context.Enabled = false
 
-	service, err := NewService(cfg, nil, nil, nil)
+	service, err := NewService(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -123,10 +125,83 @@ func TestNewService_ContextDisabled(t *testing.T) {
 	}
 }
 
+// TestNewService_Options 验证函数式选项：未注入的依赖保持为空，注入后按选项生效。
+func TestNewService_Options(t *testing.T) {
+	botID := id.UserID("@bot:option-test")
+	commandService := matrix.NewCommandService(nil, botID, nil)
+	mediaService := matrix.NewMediaService(nil, 1024)
+	mcpManager := mcp.NewManager(&config.MCPConfig{})
+
+	tests := []struct {
+		name         string
+		opts         []ServiceOption
+		wantCommands bool
+		wantMedia    bool
+		wantMCP      bool
+		wantAccount  string
+	}{
+		// 未注入 Matrix 时回落到平台无关的默认账号，历史仍然可用。
+		{name: "无选项时不绑定任何平台服务", wantAccount: "legacy"},
+		{
+			name:         "仅注入 Matrix 命令服务",
+			opts:         []ServiceOption{WithMatrix(commandService, nil)},
+			wantCommands: true, wantAccount: string(botID),
+		},
+		{
+			name:         "Matrix 命令与媒体服务一起注入",
+			opts:         []ServiceOption{WithMatrix(commandService, mediaService)},
+			wantCommands: true, wantMedia: true, wantAccount: string(botID),
+		},
+		{
+			name:        "仅注入 MCP 管理器",
+			opts:        []ServiceOption{WithMCP(mcpManager)},
+			wantMCP:     true,
+			wantAccount: "legacy",
+		},
+		{
+			name: "选项可组合",
+			opts: []ServiceOption{
+				WithMatrix(commandService, mediaService),
+				WithMCP(mcpManager),
+			},
+			wantCommands: true, wantMedia: true, wantMCP: true, wantAccount: string(botID),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := createTestAIConfig()
+			cfg.Agent.Context.Enabled = true
+
+			service, err := NewService(cfg, tt.opts...)
+			if err != nil {
+				t.Fatalf("NewService() 返回错误: %v", err)
+			}
+			defer service.Stop()
+
+			if got := service.matrixService != nil; got != tt.wantCommands {
+				t.Errorf("matrixService 是否注入 = %v, 期望 %v", got, tt.wantCommands)
+			}
+			if got := service.mediaService != nil; got != tt.wantMedia {
+				t.Errorf("mediaService 是否注入 = %v, 期望 %v", got, tt.wantMedia)
+			}
+			if got := service.mcpManager != nil; got != tt.wantMCP {
+				t.Errorf("mcpManager 是否注入 = %v, 期望 %v", got, tt.wantMCP)
+			}
+			if service.contextManager == nil {
+				t.Fatal("contextManager 应随配置启用")
+			}
+			if got := service.contextManager.account; got != tt.wantAccount {
+				t.Errorf("contextManager.account = %q, 期望 %q", got, tt.wantAccount)
+			}
+		})
+	}
+}
+
 // TestService_GetClient_Caching 测试客户端缓存。
 func TestService_GetClient_Caching(t *testing.T) {
 	cfg := createTestAIConfig()
-	service, _ := NewService(cfg, nil, nil, nil)
+	service, _ := NewService(cfg)
 
 	client1, err := service.getClient("openai.gpt-4")
 	if err != nil {
@@ -146,7 +221,7 @@ func TestService_GetClient_Caching(t *testing.T) {
 // TestService_GetClient_DifferentModels 测试不同模型返回不同客户端。
 func TestService_GetClient_DifferentModels(t *testing.T) {
 	cfg := createTestAIConfig()
-	service, _ := NewService(cfg, nil, nil, nil)
+	service, _ := NewService(cfg)
 
 	client1, err := service.getClient("openai.gpt-4")
 	if err != nil {
@@ -166,7 +241,7 @@ func TestService_GetClient_DifferentModels(t *testing.T) {
 // TestService_GetClient_Concurrency 测试并发客户端创建。
 func TestService_GetClient_Concurrency(t *testing.T) {
 	cfg := createTestAIConfig()
-	service, _ := NewService(cfg, nil, nil, nil)
+	service, _ := NewService(cfg)
 
 	const goroutines = 50
 	var wg sync.WaitGroup
@@ -196,7 +271,7 @@ func TestService_IsEnabled(t *testing.T) {
 	t.Run("enabled", func(t *testing.T) {
 		cfg := createTestAIConfig()
 		cfg.AI.Enabled = true
-		service, _ := NewService(cfg, nil, nil, nil)
+		service, _ := NewService(cfg)
 
 		if !service.IsEnabled() {
 			t.Error("service should be enabled")
@@ -206,7 +281,7 @@ func TestService_IsEnabled(t *testing.T) {
 	t.Run("disabled", func(t *testing.T) {
 		cfg := createTestAIConfig()
 		cfg.AI.Enabled = false
-		service, _ := NewService(cfg, nil, nil, nil)
+		service, _ := NewService(cfg)
 
 		if service.IsEnabled() {
 			t.Error("service should be disabled")
@@ -217,7 +292,7 @@ func TestService_IsEnabled(t *testing.T) {
 // TestAICommand_New 测试 AICommand 创建。
 func TestAICommand_New(t *testing.T) {
 	cfg := createTestAIConfig()
-	service, _ := NewService(cfg, nil, nil, nil)
+	service, _ := NewService(cfg)
 
 	cmd := NewAICommand(service)
 	if cmd == nil {
@@ -228,7 +303,7 @@ func TestAICommand_New(t *testing.T) {
 // TestMultiModelAICommand_New 测试 MultiModelAICommand 创建。
 func TestMultiModelAICommand_New(t *testing.T) {
 	cfg := createTestAIConfig()
-	service, _ := NewService(cfg, nil, nil, nil)
+	service, _ := NewService(cfg)
 
 	cmd := NewMultiModelAICommand(service, "gpt-3.5-turbo")
 	if cmd == nil {
@@ -239,7 +314,7 @@ func TestMultiModelAICommand_New(t *testing.T) {
 // TestClearContextCommand_New 测试 ClearContextCommand 创建。
 func TestClearContextCommand_New(t *testing.T) {
 	cfg := createTestAIConfig()
-	service, _ := NewService(cfg, nil, nil, nil)
+	service, _ := NewService(cfg)
 
 	cmd := NewClearContextCommand(service)
 	if cmd == nil {
@@ -250,7 +325,7 @@ func TestClearContextCommand_New(t *testing.T) {
 // TestContextInfoCommand_New 测试 ContextInfoCommand 创建。
 func TestContextInfoCommand_New(t *testing.T) {
 	cfg := createTestAIConfig()
-	service, _ := NewService(cfg, nil, nil, nil)
+	service, _ := NewService(cfg)
 
 	cmd := NewContextInfoCommand(service)
 	if cmd == nil {
@@ -262,7 +337,7 @@ func TestContextInfoCommand_New(t *testing.T) {
 func TestService_ContextIntegration(t *testing.T) {
 	cfg := createTestAIConfig()
 	cfg.Agent.Context.Enabled = true
-	service, _ := NewService(cfg, nil, nil, nil)
+	service, _ := NewService(cfg)
 
 	roomID := id.RoomID("!room:example.com")
 	userID := id.UserID("@user:example.com")
@@ -291,7 +366,7 @@ func TestService_ContextIntegration(t *testing.T) {
 func TestService_Concurrency(t *testing.T) {
 	cfg := createTestAIConfig()
 	cfg.Agent.Context.Enabled = true
-	service, _ := NewService(cfg, nil, nil, nil)
+	service, _ := NewService(cfg)
 
 	const goroutines = 50
 	var wg sync.WaitGroup
@@ -329,7 +404,7 @@ func TestService_Concurrency(t *testing.T) {
 func TestService_Stop(t *testing.T) {
 	cfg := createTestAIConfig()
 	cfg.Agent.Context.Enabled = true
-	service, _ := NewService(cfg, nil, nil, nil)
+	service, _ := NewService(cfg)
 
 	// 验证 contextManager 已初始化
 	if service.contextManager == nil {
@@ -434,7 +509,7 @@ func TestGetRoomFromContext(t *testing.T) {
 // TestService_GetModelRegistry 测试 GetModelRegistry 方法。
 func TestService_GetModelRegistry(t *testing.T) {
 	cfg := createTestAIConfig()
-	service, _ := NewService(cfg, nil, nil, nil)
+	service, _ := NewService(cfg)
 
 	registry := service.GetModelRegistry()
 	if registry == nil {
@@ -448,7 +523,7 @@ func TestService_GetModelRegistry(t *testing.T) {
 func TestService_WithNilMCPManager(t *testing.T) {
 	cfg := createTestAIConfig()
 
-	service, err := NewService(cfg, nil, nil, nil)
+	service, err := NewService(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -461,7 +536,7 @@ func TestService_WithNilMCPManager(t *testing.T) {
 // TestService_SetPromptProvider 测试设置提示词提供者。
 func TestService_SetPromptProvider(t *testing.T) {
 	cfg := createTestAIConfig()
-	service, err := NewService(cfg, nil, nil, nil)
+	service, err := NewService(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -500,7 +575,7 @@ func TestOllamaIntegration(t *testing.T) {
 	}
 	t.Logf("Testing with model %s (%s, %s)", cfg.AI.DefaultModel, modelCfg.Provider, modelCfg.BaseURL)
 
-	svc, err := NewService(cfg, nil, nil, nil)
+	svc, err := NewService(cfg)
 	if err != nil {
 		t.Fatalf("NewService failed: %v", err)
 	}

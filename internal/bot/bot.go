@@ -298,7 +298,7 @@ func (s *appState) initServices() error {
 		svc.mediaService = matrix.NewMediaService(mautrixClient, maxSizeBytes)
 	}
 
-	aiService, err := ai.NewService(s.cfg, svc.commandService, svc.mcpManager, svc.mediaService)
+	aiService, err := ai.NewService(s.cfg, ai.WithMatrix(svc.commandService, svc.mediaService), ai.WithMCP(svc.mcpManager))
 	if err != nil {
 		return fmt.Errorf("AI服务初始化失败: %w", err)
 	}

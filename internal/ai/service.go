@@ -61,20 +61,48 @@ type Service struct {
 	executor *execution.Executor
 }
 
+// ServiceOption 配置 AI 服务的可选依赖。平台专属服务由接入端注入，
+// 核心装配本身不要求任何聊天平台存在。
+type ServiceOption func(*serviceOptions)
+
+// serviceOptions 汇集 NewService 的可选依赖。
+type serviceOptions struct {
+	matrixService *matrix.CommandService
+	mediaService  *matrix.MediaService
+	mcpManager    *mcp.Manager
+}
+
+// WithMatrix 注入 Matrix 命令与媒体服务，是 Matrix 专属的兼容入口，
+// 后续由 Matrix 平台接入端持有。两者均可传 nil。
+func WithMatrix(matrixService *matrix.CommandService, mediaService *matrix.MediaService) ServiceOption {
+	return func(o *serviceOptions) {
+		o.matrixService = matrixService
+		o.mediaService = mediaService
+	}
+}
+
+// WithMCP 注入 MCP 管理器。
+func WithMCP(mcpManager *mcp.Manager) ServiceOption {
+	return func(o *serviceOptions) { o.mcpManager = mcpManager }
+}
+
 // NewService 创建一个新的 AI 服务实例。
 //
 // 参数:
-//   - cfg: AI 配置
-//   - matrixService: Matrix 命令服务
-//   - mcpManager: MCP 管理器
-//   - mediaService: 媒体服务
+//   - appConfig: 应用配置
+//   - opts: 可选依赖，平台服务与 MCP 管理器由调用方按需注入
 //
 // 返回值:
 //   - *Service: 创建的 AI 服务实例
 //   - error: 创建过程中发生的错误
-func NewService(appConfig *config.Config, matrixService *matrix.CommandService, mcpManager *mcp.Manager, mediaService *matrix.MediaService) (*Service, error) {
+func NewService(appConfig *config.Config, opts ...ServiceOption) (*Service, error) {
 	if appConfig == nil {
 		return nil, fmt.Errorf("AI配置不能为空")
+	}
+
+	var o serviceOptions
+	for _, opt := range opts {
+		opt(&o)
 	}
 
 	cfg := &appConfig.AI
@@ -99,10 +127,10 @@ func NewService(appConfig *config.Config, matrixService *matrix.CommandService, 
 	service := &Service{
 		config:         appConfig,
 		core:           core,
-		matrixService:  matrixService,
+		matrixService:  o.matrixService,
 		contextManager: contextManager,
-		mcpManager:     mcpManager,
-		mediaService:   mediaService,
+		mcpManager:     o.mcpManager,
+		mediaService:   o.mediaService,
 		respHandler:    NewResponseHandler(nil), // 将在下面重新初始化
 		toolExecutor:   NewToolExecutor(nil),    // 将在下面重新初始化
 	}
@@ -114,8 +142,8 @@ func NewService(appConfig *config.Config, matrixService *matrix.CommandService, 
 	service.respHandler = NewResponseHandler(service)
 	var history *conversation.ContextManager
 	if contextManager != nil {
-		if matrixService != nil {
-			contextManager.account = string(matrixService.BotID())
+		if o.matrixService != nil {
+			contextManager.account = string(o.matrixService.BotID())
 		}
 		history = contextManager.history
 	}
@@ -128,8 +156,8 @@ func NewService(appConfig *config.Config, matrixService *matrix.CommandService, 
 	if err != nil {
 		return nil, err
 	}
-	if mcpManager != nil {
-		mcpManager.SetAuthorizer(service.executor.CheckMCP)
+	if o.mcpManager != nil {
+		o.mcpManager.SetAuthorizer(service.executor.CheckMCP)
 	}
 
 	slog.Info("AI服务初始化完成",
