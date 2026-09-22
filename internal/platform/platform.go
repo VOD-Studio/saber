@@ -21,9 +21,10 @@ type Platform interface {
 	Stop()
 }
 
-// Registry 管理已注册的平台实现。
+// Registry 管理已注册的平台实现，并保留注册顺序作为启动顺序。
 type Registry struct {
 	platforms map[string]Platform
+	order     []string
 }
 
 // NewRegistry 创建空的平台注册表。
@@ -38,21 +39,20 @@ func (r *Registry) Register(p Platform) {
 		panic(fmt.Sprintf("platform %q is already registered", name))
 	}
 	r.platforms[name] = p
+	r.order = append(r.order, name)
 	slog.Info("平台已注册", "platform", name)
 }
 
-// Enabled 根据配置返回当前应启动的平台列表。
+// Enabled 按注册顺序返回配置中应启动的平台列表。
+//
+// 启停一律由 config.Config.PlatformEnabled 决定，注册表本身不再对任何平台名
+// 做特殊判断：接入新平台只需登记配置开关，不必改动这里。
 // 调用方负责依次 Start 和统一 Stop。
 func (r *Registry) Enabled(cfg *config.Config) []Platform {
 	var result []Platform
-	// Terminal 平台始终启用——HTTP server 入口不与任何外部平台绑定。
-	if p, ok := r.platforms["terminal"]; ok {
-		result = append(result, p)
-	}
-	// Matrix 平台通过显式开关控制。
-	if cfg.Matrix.Enabled {
-		if p, ok := r.platforms["matrix"]; ok {
-			result = append(result, p)
+	for _, name := range r.order {
+		if cfg.PlatformEnabled(name) {
+			result = append(result, r.platforms[name])
 		}
 	}
 	return result

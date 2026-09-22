@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 新增 `platforms:` 配置节与 `Config.PlatformEnabled`：`terminal.enabled`（默认可用、可显式关闭）与 `violet` 接入参数（endpoint/bot_token/account/自动回复开关/`edit_interval_ms` 默认 200ms/HTTP 超时）集中登记；`platform.Registry.Enabled` 改为按注册顺序遍历并只认配置开关，不再对 terminal/matrix 名称做硬编码判断，Matrix 关闭时其余平台也能正常启停
+
 - Matrix 出站消息按 Markdown 渲染：`chat.Adapter` 的回复正文约定为 Markdown，`matrix.ChatAdapter` 用 mautrix 渲染为 `formatted_body`（含表格与删除线），`body` 保留 Markdown 原文供纯文本客户端回退；模型输出里的原始 HTML 一律转义，不会当作可信标记，AI 正文回复与任务投递同样受益
 
 - 新增 `internal/platform/matrix` 平台接入端：持有 Matrix 账号，向 `ai` 注入聊天命令入口（`ai.ChatEntrypoint`）并注册任务结果投递器，Matrix 的 `!ai`/`!task run`/私聊与提及回复不再由 `ai` 核心构造平台 adapter

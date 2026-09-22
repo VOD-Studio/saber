@@ -19,6 +19,7 @@ type Config struct {
 	Server    HTTPServerConfig `yaml:"server"`
 	Execution ExecutionConfig  `yaml:"execution"`
 	Matrix    MatrixConfig     `yaml:"matrix"`
+	Platforms PlatformsConfig  `yaml:"platforms"`
 	AI        AIConfig         `yaml:"ai"`
 	MCP       MCPConfig        `yaml:"mcp"`
 	Shutdown  ShutdownConfig   `yaml:"shutdown"`
@@ -820,12 +821,13 @@ func DefaultMCPConfig() MCPConfig {
 // DefaultConfig 返回带有合理默认值的配置
 func DefaultConfig() *Config {
 	return &Config{
-		Server:   HTTPServerConfig{Listen: "127.0.0.1:8320", TokenFile: ".saber-token"},
-		Agent:    DefaultAgentConfig(),
-		Matrix:   DefaultMatrixConfig(),
-		AI:       DefaultAIConfig(),
-		MCP:      DefaultMCPConfig(),
-		Shutdown: DefaultShutdownConfig(),
+		Server:    HTTPServerConfig{Listen: "127.0.0.1:8320", TokenFile: ".saber-token"},
+		Agent:     DefaultAgentConfig(),
+		Matrix:    DefaultMatrixConfig(),
+		Platforms: DefaultPlatformsConfig(),
+		AI:        DefaultAIConfig(),
+		MCP:       DefaultMCPConfig(),
+		Shutdown:  DefaultShutdownConfig(),
 	}
 }
 
@@ -875,6 +877,11 @@ agent:
 # 可选接入与执行能力；详细配置见 docs/configuration.md、docs/execution.md。
 matrix:
   enabled: false
+platforms:
+  terminal:
+    enabled: true # 本机 HTTP 聊天入口（saber chat / TUI）
+  violet:
+    enabled: false # Violet Bot API 接入，凭据在 Violet 管理端签发
 mcp:
   enabled: false # 开启后仍须 execution 中的身份及工具授权
 execution:

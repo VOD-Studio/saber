@@ -116,6 +116,51 @@ func TestRegistry_Enabled_MatrixNotRegistered(t *testing.T) {
 	}
 }
 
+// TestRegistry_Enabled_ConfigDriven 验证启停完全由配置决定：新平台按开关注入、
+// 未知平台不因注册而自动上线、terminal 也可以关闭。
+func TestRegistry_Enabled_ConfigDriven(t *testing.T) {
+	t.Parallel()
+	r := newTestRegistry(
+		&stubPlatform{name: "terminal"},
+		&stubPlatform{name: "matrix"},
+		&stubPlatform{name: "violet"},
+		&stubPlatform{name: "discord"},
+	)
+
+	t.Run("only_violet", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.Matrix.Enabled = false
+		cfg.Platforms.Violet.Enabled = true
+		got := r.Enabled(cfg)
+		if len(got) != 2 || got[0].Name() != "terminal" || got[1].Name() != "violet" {
+			t.Fatalf("Enabled = %v, want [terminal violet]（按注册顺序）", names(got))
+		}
+	})
+
+	t.Run("terminal_disabled", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		cfg.Platforms.Terminal.Enabled = false
+		cfg.Matrix.Enabled = true
+		got := r.Enabled(cfg)
+		if len(got) != 1 || got[0].Name() != "matrix" {
+			t.Fatalf("Enabled = %v, want [matrix]", names(got))
+		}
+	})
+
+	t.Run("unknown_platform_never_starts", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		for _, name := range []string{"discord", ""} {
+			cfg.Matrix.Enabled = true
+			cfg.Platforms.Violet.Enabled = true
+			for _, p := range r.Enabled(cfg) {
+				if p.Name() == name {
+					t.Fatalf("未登记开关的平台 %q 不应启动", name)
+				}
+			}
+		}
+	})
+}
+
 // names 提取平台名称便于断言失败信息。
 func names(ps []Platform) []string {
 	out := make([]string, len(ps))
