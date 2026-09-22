@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"maunium.net/go/mautrix/id"
+
+	"rua.plus/saber/internal/chat"
 	_ "rua.plus/saber/internal/db" // 注册 SQLite 驱动
 )
 
@@ -280,7 +282,7 @@ func TestServiceGetSystemPrompt(t *testing.T) {
 				}
 			}
 
-			result := svc.GetSystemPrompt(roomID, tt.basePrompt)
+			result := svc.GetSystemPrompt(chat.Session{Platform: "matrix", Conversation: string(roomID)}, tt.basePrompt)
 
 			if tt.wantEmpty && result != "" {
 				t.Errorf("期望空提示词，实际: %q", result)

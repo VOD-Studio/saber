@@ -23,9 +23,10 @@ import (
 )
 
 // PromptProvider 定义提示词提供者接口。
-// 用于获取房间的系统提示词（合并基础提示词和人格提示词）。
+// 用于获取会话的系统提示词（合并基础提示词和人格提示词）。
+// 实现按 chat.Session.Platform 决定是否提供平台专属人格；非目标平台应原样返回 basePrompt。
 type PromptProvider interface {
-	GetSystemPrompt(roomID id.RoomID, basePrompt string) string
+	GetSystemPrompt(session chat.Session, basePrompt string) string
 }
 
 // Service 装配模型、通用聊天处理器以及旧 Matrix 命令兼容入口。
@@ -428,8 +429,9 @@ func (s *Service) taskRequest(message chat.Message, modelName string) (agent.Req
 	cfg := s.core.GetConfig()
 	prompt := cfg.SystemPrompt
 	// 计划和即时任务使用相同的人格与模型配置，不复制群聊历史。
-	if message.Session.Platform == "matrix" && s.promptProvider != nil {
-		prompt = s.promptProvider.GetSystemPrompt(id.RoomID(message.Session.Conversation), prompt)
+	// promptProvider 按平台自行决定是否注入人格，非目标平台原样返回 basePrompt。
+	if s.promptProvider != nil {
+		prompt = s.promptProvider.GetSystemPrompt(message.Session, prompt)
 	}
 	modelCfg, _ := cfg.GetModelConfig(modelName)
 	if modelCfg.BaseURL == "" || modelCfg.Temperature == nil {

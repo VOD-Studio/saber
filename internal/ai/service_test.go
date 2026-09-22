@@ -9,6 +9,7 @@ import (
 
 	"maunium.net/go/mautrix/id"
 
+	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
 	ruacontext "rua.plus/saber/internal/context"
 )
@@ -480,7 +481,7 @@ func TestService_SetPromptProvider(t *testing.T) {
 // testMockPromptProvider 是用于测试的 mock PromptProvider。
 type testMockPromptProvider struct{}
 
-func (m *testMockPromptProvider) GetSystemPrompt(roomID id.RoomID, basePrompt string) string {
+func (m *testMockPromptProvider) GetSystemPrompt(session chat.Session, basePrompt string) string {
 	return "test system prompt"
 }
 

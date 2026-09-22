@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"maunium.net/go/mautrix/id"
+
+	"rua.plus/saber/internal/chat"
 )
 
 // Service 提供人格管理功能。
@@ -326,10 +328,14 @@ func (s *Service) clearRoomPersonaLocked(roomID id.RoomID) error {
 	return nil
 }
 
-// GetSystemPrompt 获取指定房间的系统提示词。
-// 将基础提示词与房间人格提示词合并。
-func (s *Service) GetSystemPrompt(roomID id.RoomID, basePrompt string) string {
-	persona := s.GetRoomPersona(roomID)
+// GetSystemPrompt 获取指定会话的系统提示词。
+// 将基础提示词与房间人格提示词合并；当前仅 Matrix 平台维护房间人格，
+// 其他平台原样返回 basePrompt，便于 ai.Service 以平台无关方式调用。
+func (s *Service) GetSystemPrompt(session chat.Session, basePrompt string) string {
+	if session.Platform != "matrix" {
+		return basePrompt
+	}
+	persona := s.GetRoomPersona(id.RoomID(session.Conversation))
 	if persona == nil {
 		return basePrompt
 	}
