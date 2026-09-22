@@ -637,6 +637,7 @@ saber/
   internal/
     chat/                          # 通用消息、会话、回复与展示能力契约
       memory/                      # 无网络聊天 adapter
+    platform/                     # 可插拔平台接入端接口与注册表
     conversation/                  # 平台无关的历史、串行调度与回复交付
     task/                          # SQLite 任务与定时计划、执行日志、目录互斥和结果重试
     execution/                     # 容器命令/文件工具、权限检查、日志与交付文件

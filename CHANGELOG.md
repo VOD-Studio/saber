@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 新增 `internal/platform` 包：定义可插拔聊天平台接入端的 `Platform` 接口与 `Registry` 注册表，为后续解耦 `ai.Service` 与 Matrix、接入 Violet 等新平台提供统一入口
+
 - TUI 空输入区键入 `/` 即时弹出命令菜单，支持方向键选择、名称筛选和回车执行；保留带参数命令与 Esc 返回编辑，不干扰正文斜杠或粘贴
 
 - 新增 `saber chat` Charm v2 TUI：自适应会话侧栏、流式 Markdown/代码高亮、工具详情、模型和思考等级选择、历史续接、断线续读；退出界面不停止服务端，Esc 可取消当前任务
