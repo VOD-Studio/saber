@@ -11,7 +11,6 @@ import (
 	"maunium.net/go/mautrix/id"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/execution"
-	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/task"
 )
 
@@ -52,7 +51,7 @@ func (s *Service) sendTaskLogs(ctx context.Context, identity chat.Identity, task
 		}
 	}
 	// 每次下载请求有独立幂等键；重复事件和中途失败复用已上传/已发送步骤。
-	source := string(matrix.GetEventID(ctx))
+	source := s.eventID(ctx)
 	if source == "" {
 		source = fmt.Sprintf("agent-%d", task.ID(ctx))
 	}

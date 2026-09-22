@@ -71,6 +71,12 @@ func (p *Platform) NormalizeCommand(ctx context.Context, userID id.UserID, roomI
 	return adapter.Message(ctx, userID, roomID, text), adapter, nil
 }
 
+// OutboundAdapter 实现 ai.ChatEntrypoint：交付 Agent 结果时复用带流式编辑与媒体解析的 adapter。
+func (p *Platform) OutboundAdapter() chat.Adapter { return p.ChatAdapter(nil) }
+
+// EventID 实现 ai.ChatEntrypoint：Matrix 的事件标识来自入站上下文。
+func (p *Platform) EventID(ctx context.Context) string { return string(matrix.GetEventID(ctx)) }
+
 // Session 实现 ai.ChatEntrypoint：把房间与线程解析成带账号作用域的通用会话。
 // 命令服务缺失时返回空会话，由调用方的校验拒绝。
 func (p *Platform) Session(ctx context.Context, roomID id.RoomID) chat.Session {

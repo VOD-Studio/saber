@@ -37,6 +37,16 @@ func (e matrixEntrypoint) Session(ctx context.Context, roomID id.RoomID) chat.Se
 	return matrix.NewChatAdapter(e.service.matrixService, nil, e.service.config.Matrix.Media, false, nil).Session(ctx, roomID)
 }
 
+// OutboundAdapter 与生产实现一致，交付时保留流式编辑与媒体能力。
+func (e matrixEntrypoint) OutboundAdapter() chat.Adapter {
+	return matrix.NewChatAdapter(e.service.matrixService, e.service.mediaService, e.service.config.Matrix.Media, e.service.config.Matrix.StreamEdit.Enabled, nil)
+}
+
+// EventID 读取 Matrix 入站事件标识。
+func (e matrixEntrypoint) EventID(ctx context.Context) string {
+	return string(matrix.GetEventID(ctx))
+}
+
 // wireMatrixPlatform 模拟 Matrix 平台接入端的装配：注入聊天入口并注册任务结果投递。
 // 任务未启用时只装配聊天入口。
 func wireMatrixPlatform(t *testing.T, service *Service, commands *matrix.CommandService, media *matrix.MediaService) {

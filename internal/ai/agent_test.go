@@ -183,6 +183,7 @@ func TestService_RunAgentReply(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				wireMatrixPlatform(t, service, service.matrixService, service.mediaService)
 				defer service.Stop()
 				response, err := service.runAgentReply(context.Background(), agent.Request{Model: cfg.AI.DefaultModel, Stream: stream}, "!test:local", model)
 				if (err != nil) != sendFails || modelRequests.Load() != 1 || sent.Load() == 0 {

@@ -10,7 +10,6 @@ import (
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/conversation"
 	"rua.plus/saber/internal/execution"
-	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/model"
 )
 
@@ -62,8 +61,11 @@ func (s *Service) runAgentReply(ctx context.Context, req agent.Request, roomID i
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	adapter := matrix.NewChatAdapter(s.matrixService, s.mediaService, s.config.Matrix.Media, s.config.Matrix.StreamEdit.Enabled, nil)
-	message := chat.Message{Session: adapter.Session(ctx, roomID), ID: string(matrix.GetEventID(ctx))}
+	if s.entry == nil {
+		return nil, ErrNoChatEntrypoint
+	}
+	adapter := s.entry.OutboundAdapter()
+	message := chat.Message{Session: s.entry.Session(ctx, roomID), ID: s.eventID(ctx)}
 	result, err := conversation.Deliver(ctx, func(ctx context.Context, req agent.Request, emit func(agent.Event)) (agent.Result, error) {
 		return s.runAgent(ctx, req, emit, client)
 	}, req, message, adapter, displayConfig(s.config.Matrix.StreamEdit), func(result agent.Result) {

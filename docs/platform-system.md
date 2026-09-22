@@ -357,3 +357,31 @@ go test -tags goolm ./internal/platform
 3. 实现 `Platform.Start`（入站：订阅事件流 / 注册 webhook / sync loop）
 4. 在 `config.yaml` 的 `platforms.<name>` 下添加配置
 5. 在 `bot.go` 中 `reg.Register(<name>.New(cfg))`
+
+## 实施进度
+
+| 阶段 | 状态 | 落点 |
+|---|---|---|
+| S1 `platform` 接口与注册表 | 已完成 | `internal/platform/platform.go` |
+| S2 解耦 `ai.Service` | 基本完成 | 函数式选项 `WithMatrix`/`WithMCP`；`PromptProvider` 用 `chat.Session`；`chat.Message.ControlText` 承接引用回退剥离；`handleAICommand` 与只读命令经 `ChatEntrypoint`；`ai` 内已无 `matrix.NewChatAdapter` |
+| S3 Matrix 平台接入端 | 进行中 | `internal/platform/matrix` 已持有账号、出站/投递 adapter、会话与事件定位，并注册任务投递；同步循环与事件处理器注册仍在 `internal/bot` |
+| S4 Terminal 平台 | 未开始 | HTTP server 仍在 `bot.go` 直接 serve |
+| S5 `bot.go` 按配置启动平台 | 部分 | `run()` 已经过 `Registry.Enabled()` 启动并统一 `Stop`，仅注册了 matrix |
+| S6 配置结构迁移 | 未开始 | 仍为顶层 `matrix:` 节 |
+| S7/S8 Violet 与联调 | 未开始 | — |
+
+`ai` 剩余的 Matrix 触点：`internal/ai/response.go` 的事件回复与流式编辑器、`internal/ai/proactive*.go` 的房间元数据（`RoomService`/`RoomInfo`）、`internal/ai/service.go` 为注册 Matrix 命令而保留的 `WithMatrix`。
+
+## 平台端口 `ai.ChatEntrypoint`
+
+接入一个平台需要提供五个能力，`internal/platform/matrix` 是参考实现：
+
+| 方法 | 作用 |
+|---|---|
+| `HandleCommand` | 把平台聊天命令规范化为 `chat.Message`，按指定模型交给 `ai.Service` |
+| `NormalizeCommand` | 把 `!task list` 这类命令文本规范化，并返回只做一次性回执的 adapter |
+| `Session` | 解析平台账号、会话与线程作用域 |
+| `OutboundAdapter` | 返回带平台展示能力（编辑、媒体）的出站 adapter |
+| `EventID` | 返回触发本次处理的原生事件标识，供回复定位与幂等键使用 |
+
+装配顺序见 `internal/bot/bot.go`：构造平台 → `aiService.SetChatEntrypoint` → `aiService.RegisterTaskDelivery` → `Registry.Register` → `Start(ctx, aiService.HandleChat)`。

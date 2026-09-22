@@ -42,6 +42,10 @@ type ChatEntrypoint interface {
 	// Session 解析一次入站事件所在的会话作用域（账号与线程隔离），
 	// 使上下文类命令无需自行拼平台的会话标识。
 	Session(ctx context.Context, roomID id.RoomID) chat.Session
+	// OutboundAdapter 返回该平台具备流式编辑与媒体解析的出站 adapter，用于交付 Agent 结果。
+	OutboundAdapter() chat.Adapter
+	// EventID 返回触发当前处理的原生事件标识；没有入站事件时返回空串。
+	EventID(ctx context.Context) string
 }
 
 // ErrNoChatEntrypoint 表示当前没有平台接入端接管聊天命令。
@@ -439,6 +443,14 @@ func (s *Service) NormalizeCommand(ctx context.Context, userID id.UserID, roomID
 		return chat.Message{}, nil, ErrNoChatEntrypoint
 	}
 	return s.entry.NormalizeCommand(ctx, userID, roomID, text)
+}
+
+// eventID 返回触发当前处理的原生事件标识，未接入平台时为空。
+func (s *Service) eventID(ctx context.Context) string {
+	if s.entry == nil {
+		return ""
+	}
+	return s.entry.EventID(ctx)
 }
 
 // Session 由注入的平台入口解析会话作用域，未接入平台时返回 ErrNoChatEntrypoint。

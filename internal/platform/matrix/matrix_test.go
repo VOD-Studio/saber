@@ -254,3 +254,23 @@ func TestPlatformSession(t *testing.T) {
 		t.Fatalf("缺少命令服务时不应给出有效会话: %+v", got)
 	}
 }
+
+// TestPlatformOutboundAdapterAndEventID 验证交付 adapter 的编辑能力跟随配置，
+// 事件标识只从入站上下文取得。
+func TestPlatformOutboundAdapterAndEventID(t *testing.T) {
+	p, cfg := newPlatform(t, nil, true)
+	if got := p.OutboundAdapter().Capabilities(); !got.Edit {
+		t.Fatalf("交付 adapter 应保留流式编辑: %+v", got)
+	}
+	cfg.Matrix.StreamEdit.Enabled = false
+	if got := p.OutboundAdapter().Capabilities(); got.Edit {
+		t.Fatalf("关闭流式编辑后仍声明支持: %+v", got)
+	}
+	ctx := matrix.WithEventID(context.Background(), "$event")
+	if got := p.EventID(ctx); got != "$event" {
+		t.Fatalf("EventID() = %q", got)
+	}
+	if got := p.EventID(context.Background()); got != "" {
+		t.Fatalf("无入站事件时 EventID() = %q", got)
+	}
+}
