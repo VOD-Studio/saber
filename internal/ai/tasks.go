@@ -87,16 +87,24 @@ func (s *Service) EnableTasks(path string) error {
 	s.tasks, s.taskDir = manager, dir
 	close(ready)
 	if s.matrixService != nil {
-		adapter := matrix.NewChatAdapter(s.matrixService, s.mediaService, s.config.Matrix.Media, false, nil)
-		if err := manager.RegisterDelivery("matrix", func(ctx context.Context, t task.Task) (string, error) {
-			return s.deliverTask(ctx, adapter, t)
-		}); err != nil {
-			return err
-		}
 		s.matrixService.RegisterCommandWithDesc("task", "后台任务：run <内容> | list | status <ID> | cancel <ID> | logs <ID>", &taskCommand{service: s})
 		s.matrixService.RegisterCommandWithDesc("schedule", "定时计划：once/every/weekdays <时间> <时区> <目标> | list | status/pause/delete <ID>", &scheduleCommand{service: s})
 	}
 	return nil
+}
+
+// RegisterTaskDelivery 为指定平台注册任务结果投递器，由平台接入端在启动时调用。
+// adapter 只需具备出站发送能力，因此与聊天入站链路共用同一份平台账号作用域即可。
+func (s *Service) RegisterTaskDelivery(platform string, adapter chat.Adapter) error {
+	if s.tasks == nil {
+		return errors.New("任务服务未启用")
+	}
+	if adapter == nil {
+		return errors.New("任务投递需要平台 adapter")
+	}
+	return s.tasks.RegisterDelivery(platform, func(ctx context.Context, t task.Task) (string, error) {
+		return s.deliverTask(ctx, adapter, t)
+	})
 }
 
 func taskReply(t task.Task, kind, text string) chat.Reply {

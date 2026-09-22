@@ -91,6 +91,7 @@ func TestSchedules_CommandsRestartReportAndNaturalTool(t *testing.T) {
 		s.executor, err = execution.New(execCfg, nil, nil)
 		require.NoError(t, err)
 		require.NoError(t, s.EnableTasks(filepath.Join(dbdir, "tasks.db")))
+		wireMatrixPlatform(t, s, commands, nil)
 		return s
 	}
 	s := start()

@@ -102,6 +102,7 @@ func TestTasks_MatrixReceiptIsolationCommandsAndRetry(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.db")
 	require.NoError(t, service.EnableTasks(path))
 	require.Error(t, service.EnableTasks(path))
+	wireMatrixPlatform(t, service, commands, nil)
 	commands.RegisterCommand("ai", NewAICommand(service))
 	commands.SetReplyAIHandler(NewAICommand(service))
 	eventFor := func(eventID, sender, body string) *event.Event {
@@ -176,6 +177,7 @@ func TestTasks_MatrixReceiptIsolationCommandsAndRetry(t *testing.T) {
 	require.NoError(t, err)
 	defer service2.Stop()
 	require.NoError(t, service2.EnableTasks(path))
+	wireMatrixPlatform(t, service2, commands, nil)
 	status, err := service2.taskOperation(context.Background(), identity, "status", a.ID)
 	require.NoError(t, err)
 	require.Contains(t, status, "completed")
@@ -273,6 +275,7 @@ func TestTasks_MatrixReplyKeepsQuoteUnlessContinuingTask(t *testing.T) {
 			require.NoError(t, err)
 			defer service.Stop()
 			require.NoError(t, service.EnableTasks(filepath.Join(t.TempDir(), "tasks.db")))
+			wireMatrixPlatform(t, service, commands, nil)
 			commands.SetReplyAIHandler(NewAICommand(service))
 			if direct {
 				commands.SetDirectChatAIHandler(NewAICommand(service))

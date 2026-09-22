@@ -28,6 +28,8 @@ import (
 	"rua.plus/saber/internal/mcp"
 	"rua.plus/saber/internal/meme"
 	"rua.plus/saber/internal/persona"
+	"rua.plus/saber/internal/platform"
+	platformmatrix "rua.plus/saber/internal/platform/matrix"
 	"rua.plus/saber/internal/server"
 	"rua.plus/saber/internal/tui"
 )
@@ -44,6 +46,8 @@ type services struct {
 	memeService      *meme.Service
 	personaService   *persona.Service
 	client           *matrix.MatrixClient
+	// platforms 是已接入的聊天平台，按配置启动并统一停止。
+	platforms *platform.Registry
 }
 
 // appState 持有应用程序运行时状态。
@@ -109,6 +113,12 @@ func run(parent context.Context, info matrix.BuildInfo) error {
 	}
 	if err := state.initServices(); err != nil {
 		return err
+	}
+	// 先让平台接上共享聊天入口，再开始投递事件，避免入站消息找不到处理链路。
+	for _, p := range state.services.platforms.Enabled(state.cfg) {
+		if err := p.Start(ctx, state.services.aiService.HandleChat); err != nil {
+			slog.Warn("平台启动失败", "platform", p.Name(), "error", err)
+		}
 	}
 	if state.services.client != nil {
 		state.setupEventHandlers()
@@ -316,10 +326,19 @@ func (s *appState) initServices() error {
 	if err := aiService.EnableTasks(filepath.Join(configDir, "tasks.db")); err != nil {
 		return fmt.Errorf("任务服务初始化失败: %w", err)
 	}
+	svc.platforms = platform.NewRegistry()
 	// 可选的 Matrix 功能只在启用该入口时装配。
 	if svc.client == nil {
 		return nil
 	}
+
+	// Matrix 作为平台接入端持有聊天命令入口与任务投递器，ai 核心不再构造平台 adapter。
+	matrixPlatform := platformmatrix.New(s.cfg, svc.commandService, svc.mediaService, aiService.HandleChatModel)
+	aiService.SetChatEntrypoint(matrixPlatform)
+	if err := aiService.RegisterTaskDelivery(matrixPlatform.Name(), matrixPlatform.DeliveryAdapter()); err != nil {
+		return fmt.Errorf("matrix 平台任务投递注册失败: %w", err)
+	}
+	svc.platforms.Register(matrixPlatform)
 
 	// 初始化人格服务
 	s.initPersonaService()
@@ -630,6 +649,19 @@ func (s *appState) shutdown(cancel context.CancelFunc) {
 				slog.Debug("MCP 连接已关闭")
 			}
 		}()
+	}
+
+	if svc.platforms != nil {
+		for _, p := range svc.platforms.Enabled(s.cfg) {
+			platformName := p.Name()
+			wg.Add(1)
+			go func(p platform.Platform) {
+				defer wg.Done()
+				slog.Debug("正在停止平台...", "platform", platformName)
+				p.Stop()
+				slog.Debug("平台已停止", "platform", platformName)
+			}(p)
+		}
 	}
 
 	if svc.proactiveManager != nil {

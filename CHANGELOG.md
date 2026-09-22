@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 新增 `internal/platform/matrix` 平台接入端：持有 Matrix 账号，向 `ai` 注入聊天命令入口（`ai.ChatEntrypoint`）并注册任务结果投递器，Matrix 的 `!ai`/`!task run`/私聊与提及回复不再由 `ai` 核心构造平台 adapter
+
 - 新增 `internal/platform` 包：定义可插拔聊天平台接入端的 `Platform` 接口与 `Registry` 注册表，为后续解耦 `ai.Service` 与 Matrix、接入 Violet 等新平台提供统一入口
 - `ai.PromptProvider.GetSystemPrompt` 改用 `chat.Session` 取代 Matrix `id.RoomID`，`taskRequest` 不再硬编码 `message.Session.Platform == "matrix"`；人格提供者按平台自行决定是否注入，为非 Matrix 平台复用提示词链路扫除障碍
 

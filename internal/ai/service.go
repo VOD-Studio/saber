@@ -29,6 +29,14 @@ type PromptProvider interface {
 	GetSystemPrompt(session chat.Session, basePrompt string) string
 }
 
+// ChatEntrypoint 是平台接入端注入的聊天命令入口。
+// 实现负责把该平台的原生命令参数规范化为 chat.Message，并携带 adapter 交给 Service 处理，
+// 因此 ai 核心无需知道具体平台的 adapter 构造方式。
+type ChatEntrypoint interface {
+	// HandleCommand 处理平台聊天命令，modelName 为空时使用默认模型。
+	HandleCommand(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string, modelName string) error
+}
+
 // Service 装配模型、通用聊天处理器以及旧 Matrix 命令兼容入口。
 type Service struct {
 	config *config.Config
@@ -47,6 +55,8 @@ type Service struct {
 	mediaService *matrix.MediaService
 	// promptProvider 是提示词提供者（可选字段）。
 	promptProvider PromptProvider
+	// entry 是平台注入的聊天命令入口，负责把平台原生命令规范化为 chat.Message。
+	entry ChatEntrypoint
 	// chatProcessor 是所有聊天平台共享的消息处理链路。
 	chatProcessor *conversation.Processor
 	// respHandler 是响应处理器。
@@ -193,6 +203,12 @@ func (s *Service) IsEnabled() bool {
 // 提示词提供者用于获取房间的系统提示词（合并基础提示词和人格提示词）。
 func (s *Service) SetPromptProvider(pp PromptProvider) {
 	s.promptProvider = pp
+}
+
+// SetChatEntrypoint 注入平台聊天命令入口。未注入时平台命令会被拒绝，
+// 但聊天核心仍可经 HandleChat 由其他 adapter 直接调用。
+func (s *Service) SetChatEntrypoint(entry ChatEntrypoint) {
+	s.entry = entry
 }
 
 // GetModelRegistry 获取模型注册表。
@@ -399,17 +415,23 @@ func (s *Service) GenerateStreamingSimpleResponse(ctx context.Context, modelName
 	return resp.Content, nil
 }
 
-// handleAICommand 保留 Matrix 命令入口，消息规范化和媒体下载由 Matrix adapter 完成。
+// handleAICommand 把平台聊天命令交给注入的入口处理，ai 自身不再构造平台 adapter。
 func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID id.RoomID, modelName string, args []string) error {
-	adapter := matrix.NewChatAdapter(s.matrixService, s.mediaService, s.config.Matrix.Media, s.config.Matrix.StreamEdit.Enabled, func(ctx context.Context, message chat.Message, reply chat.Adapter) (agent.Result, error) {
-		return s.handleChat(ctx, message, reply, modelName)
-	})
-	return adapter.Handle(ctx, userID, roomID, args)
+	if s.entry == nil {
+		return fmt.Errorf("未接入聊天平台，无法处理聊天命令")
+	}
+	return s.entry.HandleCommand(ctx, userID, roomID, args, modelName)
 }
 
 // HandleChat 是内存或其他聊天 adapter 可复用的统一消息入口。
 func (s *Service) HandleChat(ctx context.Context, message chat.Message, reply chat.Adapter) (agent.Result, error) {
 	return s.handleChat(ctx, message, reply, s.GetModelRegistry().GetDefault())
+}
+
+// HandleChatModel 与 HandleChat 相同，但由平台指定本轮使用的模型。
+// 供接入端在解析平台专属命令（例如 !ai-gpt-4）后复用同一条聊天链路。
+func (s *Service) HandleChatModel(ctx context.Context, message chat.Message, reply chat.Adapter, modelName string) (agent.Result, error) {
+	return s.handleChat(ctx, message, reply, modelName)
 }
 
 func (s *Service) handleChat(ctx context.Context, message chat.Message, reply chat.Adapter, modelName string) (agent.Result, error) {
