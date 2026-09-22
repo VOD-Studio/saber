@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 新增 `internal/platform/violet` 平台接入端：以 Violet Bot API 的 bot 虚拟用户身份接入站内聊天，SSE 订阅 `message.created`、按 `@(name:uuid)` 剥离提及并把「只 @ 不提问」判为空内容、按 `GET /profile` 的 `user_id` 兜底过滤自回声、按消息 ID 有界去重；协议不支持 `Last-Event-ID` 补发，因此断线后改走消息历史接口按 `created_at` 水位补拉（首次连接只打基线，不回放旧消息），出站 `chat.Adapter` 提供 Send/Edit/SetTyping，编辑按 `platforms.violet.edit_interval_ms` 全局节流到 ≥200ms 以匹配 300 次/分钟的配额，超 10000 字符的正文按 Unicode 字符截断，发送复用 `chat.Reply.TransactionID` 作为必填的 `Idempotency-Key` 使任务重发不刷两遍屏
+
 - 新增 `platforms:` 配置节与 `Config.PlatformEnabled`：`terminal.enabled`（默认可用、可显式关闭）与 `violet` 接入参数（endpoint/bot_token/account/自动回复开关/`edit_interval_ms` 默认 200ms/HTTP 超时）集中登记；`platform.Registry.Enabled` 改为按注册顺序遍历并只认配置开关，不再对 terminal/matrix 名称做硬编码判断，Matrix 关闭时其余平台也能正常启停
 
 - Matrix 出站消息按 Markdown 渲染：`chat.Adapter` 的回复正文约定为 Markdown，`matrix.ChatAdapter` 用 mautrix 渲染为 `formatted_body`（含表格与删除线），`body` 保留 Markdown 原文供纯文本客户端回退；模型输出里的原始 HTML 一律转义，不会当作可信标记，AI 正文回复与任务投递同样受益
