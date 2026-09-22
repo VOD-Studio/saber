@@ -181,7 +181,7 @@ func (p *Platform) supervise(ctx context.Context) {
 			delay = initialReconnectDelay // 能连上说明服务活着，退避重新从短起步
 		}
 		if err != nil {
-			slog.Warn("violet 事件流中断，准备重连", "error", err, "retry_in", delay.String())
+			slog.Warn(describeReconnect(err), "error", err, "retry_in", delay.String())
 		}
 		select {
 		case <-ctx.Done():
@@ -581,6 +581,17 @@ func (p *Platform) setIdentity(profile botProfileDTO) {
 	p.identityMu.Lock()
 	defer p.identityMu.Unlock()
 	p.identity = profile
+}
+
+// describeReconnect 把重连原因分成「继续退避就行」和「得有人去改配置」。
+//
+// 401/403 是凭据被拒：Violet 对禁用与未知 token 都给这两个码，此时退避再多次也不会自己好，
+// 日志必须直接点名 bot_token 与 bot 启用状态，否则运维只会看到一条含糊的「事件流中断」。
+func describeReconnect(err error) string {
+	if status := clientStatus(err); status == 401 || status == 403 {
+		return "violet 拒绝当前凭据，检查 platforms.violet.bot_token 与该 bot 是否启用"
+	}
+	return "violet 事件流中断，准备重连"
 }
 
 // jitter 给退避时长加 ±reconnectJitter 的随机抖动，避免多实例同一时刻齐刷刷重连。

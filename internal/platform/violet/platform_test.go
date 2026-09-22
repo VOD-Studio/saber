@@ -2,7 +2,9 @@ package violetplatform
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -373,6 +375,28 @@ func TestPlatform_CommandPrefixOnlyAi(t *testing.T) {
 	waitForIdle(t, 400*time.Millisecond)
 	if got := handler.messages(); len(got) != 1 {
 		t.Fatalf("不支持的命令被当成提问回答了: %+v", texts(got))
+	}
+}
+
+// TestDescribeReconnect 验证凭据被拒与暂时断流给出不同的日志：前者需要人动手改配置。
+func TestDescribeReconnect(t *testing.T) {
+	t.Parallel()
+	for _, err := range []error{
+		&apiError{Status: 401, Code: "UNAUTHORIZED"},
+		&apiError{Status: 403, Code: "FORBIDDEN"},
+	} {
+		if got := describeReconnect(err); !strings.Contains(got, "bot_token") {
+			t.Fatalf("状态 %d 的凭据错误应点名 bot_token，got %q", clientStatus(err), got)
+		}
+	}
+	for _, err := range []error{
+		&apiError{Status: 500, Code: "INTERNAL"},
+		errors.New("connection refused"),
+		io.ErrUnexpectedEOF,
+	} {
+		if got := describeReconnect(err); got != "violet 事件流中断，准备重连" {
+			t.Fatalf("暂时断流不该被判成凭据问题，got %q", got)
+		}
 	}
 }
 
