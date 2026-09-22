@@ -240,3 +240,17 @@ func TestPlatformNormalizeCommand(t *testing.T) {
 		t.Fatal("缺少命令服务时仍规范化了命令")
 	}
 }
+
+// TestPlatformSession 验证会话作用域由平台解析：账号、房间与线程缺一不可。
+func TestPlatformSession(t *testing.T) {
+	p, _ := newPlatform(t, nil, true)
+	ctx := matrix.WithMessageRelations(context.Background(), "", "$thread")
+	want := chat.Session{Platform: "matrix", Account: "@bot:local", Conversation: "!room:local", Thread: "$thread"}
+	if got := p.Session(ctx, id.RoomID("!room:local")); got != want {
+		t.Fatalf("Session() = %+v, 期望 %+v", got, want)
+	}
+	empty := platformmatrix.New(config.DefaultConfig(), nil, nil, nil)
+	if got := empty.Session(ctx, id.RoomID("!room:local")); got.Validate() == nil {
+		t.Fatalf("缺少命令服务时不应给出有效会话: %+v", got)
+	}
+}

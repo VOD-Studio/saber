@@ -39,6 +39,9 @@ type ChatEntrypoint interface {
 	// NormalizeCommand 把平台命令文本（含 "!task list" 这样的前缀）规范化为通用消息，
 	// 并返回面向该会话的出站 adapter，供只读命令复用同一套会话作用域与回复能力。
 	NormalizeCommand(ctx context.Context, userID id.UserID, roomID id.RoomID, text string) (chat.Message, chat.Adapter, error)
+	// Session 解析一次入站事件所在的会话作用域（账号与线程隔离），
+	// 使上下文类命令无需自行拼平台的会话标识。
+	Session(ctx context.Context, roomID id.RoomID) chat.Session
 }
 
 // ErrNoChatEntrypoint 表示当前没有平台接入端接管聊天命令。
@@ -436,6 +439,14 @@ func (s *Service) NormalizeCommand(ctx context.Context, userID id.UserID, roomID
 		return chat.Message{}, nil, ErrNoChatEntrypoint
 	}
 	return s.entry.NormalizeCommand(ctx, userID, roomID, text)
+}
+
+// Session 由注入的平台入口解析会话作用域，未接入平台时返回 ErrNoChatEntrypoint。
+func (s *Service) Session(ctx context.Context, roomID id.RoomID) (chat.Session, error) {
+	if s.entry == nil {
+		return chat.Session{}, ErrNoChatEntrypoint
+	}
+	return s.entry.Session(ctx, roomID), nil
 }
 
 // HandleChat 是内存或其他聊天 adapter 可复用的统一消息入口。

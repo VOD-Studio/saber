@@ -66,6 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `!ai clear`/`!ai context` 的会话作用域改由平台端口 `ChatEntrypoint.Session` 解析，`internal/ai/commands.go` 不再硬编码 `Platform: "matrix"` 与 Matrix 线程上下文键
+
 - `ai` 的只读命令（`!task list/status/cancel/logs`、`!schedule ...`）改经平台注入的 `ChatEntrypoint.NormalizeCommand` 取得通用消息与回执 adapter，`ai/tasks.go`、`ai/schedules.go` 不再 import `internal/matrix`；`ChatEntrypoint` 未注入时统一返回 `ai.ErrNoChatEntrypoint`
 
 - `chat.Message` 新增 `ControlText` 与 `CommandText()`：Matrix 引用回退的剥离改由接入层 adapter 完成，`ai` 识别任务控制指令时不再读取 Matrix 上下文键，`matrix.GetReplyBody` 收敛为包内私有

@@ -6,8 +6,6 @@ import (
 	"fmt"
 
 	"maunium.net/go/mautrix/id"
-	"rua.plus/saber/internal/chat"
-	"rua.plus/saber/internal/matrix"
 )
 
 // AICommand 处理默认的 AI 聊天命令。
@@ -106,7 +104,10 @@ func (c *ClearContextCommand) Handle(ctx context.Context, userID id.UserID, room
 		return c.service.matrixService.SendText(ctx, roomID, "上下文管理未启用")
 	}
 
-	session := chat.Session{Platform: "matrix", Account: c.service.contextManager.account, Conversation: string(roomID), Thread: string(matrix.GetThreadID(ctx))}
+	session, err := c.service.Session(ctx, roomID)
+	if err != nil {
+		return err
+	}
 	if err := c.service.chatProcessor.Clear(ctx, session); err != nil {
 		return err
 	}
@@ -147,7 +148,10 @@ func (c *ContextInfoCommand) Handle(ctx context.Context, userID id.UserID, roomI
 		return c.service.matrixService.SendText(ctx, roomID, "上下文管理未启用")
 	}
 
-	session := chat.Session{Platform: "matrix", Account: c.service.contextManager.account, Conversation: string(roomID), Thread: string(matrix.GetThreadID(ctx))}
+	session, err := c.service.Session(ctx, roomID)
+	if err != nil {
+		return err
+	}
 	msgCount, tokenCount := c.service.contextManager.history.GetContextSize(session.Key())
 
 	html := `<table>

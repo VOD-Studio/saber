@@ -32,6 +32,11 @@ func (e matrixEntrypoint) NormalizeCommand(ctx context.Context, userID id.UserID
 	return adapter.Message(ctx, userID, roomID, text), adapter, nil
 }
 
+// Session 复用 Matrix adapter 的房间与线程解析，与生产实现一致。
+func (e matrixEntrypoint) Session(ctx context.Context, roomID id.RoomID) chat.Session {
+	return matrix.NewChatAdapter(e.service.matrixService, nil, e.service.config.Matrix.Media, false, nil).Session(ctx, roomID)
+}
+
 // wireMatrixPlatform 模拟 Matrix 平台接入端的装配：注入聊天入口并注册任务结果投递。
 // 任务未启用时只装配聊天入口。
 func wireMatrixPlatform(t *testing.T, service *Service, commands *matrix.CommandService, media *matrix.MediaService) {

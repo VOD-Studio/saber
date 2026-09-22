@@ -381,6 +381,8 @@ func TestClearContextCommand_Handle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewService failed: %v", err)
 		}
+		wireMatrixPlatform(t, service, matrixSvc, nil)
+		wireMatrixPlatform(t, service, matrixSvc, nil)
 
 		cmd := NewClearContextCommand(service)
 
@@ -408,6 +410,7 @@ func TestClearContextCommand_Handle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewService failed: %v", err)
 		}
+		wireMatrixPlatform(t, service, matrixSvc, nil)
 
 		// 添加一些上下文
 		service.contextManager.AddMessage(id.RoomID("!room:example.com"), RoleUser, "hello", id.UserID("@user:example.com"))
@@ -447,6 +450,8 @@ func TestContextInfoCommand_Handle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewService failed: %v", err)
 		}
+		wireMatrixPlatform(t, service, matrixSvc, nil)
+		wireMatrixPlatform(t, service, matrixSvc, nil)
 
 		cmd := NewContextInfoCommand(service)
 
@@ -474,6 +479,7 @@ func TestContextInfoCommand_Handle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewService failed: %v", err)
 		}
+		wireMatrixPlatform(t, service, matrixSvc, nil)
 
 		roomID := id.RoomID("!room:example.com")
 		userID := id.UserID("@user:example.com")
@@ -507,6 +513,7 @@ func TestAICommandRouter_Handle_WithSubcommand(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewService failed: %v", err)
 		}
+		wireMatrixPlatform(t, service, matrixSvc, nil)
 
 		router := NewAICommandRouter(service)
 
