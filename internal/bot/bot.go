@@ -629,53 +629,45 @@ func (s *appState) shutdown(cancel context.CancelFunc) {
 	ctx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
-	// 使用 WaitGroup 并行关闭所有服务
+	// 使用 WaitGroup 并行关闭所有服务：wg.Go 负责计数，避免 Add/Done 成对写错
 	var wg sync.WaitGroup
 
 	if svc.aiService != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			slog.Debug("正在停止 AI 服务...")
 			svc.aiService.Stop()
 			slog.Debug("AI 服务已停止")
-		}()
+		})
 	}
 
 	if svc.mcpManager != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			slog.Debug("正在关闭 MCP 连接...")
 			if err := svc.mcpManager.Close(); err != nil {
 				slog.Warn("关闭 MCP 管理器失败", "error", err)
 			} else {
 				slog.Debug("MCP 连接已关闭")
 			}
-		}()
+		})
 	}
 
 	if svc.platforms != nil {
 		for _, p := range svc.platforms.Enabled(s.cfg) {
 			platformName := p.Name()
-			wg.Add(1)
-			go func(p platform.Platform) {
-				defer wg.Done()
+			wg.Go(func() {
 				slog.Debug("正在停止平台...", "platform", platformName)
 				p.Stop()
 				slog.Debug("平台已停止", "platform", platformName)
-			}(p)
+			})
 		}
 	}
 
 	if svc.proactiveManager != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			slog.Debug("正在停止主动聊天管理器...")
 			svc.proactiveManager.Stop()
 			slog.Debug("主动聊天管理器已停止")
-		}()
+		})
 	}
 
 	// 等待所有服务关闭完成或超时
