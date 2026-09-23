@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/execution"
 	"rua.plus/saber/internal/task"
@@ -21,6 +22,16 @@ func (s *Service) deliverTask(ctx context.Context, adapter chat.Adapter, t task.
 			}
 		}
 		reply := taskReply(t, "result", text)
+		if adapter.Capabilities().ReplyState {
+			reply.Thinking = taskThinking(t.Result)
+			if t.Status == "completed" {
+				reply.Status = chat.ReplyCompleted
+			} else {
+				reply.Status = chat.ReplyFailed
+				reply.ErrorCode = t.Status
+				reply.Text = partialTaskContent(t.Result)
+			}
+		}
 		messageID, err := adapter.Send(ctx, reply)
 		if err != nil || !adapter.Capabilities().Edit {
 			return messageID, err
@@ -51,4 +62,32 @@ func (s *Service) deliverTask(ctx context.Context, adapter chat.Adapter, t task.
 		}
 	}
 	return messageID, nil
+}
+
+func taskThinking(result agent.Result) string {
+	var summary strings.Builder
+	for _, round := range result.Rounds {
+		if round.Response.Thinking != "" {
+			if summary.Len() > 0 {
+				summary.WriteString("\n\n")
+			}
+			summary.WriteString(round.Response.Thinking)
+		}
+	}
+	return summary.String()
+}
+
+// partialTaskContent 保留最后一次模型尝试已生成的正文；没有增量时留空给失败卡片。
+func partialTaskContent(result agent.Result) string {
+	for i := len(result.Rounds) - 1; i >= 0; i-- {
+		for j := len(result.Rounds[i].Attempts) - 1; j >= 0; j-- {
+			if text := result.Rounds[i].Attempts[j].Response.Content; text != "" {
+				return text
+			}
+		}
+		if text := result.Rounds[i].Response.Content; text != "" {
+			return text
+		}
+	}
+	return ""
 }

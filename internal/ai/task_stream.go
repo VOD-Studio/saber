@@ -23,13 +23,15 @@ type taskStream struct {
 	adapter chat.Adapter
 	display chat.Display
 
-	mu      sync.Mutex
-	content strings.Builder
-	started time.Time
-	version uint64
-	updates chan struct{}
-	stop    chan struct{}
-	done    chan struct{}
+	mu       sync.Mutex
+	content  strings.Builder
+	thinking strings.Builder
+	status   chat.ReplyStatus
+	started  time.Time
+	version  uint64
+	updates  chan struct{}
+	stop     chan struct{}
+	done     chan struct{}
 }
 
 func (s *Service) newTaskStream(ctx context.Context) *taskStream {
@@ -49,7 +51,7 @@ func (s *Service) newTaskStream(ctx context.Context) *taskStream {
 	}
 	p := &taskStream{
 		task: t, adapter: config.adapter, display: config.display,
-		started: time.Now(), updates: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
+		started: time.Now(), status: chat.ReplyPending, updates: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
 	}
 	go p.run(ctx)
 	return p
@@ -60,10 +62,27 @@ func (p *taskStream) event(event agent.Event) {
 	switch event.Kind {
 	case agent.ModelStarted, agent.AttemptStarted:
 		p.content.Reset()
+		p.thinking.Reset()
+		p.status = chat.ReplyThinking
 		p.started = time.Now()
 		p.version++
+		select {
+		case p.updates <- struct{}{}:
+		default:
+		}
+	case agent.ThinkingDelta:
+		p.thinking.WriteString(event.Text)
+		if p.status != chat.ReplyStreaming {
+			p.status = chat.ReplyThinking
+		}
+		p.version++
+		select {
+		case p.updates <- struct{}{}:
+		default:
+		}
 	case agent.TextDelta:
 		p.content.WriteString(event.Text)
+		p.status = chat.ReplyStreaming
 		p.version++
 		select {
 		case p.updates <- struct{}{}:
@@ -80,6 +99,10 @@ func (p *taskStream) close() {
 
 func (p *taskStream) run(ctx context.Context) {
 	defer close(p.done)
+	if p.adapter.Capabilities().ReplyState {
+		p.runReplyState(ctx)
+		return
+	}
 	interval := p.display.EditInterval
 	if interval <= 0 {
 		interval = time.Millisecond
@@ -128,5 +151,57 @@ func (p *taskStream) run(ctx context.Context) {
 		if err != nil {
 			slog.Debug("更新任务临时回复失败，终态仍会重试投递", "task", p.task.ID, "error", err)
 		}
+	}
+}
+
+// runReplyState 在同一条幂等回复上更新状态和累计内容；无增量时续期生成租约。
+func (p *taskStream) runReplyState(ctx context.Context) {
+	interval := p.display.EditInterval
+	if interval <= 0 {
+		interval = 200 * time.Millisecond
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	var messageID string
+	var shown uint64
+	var lastUpdate time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-p.stop:
+			return
+		case <-p.updates:
+		case <-ticker.C:
+		}
+		p.mu.Lock()
+		text, thinking, status, version := strings.Clone(p.content.String()), strings.Clone(p.thinking.String()), p.status, p.version
+		p.mu.Unlock()
+		if messageID == "" {
+			pending := taskReply(p.task, "result", "")
+			pending.Status = chat.ReplyPending
+			updateCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			id, err := p.adapter.Send(updateCtx, pending)
+			cancel()
+			if err != nil {
+				slog.Debug("取得任务回复占位消息失败", "task", p.task.ID, "error", err)
+				continue
+			}
+			messageID = id
+			lastUpdate = time.Now()
+		}
+		if version == shown && time.Since(lastUpdate) < 15*time.Second {
+			continue
+		}
+		reply := taskReply(p.task, "result", text)
+		reply.Status, reply.Thinking = status, thinking
+		updateCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := p.adapter.Edit(updateCtx, messageID, reply)
+		cancel()
+		if err != nil {
+			slog.Debug("更新任务回复状态失败，终态仍会重试投递", "task", p.task.ID, "error", err)
+			continue
+		}
+		shown, lastUpdate = version, time.Now()
 	}
 }

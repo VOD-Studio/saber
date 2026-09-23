@@ -189,6 +189,7 @@ platforms:
 - `account` 参与会话与历史的存储键，改动它等于换一份历史、限流额度也重新计。多实例接同一个站点时应当显式区分。
 - 触发规则：私聊由 `direct_chat_auto_reply` 控制，群聊由 `group_chat_mention_reply` 控制且必须被 `@` 到（Violet 服务端本来就只把被点名的群聊消息推给 bot，Saber 再判一次）。正文里的 `@(username:uuid)` 会降级成 `@username` 再交给模型；只 @ 一句没有内容不会触发回答。
 - `edit_interval_ms` 是 Violet 自己的出站编辑下限。写端点按 bot 用户限流，编辑配额约 300 次/分钟，因此任务文本增量会合并后按该间隔更新（默认 200ms）；最终定稿同样走编辑，失败时重试。300 字节、3 秒、500ms、最多 5 次的旧展示策略只用于 Matrix。
+- Violet 的「允许展示 thinking」开关由 Violet 后台逐 Bot 管理，默认关闭；Saber 仅上报 Responses 明确给出的公开摘要，不从正文的 `<think>` 标签猜测或发送原始推理。Violet 关闭展示时应丢弃新上报的摘要，并从历史与 SSE 中隐藏既有摘要；关闭开关不删除历史数据。
 - `http_timeout_seconds` 只作用于普通 API 请求，事件流是长连接，靠 30 秒心跳与 90 秒静默看门狗判活。
 - 断线恢复：Violet 的 bot 事件流不支持 `Last-Event-ID` 补发，Saber 在重连后按消息历史接口补齐水位之后的消息，并按消息 ID 去重；首次连接只打水位基线，不会把站内旧消息当新问题回答一遍。
 - 能力边界：Violet 只走 `HandleChat` 这条最小链路。`!ai <内容>` 会被剥掉前缀当提问，其余 `!` 开头命令（`!task`、`!schedule`、上下文命令）在本平台无落点、直接跳过；任务产出的文件不投递（上传通道仍按 Matrix 限定）；主动聊天未接入 Violet（`SendNotice` 没有对等语义）。

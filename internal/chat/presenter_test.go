@@ -83,6 +83,37 @@ func TestPresenter_ThresholdAndPreviewFailure(t *testing.T) {
 	}
 }
 
+func TestPresenter_ReplyStateKeepsOneMessageAndPartialFailure(t *testing.T) {
+	target := &sink{caps: chat.Capabilities{Edit: true, Reply: true, ReplyState: true}}
+	p := chat.NewPresenter(target, chat.Message{Session: chat.Session{Platform: "p", Account: "a", Conversation: "c"}, ID: "incoming"}, chat.Display{})
+	ctx := context.Background()
+	if err := p.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []agent.Event{
+		{Kind: agent.ModelStarted},
+		{Kind: agent.ThinkingDelta, Text: "公开摘要"},
+		{Kind: agent.TextDelta, Text: "部分"},
+	} {
+		if err := p.Event(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := p.Fail(ctx, "timed_out"); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Heartbeat(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(target.sends) != 1 || target.sends[0].Status != chat.ReplyPending || target.sends[0].Text != "" || target.sends[0].ReplyTo != "incoming" {
+		t.Fatalf("占位消息 = %+v", target.sends)
+	}
+	last := target.edits[len(target.edits)-1]
+	if last.Status != chat.ReplyFailed || last.Text != "部分" || last.Thinking != "公开摘要" || last.ErrorCode != "timed_out" {
+		t.Fatalf("失败回复 = %+v", last)
+	}
+}
+
 func TestMessage_IdentityAndValidation(t *testing.T) {
 	session := chat.Session{Platform: "p", Account: "a", Conversation: "c"}
 	for _, m := range []chat.Message{{}, {Session: session}, {Session: session, SenderID: "42"}, {Session: session, SenderID: "42", Attachments: []chat.Attachment{{Kind: "file", URL: "x"}}}} {

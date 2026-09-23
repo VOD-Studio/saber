@@ -78,10 +78,7 @@ func (s *Service) EnableTasks(path string) error {
 		if err := s.core.WaitForRateLimit(ctx); err != nil {
 			return agent.Result{}, err
 		}
-		var progress *taskStream
-		if req.Stream {
-			progress = s.newTaskStream(ctx)
-		}
+		progress := s.newTaskStream(ctx)
 		if progress != nil {
 			defer progress.close()
 		}
@@ -182,6 +179,17 @@ func (s *Service) submitTask(ctx context.Context, message chat.Message, req agen
 	}
 	if err != nil {
 		return err
+	}
+	if reply.Capabilities().ReplyState {
+		ackCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		pending := taskReply(t, "result", "")
+		pending.Status = chat.ReplyPending
+		messageID, sendErr := reply.Send(ackCtx, pending)
+		if sendErr != nil {
+			return sendErr
+		}
+		return s.tasks.RememberMessage(ackCtx, t.ID, messageID)
 	}
 	if !s.config.Agent.TaskReceiptEnabled {
 		return nil

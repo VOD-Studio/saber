@@ -12,10 +12,11 @@ import (
 // agentStreamHandler 只拼接模型协议并发出运行事件，不操作聊天平台。
 // SDK 在单个请求内串行调用 handler。
 type agentStreamHandler struct {
-	emit    func(agent.Event)
-	content strings.Builder
-	calls   map[int]*StreamingToolCallState
-	result  agent.Response
+	emit     func(agent.Event)
+	content  strings.Builder
+	thinking strings.Builder
+	calls    map[int]*StreamingToolCallState
+	result   agent.Response
 }
 
 func newAgentStreamHandler(emit func(agent.Event)) *agentStreamHandler {
@@ -30,6 +31,7 @@ func (h *agentStreamHandler) OnChunk(_ context.Context, chunk string) {
 
 // OnThinkingChunk 只转发上游明确标为公开摘要的内容。
 func (h *agentStreamHandler) OnThinkingChunk(_ context.Context, chunk string) {
+	h.thinking.WriteString(chunk)
 	h.emit(agent.Event{Kind: agent.ThinkingDelta, Text: chunk})
 }
 
@@ -83,6 +85,7 @@ func (h *agentStreamHandler) GetAccumulatedToolCalls() []openai.ToolCall {
 func (h *agentStreamHandler) response() agent.Response {
 	response := h.result
 	response.Content = h.content.String()
+	response.Thinking = h.thinking.String()
 	response.ToolCalls = h.GetAccumulatedToolCalls()
 	return response
 }

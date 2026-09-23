@@ -135,11 +135,7 @@ func (c *client) messages(ctx context.Context, conversationID, cursor string, li
 
 // send 发送文本消息。idempotencyKey 是 Violet 必填的幂等头，同键重试返回同一条消息，
 // 因此任务投递这类「重放应是同一条」的场景必须把上层给的 TransactionID 原样带上。
-func (c *client) send(ctx context.Context, conversationID, content, replyToID, idempotencyKey string) (messageDTO, error) {
-	body := map[string]any{"content": content}
-	if replyToID != "" {
-		body["reply_to_id"] = replyToID
-	}
+func (c *client) send(ctx context.Context, conversationID string, body outgoingMessage, idempotencyKey string) (messageDTO, error) {
 	var out messageDTO
 	path := "/conversations/" + url.PathEscape(conversationID) + "/messages"
 	if err := c.request(ctx, http.MethodPost, path, nil, body, idempotencyKey, &out); err != nil {
@@ -149,9 +145,9 @@ func (c *client) send(ctx context.Context, conversationID, content, replyToID, i
 }
 
 // edit 整体替换自己发过的消息正文，流式回复靠它逐步定稿。
-func (c *client) edit(ctx context.Context, conversationID, messageID, content string) error {
+func (c *client) edit(ctx context.Context, conversationID, messageID string, body outgoingMessage) error {
 	path := "/conversations/" + url.PathEscape(conversationID) + "/messages/" + url.PathEscape(messageID)
-	return c.request(ctx, http.MethodPatch, path, nil, map[string]any{"content": content}, "", nil)
+	return c.request(ctx, http.MethodPatch, path, nil, body, "", nil)
 }
 
 // setTyping 上报输入状态，204 无响应体。

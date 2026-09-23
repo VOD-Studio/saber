@@ -114,7 +114,7 @@ func TestResponses_ToolLoop(t *testing.T) {
 				n := requests.Add(1)
 				output := `[ {"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]} ]`
 				if n == 1 {
-					output = `[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque","summary":[]},
+					output = `[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque","summary":[{"type":"summary_text","text":"公开摘要"}]},
       {"id":"fc_1","type":"function_call","call_id":"call1","name":"lookup","arguments":"{\"n\":1}"},
       {"id":"fc_2","type":"function_call","call_id":"call2","name":"lookup","arguments":"{\"n\":2}"}]`
 				} else {
@@ -173,9 +173,10 @@ func TestResponses_ToolLoop(t *testing.T) {
 			require.EqualValues(t, 2, requests.Load())
 			require.Equal(t, 30, result.Usage.TotalTokens)
 			require.Len(t, result.Rounds[0].Response.ResponsesOutput, 3)
+			require.Equal(t, "公开摘要", result.Rounds[0].Response.Thinking)
+			require.Equal(t, "公开摘要", thinking.String())
 			if streaming {
 				require.Equal(t, "done", text.String())
-				require.Equal(t, "公开摘要", thinking.String())
 			}
 		})
 	}

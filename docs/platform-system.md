@@ -223,8 +223,8 @@ Violet 是一个全栈博客平台，内置聊天系统。Saber 通过 Violet Bo
 | GET | `/api/v1/chat/bot/conversations` | 会话列表，首次连接用来打水位基线与预热形态缓存 |
 | GET | `/api/v1/chat/bot/conversations/{cid}` | 会话详情，主要取 `kind`（`direct`/`room`） |
 | GET | `/api/v1/chat/bot/conversations/{cid}/messages` | 历史（新→旧，cursor 分页），也是断线恢复通道 |
-| POST | `/api/v1/chat/bot/conversations/{cid}/messages` | 发文本消息，`Idempotency-Key` 头必填 |
-| PATCH | `/api/v1/chat/bot/conversations/{cid}/messages/{mid}` | 编辑自己的消息（流式定稿）；路径带 cid 是因为服务端按会话做归属校验 |
+| POST | `/api/v1/chat/bot/conversations/{cid}/messages` | 创建 `pending` 回复或普通文本消息，`Idempotency-Key` 头必填 |
+| PATCH | `/api/v1/chat/bot/conversations/{cid}/messages/{mid}` | 更新同一回复的累计正文、公开思考摘要和状态；路径带 cid 是因为服务端按会话做归属校验 |
 | POST | `/api/v1/chat/bot/conversations/{cid}/typing` | 上报输入状态，204 无响应体 |
 
 成功响应统一是 `{"data": ..., "meta": {"pagination": ...}}`，失败是 `{"error": CODE, "message": ...}`；接入端把状态码留在 `apiError` 里，因为 401/403（凭据问题，重试无用）与 5xx/网络错误（该退避重连）的处置完全不同。
@@ -244,10 +244,12 @@ Violet 是一个全栈博客平台，内置聊天系统。Saber 通过 Violet Bo
 
 ### 出站：`chat.Adapter`
 
-`adapter.go` 声明 `Edit`/`Typing`/`Reply` 三项能力，`Send` 返回平台消息 ID 供后续编辑，`Reply.TransactionID` 原样作 `Idempotency-Key`（Violet 按 (会话, 发送者, 幂等键) 唯一，同键重发返回同一条消息；超过列宽 128 的键收敛为 SHA-256）。两处平台自己的约束：
+`adapter.go` 声明 `Edit`/`Typing`/`Reply`/`ReplyState` 四项能力，`Send` 返回平台消息 ID 供后续编辑，`Reply.TransactionID` 原样作 `Idempotency-Key`（Violet 按 (会话, 发送者, 幂等键) 唯一，同键重发返回同一条消息；超过列宽 128 的键收敛为 SHA-256）。两处平台自己的约束：
 
-- 正文按 Unicode 字符截到 10000 以内并留截断标记，空白正文直接拒发（服务端要求去掉空白后非空）
+- 正文按 Unicode 字符截到 10000 以内并留截断标记；只有 `pending`、`thinking`、`failed` Bot 回复可使用空正文，普通文本消息仍拒绝空白正文
 - 编辑有全局最小间隔节流（`edit_interval_ms`，默认 200ms ≈ 300 次/分钟配额）。后台任务合并模型增量后最多按此频率更新；最终投递也走 `Edit`，失败时按原幂等键重试
+
+回复生命周期请求采用 `{"content":"...","reply_to_id":"...","bot_reply":{"status":"streaming","thinking":"..."}}`。创建时 `status=pending` 且 `content` 可为空；后续 PATCH 始终传累计 `content` 和累计 `thinking`，状态为 `thinking`、`streaming`、`completed` 或 `failed`，失败可附 `error_code`。Saber 不写 `sender_kind`、`revision`、`updated_at`：它们由 Violet 服务端维护并通过历史和 `message.updated` SSE 返回。Violet 必须原子更新四项、拒绝终态回退，并以后台 Bot 开关控制 thinking 的保存和返回；这部分是跨仓协议依赖，Saber 的假服务端测试不能替代真实 Violet 联调。旧 Bot 未携带 `bot_reply` 时仍走普通文本消息行为。
 
 ### 消息流转
 
@@ -260,14 +262,13 @@ violetplatform.Platform.supervise → connectOnce → readSSEFrames
     │ 构造 chat.Message
     ▼
 aiService.HandleChat(ctx, msg, violetAdapter)
-    │ 持久化任务
+    │ 持久化任务 → POST pending 占位消息
     ▼
 agent.Runtime → task_events（完整增量与执行记录）
-    │ 文本增量异步合并
-    ├─ Send() → POST /chat/bot/conversations/{cid}/messages（稳定 Idempotency-Key）
-    ├─ Edit() → PATCH /chat/bot/conversations/{cid}/messages/{mid}（≥edit_interval_ms）
+    │ 公开思考摘要与正文增量异步合并
+    ├─ Edit() → PATCH thinking/streaming（≥edit_interval_ms；静默时续期）
     ▼
-任务终态入库 → 幂等 Send() 取回同一消息 ID → Edit() 定稿；失败重试
+任务终态入库 → 幂等 Send() 取回同一消息 ID → Edit() 提交 completed/failed；失败重试
 ```
 
 ## 实施顺序

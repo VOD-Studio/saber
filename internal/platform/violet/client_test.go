@@ -112,7 +112,7 @@ func TestClient_Send(t *testing.T) {
 	fake := newFakeViolet(t)
 	api := newTestClient(fake)
 	ctx := context.Background()
-	created, err := api.send(ctx, testDirectRoom, "你好", "msg-ref", "key-1")
+	created, err := api.send(ctx, testDirectRoom, outgoingMessage{Content: "你好", ReplyToID: "msg-ref"}, "key-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestClient_Send(t *testing.T) {
 	if len(sent) != 1 || sent[0].Idempotency != "key-1" || sent[0].ReplyTo != "msg-ref" {
 		t.Fatalf("服务端收到的请求 = %+v", sent)
 	}
-	again, err := api.send(ctx, testDirectRoom, "你好", "msg-ref", "key-1")
+	again, err := api.send(ctx, testDirectRoom, outgoingMessage{Content: "你好", ReplyToID: "msg-ref"}, "key-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestClient_Send(t *testing.T) {
 	if len(fake.sentMessages()) != 1 {
 		t.Fatalf("重发刷出了第二条消息: %+v", fake.sentMessages())
 	}
-	if _, err := api.send(ctx, testDirectRoom, "   ", "", "key-2"); clientStatus(err) != 400 {
+	if _, err := api.send(ctx, testDirectRoom, outgoingMessage{Content: "   "}, "key-2"); clientStatus(err) != 400 {
 		t.Fatalf("空白正文应被服务端拒绝，got %v", err)
 	}
 }
@@ -146,16 +146,16 @@ func TestClient_Edit(t *testing.T) {
 	theirs := fake.pushMessage(testDirectRoom, "user-1", "alice", "别人的消息", time.Now())
 	api := newTestClient(fake)
 	ctx := context.Background()
-	if err := api.edit(ctx, testDirectRoom, mine.ID, "最终答案"); err != nil {
+	if err := api.edit(ctx, testDirectRoom, mine.ID, outgoingMessage{Content: "最终答案"}); err != nil {
 		t.Fatal(err)
 	}
 	if records := fake.editRecords(); len(records) != 1 || records[0].Content != "最终答案" {
 		t.Fatalf("编辑记录 = %+v", records)
 	}
-	if err := api.edit(ctx, testDirectRoom, theirs.ID, "篡改"); clientStatus(err) != 403 {
+	if err := api.edit(ctx, testDirectRoom, theirs.ID, outgoingMessage{Content: "篡改"}); clientStatus(err) != 403 {
 		t.Fatalf("编辑他人消息应报 403，got %v", err)
 	}
-	if err := api.edit(ctx, testDirectRoom, "msg-nope", "内容"); clientStatus(err) != 404 {
+	if err := api.edit(ctx, testDirectRoom, "msg-nope", outgoingMessage{Content: "内容"}); clientStatus(err) != 404 {
 		t.Fatalf("编辑不存在消息应报 404，got %v", err)
 	}
 }

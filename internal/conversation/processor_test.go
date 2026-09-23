@@ -72,6 +72,24 @@ func TestProcessor_MemoryHistoryAndCapabilities(t *testing.T) {
 	}
 }
 
+func TestDeliver_ReplyStateFailureKeepsPartialContent(t *testing.T) {
+	adapter := memory.New("account", chat.Capabilities{Edit: true, ReplyState: true}, nil)
+	message := chat.Message{Session: chat.Session{Platform: "memory", Account: "account", Conversation: "room"}, ID: "question"}
+	_, err := conversation.Deliver(context.Background(), func(_ context.Context, _ agent.Request, emit func(agent.Event)) (agent.Result, error) {
+		emit(agent.Event{Kind: agent.ModelStarted})
+		emit(agent.Event{Kind: agent.ThinkingDelta, Text: "摘要"})
+		emit(agent.Event{Kind: agent.TextDelta, Text: "部分正文"})
+		return agent.Result{Status: agent.Failed}, errors.New("upstream failed")
+	}, agent.Request{}, message, adapter, chat.Display{}, nil)
+	if err == nil {
+		t.Fatal("运行错误未返回")
+	}
+	replies := adapter.Replies()
+	if len(replies) != 1 || replies[0].Status != chat.ReplyFailed || replies[0].Text != "部分正文" || replies[0].Thinking != "摘要" {
+		t.Fatalf("回复未保留部分内容: %+v", replies)
+	}
+}
+
 func TestProcessor_SessionIsolation(t *testing.T) {
 	h := history(t)
 	processor := &conversation.Processor{History: h, Run: func(_ context.Context, req agent.Request, _ func(agent.Event)) (agent.Result, error) {

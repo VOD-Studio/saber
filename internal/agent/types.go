@@ -59,6 +59,8 @@ type Response struct {
 
 	// Content 是模型返回的文本。
 	Content string `json:"content"`
+	// Thinking 仅包含模型明确标为公开摘要的文本，不保存原始或加密推理。
+	Thinking string `json:"thinking,omitempty"`
 	// Usage 是模型报告的用量，未报告时为零。
 	Usage openai.Usage `json:"usage"`
 	// Model 是实际响应模型。

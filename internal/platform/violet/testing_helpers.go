@@ -33,6 +33,7 @@ type sentMessage struct {
 	Content      string
 	ReplyTo      string
 	Idempotency  string
+	BotReply     *botReplyDTO
 }
 
 // editedMessage 是一次出站编辑的观测记录。
@@ -40,6 +41,7 @@ type editedMessage struct {
 	Conversation string
 	MessageID    string
 	Content      string
+	BotReply     *botReplyDTO
 	At           time.Time
 }
 
@@ -58,6 +60,7 @@ type fakeViolet struct {
 	conversations map[string]conversationDTO
 	history       map[string][]messageDTO
 	byIdempotency map[string]string
+	allowThinking bool
 
 	sent    []sentMessage
 	edits   []editedMessage
@@ -300,15 +303,12 @@ func (f *fakeViolet) serveSendMessage(w http.ResponseWriter, r *http.Request, pa
 		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "Idempotency-Key 必填")
 		return
 	}
-	var body struct {
-		Content   string `json:"content"`
-		ReplyToID string `json:"reply_to_id"`
-	}
+	var body outgoingMessage
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
 		return
 	}
-	if strings.TrimSpace(body.Content) == "" {
+	if strings.TrimSpace(body.Content) == "" && (body.BotReply == nil || body.BotReply.Status != "pending" && body.BotReply.Status != "thinking" && body.BotReply.Status != "failed") {
 		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "正文不能为空")
 		return
 	}
@@ -333,23 +333,31 @@ func (f *fakeViolet) serveSendMessage(w http.ResponseWriter, r *http.Request, pa
 		Sender:         userDTO{ID: testBotUserID, Username: testBotUsername},
 		Type:           "text",
 		Content:        body.Content,
+		SenderKind:     "bot",
 		CreatedAt:      time.Now().Format(time.RFC3339Nano),
+	}
+	if body.BotReply != nil {
+		state := botReplyDTO{Status: body.BotReply.Status, Thinking: body.BotReply.Thinking, ErrorCode: body.BotReply.ErrorCode}
+		state.Revision = 1
+		state.UpdatedAt = time.Now().Format(time.RFC3339Nano)
+		if !f.allowThinking {
+			state.Thinking = ""
+		}
+		created.BotReply = &state
 	}
 	if body.ReplyToID != "" {
 		created.ReplyTo = &messageRefDTO{ID: body.ReplyToID}
 	}
 	f.history[id] = append([]messageDTO{created}, f.history[id]...)
 	f.byIdempotency[idempotencyKey] = created.ID
-	f.sent = append(f.sent, sentMessage{Conversation: id, Content: body.Content, ReplyTo: body.ReplyToID, Idempotency: key})
+	f.sent = append(f.sent, sentMessage{Conversation: id, Content: body.Content, ReplyTo: body.ReplyToID, Idempotency: key, BotReply: created.BotReply})
 	writeAPIData(w, http.StatusCreated, created)
 }
 
 func (f *fakeViolet) serveEdit(w http.ResponseWriter, r *http.Request, path string) {
 	id := conversationIDFrom(path)
 	messageID := path[strings.LastIndex(path, "/")+1:]
-	var body struct {
-		Content string `json:"content"`
-	}
+	var body outgoingMessage
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
 		return
@@ -364,11 +372,29 @@ func (f *fakeViolet) serveEdit(w http.ResponseWriter, r *http.Request, path stri
 			writeAPIError(w, http.StatusForbidden, "FORBIDDEN", "不是本 bot 发的消息")
 			return
 		}
+		if message.BotReply != nil && (message.BotReply.Status == "completed" || message.BotReply.Status == "failed") && body.BotReply != nil && body.BotReply.Status != message.BotReply.Status {
+			writeAPIError(w, http.StatusConflict, "CONFLICT", "回复已结束")
+			return
+		}
 		message.Content = body.Content
 		edited := time.Now()
-		message.EditedAt = edited.Format(time.RFC3339Nano)
+		if body.BotReply != nil {
+			state := botReplyDTO{Status: body.BotReply.Status, Thinking: body.BotReply.Thinking, ErrorCode: body.BotReply.ErrorCode}
+			if message.BotReply != nil {
+				state.Revision = message.BotReply.Revision + 1
+			} else {
+				state.Revision = 1
+			}
+			state.UpdatedAt = edited.Format(time.RFC3339Nano)
+			if !f.allowThinking {
+				state.Thinking = ""
+			}
+			message.BotReply = &state
+		} else {
+			message.EditedAt = edited.Format(time.RFC3339Nano)
+		}
 		f.history[id][index] = message
-		f.edits = append(f.edits, editedMessage{Conversation: id, MessageID: messageID, Content: body.Content, At: edited})
+		f.edits = append(f.edits, editedMessage{Conversation: id, MessageID: messageID, Content: body.Content, BotReply: message.BotReply, At: edited})
 		writeAPIData(w, http.StatusOK, message)
 		return
 	}

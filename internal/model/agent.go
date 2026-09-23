@@ -41,6 +41,11 @@ func AgentModel(getClient func(string) (*Client, error), retry *RetryConfigWrapp
 						result, requestErr = client.createResponse(ctx, request, collector)
 						if result != nil {
 							response = *result
+							if summary := collector.response().Thinking; response.Thinking == "" {
+								response.Thinking = summary
+							} else if summary == "" && response.Thinking != "" {
+								emit(agent.Event{Kind: agent.ThinkingDelta, Text: response.Thinking})
+							}
 						} else {
 							response = collector.response()
 						}
@@ -53,6 +58,9 @@ func AgentModel(getClient func(string) (*Client, error), retry *RetryConfigWrapp
 						result, requestErr = client.CreateChatCompletion(ctx, request)
 						if result != nil {
 							response = *result
+							if response.Thinking != "" {
+								emit(agent.Event{Kind: agent.ThinkingDelta, Text: response.Thinking})
+							}
 						}
 					}
 				}

@@ -144,15 +144,40 @@ func Deliver(ctx context.Context, run RunFunc, req agent.Request, message chat.M
 		}()
 	}
 	presenter := chat.NewPresenter(adapter, message, display)
+	if adapter.Capabilities().ReplyState {
+		if err := presenter.Start(ctx); err != nil {
+			slog.Debug("创建回复占位消息失败", "error", err)
+		}
+		stop := make(chan struct{})
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-ticker.C:
+					if err := presenter.Heartbeat(ctx); err != nil {
+						slog.Debug("续期回复状态失败", "error", err)
+					}
+				}
+			}
+		}()
+		defer func() { close(stop); <-done }()
+	}
 	result, err := run(ctx, req, func(event agent.Event) {
 		if displayErr := presenter.Event(ctx, event); displayErr != nil {
 			slog.Debug("更新临时回复失败", "error", displayErr)
 		}
 	})
 	if err != nil {
+		markReplyFailed(ctx, presenter, result.Status)
 		return result, err
 	}
 	if result.Status != agent.Completed {
+		markReplyFailed(ctx, presenter, result.Status)
 		return result, fmt.Errorf("agent ended without a final answer: %s", result.Status)
 	}
 	if save != nil {
@@ -162,6 +187,18 @@ func Deliver(ctx context.Context, run RunFunc, req agent.Request, message chat.M
 		return result, fmt.Errorf("发送响应失败：%w", err)
 	}
 	return result, nil
+}
+
+func markReplyFailed(ctx context.Context, presenter *chat.Presenter, status agent.Status) {
+	code := string(status)
+	if code == "" {
+		code = string(agent.Failed)
+	}
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := presenter.Fail(cleanup, code); err != nil {
+		slog.Debug("标记回复失败失败", "error", err)
+	}
 }
 
 func contextStatus(err error) agent.Status {

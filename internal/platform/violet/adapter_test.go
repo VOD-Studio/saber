@@ -61,6 +61,62 @@ func TestAdapter_Send(t *testing.T) {
 	}
 }
 
+func TestAdapter_ReplyLifecycle(t *testing.T) {
+	t.Parallel()
+	fake := newFakeViolet(t)
+	fake.allowThinking = true
+	_, adapter := newTestAdapterViaPlatform(t, fake)
+	ctx := context.Background()
+	reply := chat.Reply{Session: testSession(adapter, testDirectRoom), ReplyTo: "msg-1", TransactionID: "reply-1", Status: chat.ReplyPending}
+	id, err := adapter.Send(ctx, reply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply.Status, reply.Thinking = chat.ReplyThinking, "公开摘要"
+	if err := adapter.Edit(ctx, id, reply); err != nil {
+		t.Fatal(err)
+	}
+	reply.Status, reply.Text = chat.ReplyStreaming, "部分正文"
+	if err := adapter.Edit(ctx, id, reply); err != nil {
+		t.Fatal(err)
+	}
+	reply.Status, reply.ErrorCode = chat.ReplyFailed, "timed_out"
+	if err := adapter.Edit(ctx, id, reply); err != nil {
+		t.Fatal(err)
+	}
+	again, err := adapter.Send(ctx, chat.Reply{Session: reply.Session, TransactionID: reply.TransactionID, Status: chat.ReplyPending})
+	if err != nil || again != id || len(fake.sentMessages()) != 1 {
+		t.Fatalf("幂等消息 = %q, %v, %+v", again, err, fake.sentMessages())
+	}
+	fake.mu.Lock()
+	final := fake.history[testDirectRoom][0]
+	fake.mu.Unlock()
+	if final.BotReply == nil || final.BotReply.Status != "failed" || final.BotReply.Thinking != "公开摘要" || final.BotReply.Revision != 4 || final.BotReply.ErrorCode != "timed_out" || final.Content != "部分正文" || final.EditedAt != "" {
+		t.Fatalf("回复终态 = %+v", final)
+	}
+	reply.Status = chat.ReplyStreaming
+	if err := adapter.Edit(ctx, id, reply); clientStatus(err) != 409 {
+		t.Fatalf("终态仍允许旧更新: %v", err)
+	}
+}
+
+func TestAdapter_ThinkingCanBeHiddenByViolet(t *testing.T) {
+	t.Parallel()
+	fake := newFakeViolet(t) // 模拟后台默认关闭展示。
+	_, adapter := newTestAdapterViaPlatform(t, fake)
+	reply := chat.Reply{Session: testSession(adapter, testDirectRoom), Status: chat.ReplyThinking, Thinking: "公开摘要"}
+	id, err := adapter.Send(context.Background(), reply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.mu.Lock()
+	got := fake.history[testDirectRoom][0]
+	fake.mu.Unlock()
+	if got.ID != id || got.BotReply == nil || got.BotReply.Thinking != "" || got.BotReply.Status != "thinking" {
+		t.Fatalf("关闭展示后泄露 thinking: %+v", got)
+	}
+}
+
 // TestAdapter_SendRejectsForeignSession 验证跨平台/跨账号的回复被拒：
 // 拿别的平台的会话 ID 往 Violet 发，轻则发不进去，重则把答案投进陌生会话。
 func TestAdapter_SendRejectsForeignSession(t *testing.T) {

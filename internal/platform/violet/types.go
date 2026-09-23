@@ -34,11 +34,34 @@ type messageDTO struct {
 	Sender         userDTO        `json:"sender"`
 	Type           string         `json:"type"`
 	Content        string         `json:"content"`
+	SenderKind     string         `json:"sender_kind"`
+	BotReply       *botReplyDTO   `json:"bot_reply,omitempty"`
 	Mentions       map[string]any `json:"mentions"`
 	ReplyTo        *messageRefDTO `json:"reply_to"`
 	IsDeleted      bool           `json:"is_deleted"`
 	EditedAt       string         `json:"edited_at,omitempty"`
 	CreatedAt      string         `json:"created_at"`
+}
+
+// botReplyDTO 是 Violet 生成状态的读模型，revision 由服务端递增。
+type botReplyDTO struct {
+	Status    string `json:"status"`
+	Thinking  string `json:"thinking,omitempty"`
+	Revision  int64  `json:"revision"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+	ErrorCode string `json:"error_code,omitempty"`
+}
+
+type outgoingMessage struct {
+	Content   string            `json:"content"`
+	ReplyToID string            `json:"reply_to_id,omitempty"`
+	BotReply  *outgoingBotReply `json:"bot_reply,omitempty"`
+}
+
+type outgoingBotReply struct {
+	Status    string `json:"status"`
+	Thinking  string `json:"thinking"`
+	ErrorCode string `json:"error_code,omitempty"`
 }
 
 // messageRefDTO 是被引用消息的紧凑预览，这里只取定位所需的 ID。

@@ -112,7 +112,7 @@ func responseResult(resp openai.CreateResponseResponse) (*ChatCompletionResponse
 	if resp.Usage != nil {
 		result.Usage = openai.Usage{PromptTokens: resp.Usage.InputTokens, CompletionTokens: resp.Usage.OutputTokens, TotalTokens: resp.Usage.TotalTokens}
 	}
-	var content strings.Builder
+	var content, thinking strings.Builder
 	for _, raw := range resp.Output {
 		data, err := json.Marshal(raw)
 		if err != nil {
@@ -141,12 +141,18 @@ func responseResult(resp openai.CreateResponseResponse) (*ChatCompletionResponse
 		case "function_call":
 			result.ToolCalls = append(result.ToolCalls, openai.ToolCall{ID: item.CallID, Type: openai.ToolTypeFunction, Function: openai.FunctionCall{Name: item.Name, Arguments: item.Arguments}})
 		case "reasoning":
-			// 原样保留加密推理，仅在工具续轮时回传，不展示为回答。
+			// 公开摘要可展示；原始及加密推理仍只在 ResponsesOutput 中续轮。
+			for _, part := range item.Summary {
+				if part.Type == "summary_text" {
+					thinking.WriteString(part.Text)
+				}
+			}
 		default:
 			return result, fmt.Errorf("unsupported Responses output item %q", item.Type)
 		}
 	}
 	result.Content = content.String()
+	result.Thinking = thinking.String()
 	if result.Content == "" {
 		result.Content = resp.OutputText
 	}

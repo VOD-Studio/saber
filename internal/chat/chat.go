@@ -118,7 +118,25 @@ type Capabilities struct {
 	Typing bool
 	// Reply 表示支持引用当前消息回复。
 	Reply bool
+	// ReplyState 表示平台支持回复生命周期和独立 thinking 字段。
+	ReplyState bool
 }
+
+// ReplyStatus 是平台持久化的回复状态，空值沿用普通文本消息协议。
+type ReplyStatus string
+
+const (
+	// ReplyPending 表示已接受任务，正文尚未开始生成。
+	ReplyPending ReplyStatus = "pending"
+	// ReplyThinking 表示模型正在处理，可附公开思考摘要。
+	ReplyThinking ReplyStatus = "thinking"
+	// ReplyStreaming 表示正文正在增量生成。
+	ReplyStreaming ReplyStatus = "streaming"
+	// ReplyCompleted 表示已成功提交最终正文。
+	ReplyCompleted ReplyStatus = "completed"
+	// ReplyFailed 表示回复未完成，可保留部分正文。
+	ReplyFailed ReplyStatus = "failed"
+)
 
 // Reply 是发往原会话的文本回复。
 type Reply struct {
@@ -131,6 +149,10 @@ type Reply struct {
 	// Text 是当前完整内容，编辑时也使用完整内容；以 Markdown 书写，
 	// 富文本渲染由平台 adapter 自行决定，内容来自模型或用户时不可当作可信标记。
 	Text string
+	// Status、Thinking 和 ErrorCode 仅由支持 ReplyState 的 Bot adapter 上报。
+	Status    ReplyStatus
+	Thinking  string
+	ErrorCode string
 }
 
 // Adapter 实现平台发送能力；不支持的可选方法不会被调用。

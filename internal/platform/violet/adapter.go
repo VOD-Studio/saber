@@ -70,7 +70,7 @@ func newAdapter(api *client, account string, throttle *editThrottle) *Adapter {
 
 // Capabilities 返回 Violet 的展示能力：可原地编辑、可上报输入状态、可引用回复。
 func (a *Adapter) Capabilities() chat.Capabilities {
-	return chat.Capabilities{Edit: true, Typing: true, Reply: true}
+	return chat.Capabilities{Edit: true, Typing: true, Reply: true, ReplyState: true}
 }
 
 // Send 创建一条文本消息并返回可供编辑的消息 ID。
@@ -79,7 +79,7 @@ func (a *Adapter) Send(ctx context.Context, reply chat.Reply) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	created, err := a.api.send(ctx, reply.Session.Conversation, content, reply.ReplyTo, idempotencyKey(reply))
+	created, err := a.api.send(ctx, reply.Session.Conversation, outgoing(reply, content), idempotencyKey(reply))
 	if err != nil {
 		return "", fmt.Errorf("violet 发送消息失败: %w", err)
 	}
@@ -101,7 +101,9 @@ func (a *Adapter) Edit(ctx context.Context, messageID string, reply chat.Reply) 
 	if err := a.throttle.wait(ctx); err != nil {
 		return err
 	}
-	if err := a.api.edit(ctx, reply.Session.Conversation, messageID, content); err != nil {
+	body := outgoing(reply, content)
+	body.ReplyToID = ""
+	if err := a.api.edit(ctx, reply.Session.Conversation, messageID, body); err != nil {
 		return fmt.Errorf("violet 编辑消息失败: %w", err)
 	}
 	return nil
@@ -143,14 +145,30 @@ func (a *Adapter) prepare(ctx context.Context, reply chat.Reply) (string, error)
 	if err := a.validate(ctx, reply.Session); err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(reply.Text) == "" {
+	if strings.TrimSpace(reply.Text) == "" && reply.Status != chat.ReplyPending && reply.Status != chat.ReplyThinking && reply.Status != chat.ReplyFailed {
 		return "", errors.New("violet 不接受空白正文")
+	}
+	if reply.Status == "" && (reply.Thinking != "" || reply.ErrorCode != "") {
+		return "", errors.New("violet 生成信息缺少回复状态")
+	}
+	switch reply.Status {
+	case "", chat.ReplyPending, chat.ReplyThinking, chat.ReplyStreaming, chat.ReplyCompleted, chat.ReplyFailed:
+	default:
+		return "", fmt.Errorf("violet 不支持回复状态 %q", reply.Status)
 	}
 	content, truncated := truncateContent(reply.Text)
 	if truncated {
 		slog.Warn("violet 出站正文超长已截断", "platform", a.platformName, "conversation", reply.Session.Conversation, "runes", len([]rune(reply.Text)))
 	}
 	return content, nil
+}
+
+func outgoing(reply chat.Reply, content string) outgoingMessage {
+	body := outgoingMessage{Content: content, ReplyToID: reply.ReplyTo}
+	if reply.Status != "" {
+		body.BotReply = &outgoingBotReply{Status: string(reply.Status), Thinking: reply.Thinking, ErrorCode: reply.ErrorCode}
+	}
+	return body
 }
 
 // idempotencyKey 取上层给定的事务 ID，缺省时生成一个随机键。
