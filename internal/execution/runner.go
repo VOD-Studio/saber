@@ -119,7 +119,8 @@ func (e *Executor) Run(ctx context.Context, tool string, args map[string]any) (r
 		return result, err
 	}
 	identity, _ := chat.IdentityFromContext(ctx)
-	w := e.cfg.Workspaces[e.grants[identityKey(identity)].Workspace]
+	grant, _ := e.grant(identity)
+	w := e.cfg.Workspaces[grant.Workspace]
 	// 防止宿主管理员替换已授权路径为指向其他目录的符号链接。
 	resolved, resolveErr := filepath.EvalSymlinks(run.dir)
 	if resolveErr != nil || resolved != run.dir {

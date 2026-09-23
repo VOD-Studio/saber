@@ -44,6 +44,21 @@ func identityKey(i chat.Identity) string {
 	return string(data)
 }
 
+func (e *Executor) grant(identity chat.Identity) (config.ExecutionGrant, bool) {
+	for _, pair := range [][2]string{
+		{identity.Session.Conversation, identity.SenderID},
+		{identity.Session.Conversation, "*"},
+		{"*", identity.SenderID},
+		{"*", "*"},
+	} {
+		identity.Session.Conversation, identity.SenderID = pair[0], pair[1]
+		if grant, ok := e.grants[identityKey(identity)]; ok {
+			return grant, true
+		}
+	}
+	return config.ExecutionGrant{}, false
+}
+
 // LocalTool 判断名称是否属于本地执行工具保留字。
 func LocalTool(name string) bool {
 	return slices.Contains([]string{"exec", "read_file", "list_files", "write_file", "apply_patch"}, name)
@@ -152,8 +167,8 @@ func New(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) 
 		if _, ok := cfg.Workspaces[grant.Workspace]; !ok {
 			return nil, fmt.Errorf("unknown workspace %q", grant.Workspace)
 		}
-		if grant.Platform == "" || grant.Account == "" || grant.Room == "" || len(grant.Users) == 0 {
-			return nil, errors.New("grant requires platform, account, room and users")
+		if grant.Platform == "" || strings.Contains(grant.Platform, "*") || grant.Account == "" || strings.Contains(grant.Account, "*") || grant.Room == "" || (grant.Room != "*" && strings.Contains(grant.Room, "*")) || len(grant.Users) == 0 {
+			return nil, errors.New("grant requires exact platform/account and room/users (only full * wildcard allowed)")
 		}
 		grant.Tools = slices.Clone(grant.Tools)
 		grant.Capabilities = slices.Clone(grant.Capabilities)
@@ -170,8 +185,8 @@ func New(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) 
 			}
 		}
 		for _, user := range grant.Users {
-			if user == "" || strings.Contains(user, "*") {
-				return nil, errors.New("grant requires exact member IDs")
+			if user == "" || (user != "*" && strings.Contains(user, "*")) {
+				return nil, errors.New("grant user must be an exact ID or *")
 			}
 			key := identityKey(chat.Identity{Session: chat.Session{Platform: grant.Platform, Account: grant.Account, Conversation: grant.Room}, SenderID: user})
 			if _, ok := e.grants[key]; ok {
@@ -233,7 +248,7 @@ func resolveFuturePath(path string) (string, error) {
 
 // Workspace 只根据真实接入身份选择工作区，忽略模型或文件中的目录声明。
 func (e *Executor) Workspace(identity chat.Identity) (string, error) {
-	grant, ok := e.grants[identityKey(identity)]
+	grant, ok := e.grant(identity)
 	if !e.cfg.Enabled || !ok {
 		return "", errors.New("该成员尚未获得本群工作区授权")
 	}
@@ -260,7 +275,7 @@ func (e *Executor) Check(ctx context.Context, tool string) error {
 	if _, blocked := e.blocked.Load(dir); blocked {
 		return errors.New("workspace quarantined after container cleanup failure")
 	}
-	grant := e.grants[identityKey(identity)]
+	grant, _ := e.grant(identity)
 	if !slices.Contains(grant.Tools, tool) {
 		return fmt.Errorf("tool %q is not authorized", tool)
 	}

@@ -14,7 +14,7 @@ type ExecutionConfig struct {
 	Workspaces map[string]WorkspaceConfig `yaml:"workspaces"`
 	// TaskAdmins 仅授予同群任务取消、日志读取和计划管理，不授予执行工具。
 	TaskAdmins []TaskAdmin `yaml:"task_admins"`
-	// Grants 精确授权账号、群、成员与工作区。
+	// Grants 按平台账号、会话、成员授权工作区；会话和成员可显式通配。
 	Grants []ExecutionGrant `yaml:"grants"`
 	// MCPRequirements 按 mcp:服务器:工具 声明额外能力；未声明的工具禁止调用。
 	// 所有 MCP 工具都额外要求 external 能力，不信任服务端工具描述或注解。
@@ -35,9 +35,9 @@ type ExecutionGrant struct {
 	Platform string `yaml:"platform"`
 	// Account 是机器人的账号。
 	Account string `yaml:"account"`
-	// Room 是授权群 ID。
+	// Room 是授权会话 ID；"*" 表示该平台账号下的所有会话。
 	Room string `yaml:"room"`
-	// Users 是完整成员 ID，禁止通配符。
+	// Users 是完整成员 ID；"*" 表示会话中的所有成员。
 	Users []string `yaml:"users"`
 	// Workspace 引用 Workspaces 的名称；一个成员在同群只绑定一个工作区。
 	Workspace string `yaml:"workspace"`

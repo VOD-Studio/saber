@@ -57,7 +57,7 @@ func TestPolicy_TrustedScopeAndSeparateCapabilities(t *testing.T) {
 }
 
 func TestPolicy_RejectsSecretsAndUnsafeRoots(t *testing.T) {
-	for _, name := range []string{"protected file", "secret value", "reserved variable", "wildcard", "unknown capability", "unknown tool", "conflict"} {
+	for _, name := range []string{"protected file", "secret value", "reserved variable", "wildcard platform", "wildcard account", "partial room wildcard", "partial member wildcard", "unknown capability", "unknown tool", "conflict"} {
 		t.Run(name, func(t *testing.T) {
 			cfg, _ := fixture(t)
 			var paths []string
@@ -69,8 +69,14 @@ func TestPolicy_RejectsSecretsAndUnsafeRoots(t *testing.T) {
 				w.Env["CUSTOM"] = "bot-secret"
 			case "reserved variable":
 				w.Env["MATRIX_ACCESS_TOKEN"] = "anything"
-			case "wildcard":
-				cfg.Grants[0].Users = []string{"*"}
+			case "wildcard platform":
+				cfg.Grants[0].Platform = "*"
+			case "wildcard account":
+				cfg.Grants[0].Account = "*"
+			case "partial room wildcard":
+				cfg.Grants[0].Room = "ro*"
+			case "partial member wildcard":
+				cfg.Grants[0].Users = []string{"al*"}
 			case "unknown capability":
 				cfg.Grants[0].Capabilities = []string{"admin"}
 			case "unknown tool":
@@ -87,6 +93,66 @@ func TestPolicy_RejectsSecretsAndUnsafeRoots(t *testing.T) {
 	require.NoError(t, err)
 	_, err = e.Workspace(chat.Identity{})
 	require.Error(t, err)
+}
+
+// TestPolicy_GrantWildcards 验证会话与成员通配授权的命中范围，以及精确授权优先。
+func TestPolicy_GrantWildcards(t *testing.T) {
+	cfg, identity := fixture(t)
+	tools := cfg.Grants[0].Tools
+	cfg.Workspaces["exact"] = config.WorkspaceConfig{Path: t.TempDir()}
+	cfg.Workspaces["room"] = config.WorkspaceConfig{Path: t.TempDir()}
+	cfg.Workspaces["member"] = config.WorkspaceConfig{Path: t.TempDir()}
+	cfg.Workspaces["all"] = config.WorkspaceConfig{Path: t.TempDir()}
+	cfg.Grants = nil
+	for _, workspace := range []string{"all", "member", "room", "exact"} {
+		grant := config.ExecutionGrant{Platform: "matrix", Account: "bot", Workspace: workspace, Tools: tools}
+		switch workspace {
+		case "all":
+			grant.Room, grant.Users = "*", []string{"*"}
+		case "member":
+			grant.Room, grant.Users = "*", []string{"alice"}
+		case "room":
+			grant.Room, grant.Users = "room", []string{"*"}
+		case "exact":
+			grant.Room, grant.Users = "room", []string{"alice"}
+		}
+		cfg.Grants = append(cfg.Grants, grant)
+	}
+	e, err := New(cfg, nil, nil)
+	require.NoError(t, err)
+
+	otherRoom := identity
+	otherRoom.Session.Conversation = "anywhere"
+	bob := identity
+	bob.SenderID = "bob"
+	otherBob := otherRoom
+	otherBob.SenderID = "bob"
+	otherAccount := identity
+	otherAccount.Session.Account = "other"
+	for _, tc := range []struct {
+		name     string
+		identity chat.Identity
+		want     string
+	}{
+		{"精确授权优先", identity, "exact"},
+		{"同会话其他成员用成员通配", bob, "room"},
+		{"其他会话的精确成员用会话通配", otherRoom, "member"},
+		{"其他会话其他成员用全通配", otherBob, "all"},
+		{"账号必须精确匹配", otherAccount, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, err := e.Workspace(tc.identity)
+			if tc.want == "" {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			// New() 会解析符号链接，比较时同样取真实路径。
+			want, wantErr := filepath.EvalSymlinks(cfg.Workspaces[tc.want].Path)
+			require.NoError(t, wantErr)
+			require.Equal(t, want, dir)
+		})
+	}
 }
 
 func TestDockerExecution(t *testing.T) {
