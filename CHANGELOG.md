@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Release 说明写入 runner 临时目录，避免交叉编译时 Go 将干净的标签工作树标记为 dirty
+
 ## [0.1.0] - 2026-09-23
 
 ### Added

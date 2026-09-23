@@ -91,7 +91,7 @@ jobs:
           notes = remaining[:next_heading.start() if next_heading else None].strip()
           if not notes:
               raise SystemExit(f"CHANGELOG.md 中 {version} 的发布说明为空")
-          Path("RELEASE_NOTES.md").write_text(notes + "\n", encoding="utf-8")
+          (Path(os.environ["RUNNER_TEMP"]) / "RELEASE_NOTES.md").write_text(notes + "\n", encoding="utf-8")
           PY
       - name: Build all platform release binaries
         run: |
@@ -100,6 +100,6 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          body_path: RELEASE_NOTES.md
+          body_path: ${{ runner.temp }}/RELEASE_NOTES.md
           files: bin/release/*
           fail_on_unmatched_files: true
