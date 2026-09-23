@@ -24,15 +24,18 @@ type taskStream struct {
 	adapter chat.Adapter
 	display chat.Display
 
-	mu       sync.Mutex
-	content  strings.Builder
-	thinking strings.Builder
-	status   chat.ReplyStatus
-	started  time.Time
-	version  uint64
-	updates  chan struct{}
-	stop     chan struct{}
-	done     chan struct{}
+	mu              sync.Mutex
+	content         strings.Builder
+	thinking        strings.Builder
+	thinkingPrefix  string
+	replaceContent  bool
+	replaceThinking bool
+	status          chat.ReplyStatus
+	started         time.Time
+	version         uint64
+	updates         chan struct{}
+	stop            chan struct{}
+	done            chan struct{}
 }
 
 func (s *Service) newTaskStream(ctx context.Context) *taskStream {
@@ -61,9 +64,20 @@ func (s *Service) newTaskStream(ctx context.Context) *taskStream {
 func (p *taskStream) event(event agent.Event) {
 	p.mu.Lock()
 	switch event.Kind {
-	case agent.ModelStarted, agent.AttemptStarted:
-		p.content.Reset()
+	case agent.ModelStarted:
+		if p.adapter.Capabilities().ReplyState {
+			if p.thinking.Len() > 0 {
+				if p.thinkingPrefix != "" {
+					p.thinkingPrefix += "\n\n"
+				}
+				p.thinkingPrefix += p.thinking.String()
+			}
+			p.replaceContent = true
+		} else {
+			p.content.Reset()
+		}
 		p.thinking.Reset()
+		p.replaceThinking = false
 		p.status = chat.ReplyThinking
 		p.started = time.Now()
 		p.version++
@@ -71,7 +85,26 @@ func (p *taskStream) event(event agent.Event) {
 		case p.updates <- struct{}{}:
 		default:
 		}
+	case agent.AttemptStarted:
+		if p.adapter.Capabilities().ReplyState {
+			p.replaceContent = true
+			p.replaceThinking = true
+		} else {
+			p.content.Reset()
+			p.thinking.Reset()
+			p.version++
+		}
+		p.status = chat.ReplyThinking
+		p.started = time.Now()
+		select {
+		case p.updates <- struct{}{}:
+		default:
+		}
 	case agent.ThinkingDelta:
+		if p.replaceThinking {
+			p.thinking.Reset()
+			p.replaceThinking = false
+		}
 		p.thinking.WriteString(event.Text)
 		if p.status != chat.ReplyStreaming {
 			p.status = chat.ReplyThinking
@@ -82,6 +115,14 @@ func (p *taskStream) event(event agent.Event) {
 		default:
 		}
 	case agent.TextDelta:
+		if p.replaceThinking {
+			p.thinking.Reset()
+			p.replaceThinking = false
+		}
+		if p.replaceContent {
+			p.content.Reset()
+			p.replaceContent = false
+		}
 		p.content.WriteString(event.Text)
 		p.status = chat.ReplyStreaming
 		p.version++
@@ -181,7 +222,15 @@ func (p *taskStream) runReplyState(ctx context.Context) {
 			continue
 		}
 		p.mu.Lock()
-		text, thinking, status, version := strings.Clone(p.content.String()), strings.Clone(p.thinking.String()), p.status, p.version
+		text, thinking, status, version := strings.Clone(p.content.String()), p.thinking.String(), p.status, p.version
+		if p.thinkingPrefix != "" {
+			if thinking != "" {
+				thinking = p.thinkingPrefix + "\n\n" + thinking
+			} else {
+				thinking = p.thinkingPrefix
+			}
+		}
+		thinking = strings.Clone(thinking)
 		p.mu.Unlock()
 		if messageID == "" {
 			pending := taskReply(p.task, "result", "")

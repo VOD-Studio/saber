@@ -113,6 +113,7 @@ func TestTaskDelivery_SlowMultipleFilesResumeWithoutReupload(t *testing.T) {
 type replyStateSink struct {
 	mu       sync.Mutex
 	replies  map[string]chat.Reply
+	updates  []chat.Reply
 	sends    int
 	attempts int
 	sendErr  error
@@ -161,6 +162,7 @@ func (s *replyStateSink) Edit(_ context.Context, id string, reply chat.Reply) er
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.replies[id] = reply
+	s.updates = append(s.updates, reply)
 	return nil
 }
 func (s *replyStateSink) SetTyping(context.Context, chat.Session, bool) error { return nil }
@@ -237,4 +239,60 @@ func TestTaskStream_ReplyStateUpdatesSameMessage(t *testing.T) {
 	sends := sink.sends
 	sink.mu.Unlock()
 	require.Equal(t, 1, sends)
+}
+
+func TestTaskStream_ReplyStateKeepsProgressAcrossRounds(t *testing.T) {
+	sink := &replyStateSink{}
+	message := chat.Message{Session: chat.Session{Platform: "violet", Account: "bot", Conversation: "room"}, ID: "question"}
+	p := &taskStream{
+		task: task.Task{ID: 1, Message: message}, adapter: sink,
+		display: chat.Display{EditInterval: time.Millisecond}, status: chat.ReplyPending,
+		updates: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
+	}
+	go p.run(context.Background())
+	defer p.close()
+	matches := func(status chat.ReplyStatus, text, thinking string) bool {
+		sink.mu.Lock()
+		defer sink.mu.Unlock()
+		for _, reply := range sink.replies {
+			return reply.Status == status && reply.Text == text && reply.Thinking == thinking
+		}
+		return false
+	}
+	p.event(agent.Event{Kind: agent.ModelStarted, Round: 1})
+	p.event(agent.Event{Kind: agent.AttemptStarted, Round: 1})
+	p.event(agent.Event{Kind: agent.ThinkingDelta, Round: 1, Text: "第一轮思考"})
+	p.event(agent.Event{Kind: agent.TextDelta, Round: 1, Text: "第一轮草稿"})
+	require.Eventually(t, func() bool {
+		return matches(chat.ReplyStreaming, "第一轮草稿", "第一轮思考")
+	}, time.Second, time.Millisecond)
+	sink.mu.Lock()
+	firstRoundUpdates := len(sink.updates)
+	sink.mu.Unlock()
+
+	p.event(agent.Event{Kind: agent.ModelStarted, Round: 2})
+	p.event(agent.Event{Kind: agent.AttemptStarted, Round: 2})
+	p.event(agent.Event{Kind: agent.ThinkingDelta, Round: 2, Text: "第二轮思考"})
+	require.Eventually(t, func() bool {
+		return matches(chat.ReplyThinking, "第一轮草稿", "第一轮思考\n\n第二轮思考")
+	}, time.Second, time.Millisecond)
+
+	p.event(agent.Event{Kind: agent.TextDelta, Round: 2, Text: "最终正文第一段"})
+	require.Eventually(t, func() bool {
+		return matches(chat.ReplyStreaming, "最终正文第一段", "第一轮思考\n\n第二轮思考")
+	}, time.Second, time.Millisecond)
+	p.event(agent.Event{Kind: agent.AttemptStarted, Round: 2})
+	p.event(agent.Event{Kind: agent.ThinkingDelta, Round: 2, Text: "重试思考"})
+	p.event(agent.Event{Kind: agent.TextDelta, Round: 2, Text: "重试正文第一段"})
+	require.Eventually(t, func() bool {
+		return matches(chat.ReplyStreaming, "重试正文第一段", "第一轮思考\n\n重试思考")
+	}, time.Second, time.Millisecond)
+	sink.mu.Lock()
+	updates := append([]chat.Reply(nil), sink.updates[firstRoundUpdates:]...)
+	sink.mu.Unlock()
+	require.NotEmpty(t, updates)
+	for _, reply := range updates {
+		require.NotEmpty(t, reply.Text)
+		require.Contains(t, reply.Thinking, "第一轮思考")
+	}
 }
