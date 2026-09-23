@@ -327,7 +327,10 @@ func (s *appState) initServices() error {
 	}
 	svc.aiService = aiService
 	configDir := filepath.Dir(s.flags.ConfigPath)
-	protected := []string{s.cfg.Server.TokenPath(s.flags.ConfigPath), s.flags.ConfigPath, s.flags.ConfigPath + ".session", s.cfg.Matrix.E2EESessionPath, s.cfg.Matrix.E2EESessionPath + ".key", s.cfg.Matrix.PickleKeyPath, filepath.Join(configDir, "tasks.db"), filepath.Join(configDir, "persona.db")}
+	protected := []string{s.cfg.Server.TokenPath(s.flags.ConfigPath), s.flags.ConfigPath, s.flags.ConfigPath + ".session", filepath.Join(configDir, "tasks.db"), filepath.Join(configDir, "persona.db")}
+	if s.cfg.Matrix.Enabled {
+		protected = append(protected, s.cfg.Matrix.E2EESessionPath, s.cfg.Matrix.E2EESessionPath+".key", s.cfg.Matrix.PickleKeyPath)
+	}
 	if err := aiService.ConfigureExecution(s.cfg.Execution, protected, secrets); err != nil {
 		return fmt.Errorf("执行权限初始化失败: %w", err)
 	}

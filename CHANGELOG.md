@@ -76,6 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Matrix 关闭时，执行器不再检查未启用入口的 E2EE 会话与密钥默认路径，源码工作区无需额外配置 `matrix.e2ee_session_path`
 - 平台注册不再被 Matrix 启用状态挡死：`internal/bot` 的 `initServices` 原先在 Matrix 客户端为空时提前返回，关掉 Matrix 后平台注册表永远是空的；现在 Matrix 与 Violet 各自按条件注册，人格服务、`!ai` 命令注册、主动聊天与 Meme 仍按原条件装配。新增可选端口 `platform.TaskDelivery`（`DeliveryAdapter`），`registerPlatform` 据此注册任务投递，没有该端口的平台只接即时消息；启用 violet 但 `platforms.violet` 不合法时在启动阶段直接报错，而不是只留一条平台 Start 失败的 warning
 
 
