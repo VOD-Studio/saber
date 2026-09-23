@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Agent 流式事件新增独立 `thinking_delta`，仅转发 Responses 明确标为公开的思考摘要；加密推理和原始推理文本仍只用于模型协议，不进入聊天展示
 - 执行授权 `grants` 支持用 `room: "*"` 与 `users: ["*"]` 授权精确平台账号下的所有会话和成员，精确授权优先；`task_admins` 仍要求精确 ID
 - 配置文件是符号链接时，运行状态跟随真实配置路径保存，以便将私有状态移出被授权的源码工作区
 - 新增 `agent.task_receipt_enabled` 开关，默认关闭所有聊天平台任务提交后的「已接收，任务 #…」回执；任务持久化与最终结果投递不变，开启可恢复原有回执

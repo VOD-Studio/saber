@@ -108,7 +108,7 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 			switch event.Kind {
 			case AttemptFinished:
 				round.Attempts = append(round.Attempts, event.Attempt)
-			case AttemptStarted, TextDelta:
+			case AttemptStarted, TextDelta, ThinkingDelta:
 				if ctx.Err() != nil {
 					return
 				}

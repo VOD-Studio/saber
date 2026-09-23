@@ -28,6 +28,11 @@ func (h *agentStreamHandler) OnChunk(_ context.Context, chunk string) {
 	h.emit(agent.Event{Kind: agent.TextDelta, Text: chunk})
 }
 
+// OnThinkingChunk 只转发上游明确标为公开摘要的内容。
+func (h *agentStreamHandler) OnThinkingChunk(_ context.Context, chunk string) {
+	h.emit(agent.Event{Kind: agent.ThinkingDelta, Text: chunk})
+}
+
 // OnToolCallChunk 按索引拼接工具调用，完成前不执行。
 func (h *agentStreamHandler) OnToolCallChunk(_ context.Context, index int, id, name, args string) {
 	state := h.calls[index]

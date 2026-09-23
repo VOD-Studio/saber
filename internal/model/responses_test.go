@@ -130,6 +130,8 @@ func TestResponses_ToolLoop(t *testing.T) {
 				if streaming {
 					w.Header().Set("Content-Type", "text/event-stream")
 					if n == 1 {
+						writeResponseSSE(t, w, `{"type":"response.reasoning_summary_text.delta","delta":"公开摘要"}`)
+						writeResponseSSE(t, w, `{"type":"response.reasoning_text.delta","delta":"private reasoning"}`)
 						// output_index 0 是推理，工具碎片与完整终态不得重复拼接。
 						writeResponseSSE(t, w, `{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","call_id":"call1","name":"lookup","arguments":""}}`)
 						writeResponseSSE(t, w, `{"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"n\":"}`)
@@ -156,10 +158,13 @@ func TestResponses_ToolLoop(t *testing.T) {
 					return agent.ToolOutput{Value: "ok"}, nil
 				},
 			}
-			var text strings.Builder
+			var text, thinking strings.Builder
 			result, err := runtime.Run(context.Background(), agent.Request{Model: "podlink-responses.gpt-5.6-sol", Stream: streaming, Messages: []openai.ChatCompletionMessage{{Role: "user", Content: "lookup"}}, Tools: []openai.Tool{{Type: openai.ToolTypeFunction, Function: &openai.FunctionDefinition{Name: "lookup"}}}}, func(e agent.Event) {
 				if e.Kind == agent.TextDelta {
 					text.WriteString(e.Text)
+				}
+				if e.Kind == agent.ThinkingDelta {
+					thinking.WriteString(e.Text)
 				}
 			})
 			require.NoError(t, err)
@@ -170,6 +175,7 @@ func TestResponses_ToolLoop(t *testing.T) {
 			require.Len(t, result.Rounds[0].Response.ResponsesOutput, 3)
 			if streaming {
 				require.Equal(t, "done", text.String())
+				require.Equal(t, "公开摘要", thinking.String())
 			}
 		})
 	}

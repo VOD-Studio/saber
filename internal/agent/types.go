@@ -160,6 +160,8 @@ const (
 	AttemptStarted EventKind = "attempt_started"
 	// TextDelta 表示当前尝试的文本增量。
 	TextDelta EventKind = "text_delta"
+	// ThinkingDelta 表示模型明确提供的可公开思考摘要增量，不包含加密或原始推理。
+	ThinkingDelta EventKind = "thinking_delta"
 	// AttemptFinished 表示一次模型请求尝试结束。
 	AttemptFinished EventKind = "attempt_finished"
 	// ModelCompleted 表示当前轮响应已接收，仍须检查协议和预算。

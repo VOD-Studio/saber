@@ -211,6 +211,12 @@ func (c *Client) createResponse(ctx context.Context, req ChatCompletionRequest, 
 			return nil, err
 		}
 		switch event.Type {
+		case openai.ResponseStreamEventReasoningSummaryTextDelta:
+			if handler != nil && event.Delta != "" {
+				if thinking, ok := handler.(interface{ OnThinkingChunk(context.Context, string) }); ok {
+					thinking.OnThinkingChunk(ctx, event.Delta)
+				}
+			}
 		case openai.ResponseStreamEventOutputTextDelta, openai.ResponseStreamEventRefusalDelta:
 			text.WriteString(event.Delta)
 			if handler != nil {
