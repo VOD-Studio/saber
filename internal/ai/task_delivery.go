@@ -20,7 +20,16 @@ func (s *Service) deliverTask(ctx context.Context, adapter chat.Adapter, t task.
 				text = "任务已完成"
 			}
 		}
-		return adapter.Send(ctx, taskReply(t, "result", text))
+		reply := taskReply(t, "result", text)
+		messageID, err := adapter.Send(ctx, reply)
+		if err != nil || !adapter.Capabilities().Edit {
+			return messageID, err
+		}
+		// 流式发送可能已经创建同一条消息；幂等发送取回 ID 后原地写入终态。
+		if err := adapter.Edit(ctx, messageID, reply); err != nil {
+			return "", err
+		}
+		return messageID, nil
 	})
 	if err != nil || s.executor == nil || t.Status != "completed" {
 		return messageID, err

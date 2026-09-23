@@ -89,7 +89,7 @@ type ContextConfig struct {
 	InactiveRoomHours int  `yaml:"-"`                // 不活跃房间清理阈值（小时）
 }
 
-// StreamEditConfig 存储流式编辑配置
+// StreamEditConfig 存储 Matrix 专属的流式编辑配置。
 type StreamEditConfig struct {
 	Enabled         bool `yaml:"enabled"`           // 是否启用流式编辑
 	CharThreshold   int  `yaml:"char_threshold"`    // 触发编辑的字符阈值
@@ -285,7 +285,7 @@ func DefaultContextConfig() ContextConfig {
 	}
 }
 
-// DefaultStreamEditConfig 返回带有合理默认值的流式编辑配置
+// DefaultStreamEditConfig 返回 Matrix 流式编辑的默认值。
 func DefaultStreamEditConfig() StreamEditConfig {
 	return StreamEditConfig{
 		Enabled:         true,

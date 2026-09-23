@@ -247,7 +247,7 @@ Violet 是一个全栈博客平台，内置聊天系统。Saber 通过 Violet Bo
 `adapter.go` 声明 `Edit`/`Typing`/`Reply` 三项能力，`Send` 返回平台消息 ID 供后续编辑，`Reply.TransactionID` 原样作 `Idempotency-Key`（Violet 按 (会话, 发送者, 幂等键) 唯一，同键重发返回同一条消息；超过列宽 128 的键收敛为 SHA-256）。两处平台自己的约束：
 
 - 正文按 Unicode 字符截到 10000 以内并留截断标记，空白正文直接拒发（服务端要求去掉空白后非空）
-- 编辑有全局最小间隔节流（`edit_interval_ms`，默认 200ms ≈ 300 次/分钟配额）。超频时**等待**而不是丢弃：`Presenter.Finish` 的最终定稿也走 `Edit`，丢一次编辑就等于丢掉答案
+- 编辑有全局最小间隔节流（`edit_interval_ms`，默认 200ms ≈ 300 次/分钟配额）。后台任务合并模型增量后最多按此频率更新；最终投递也走 `Edit`，失败时按原幂等键重试
 
 ### 消息流转
 
@@ -260,19 +260,14 @@ violetplatform.Platform.supervise → connectOnce → readSSEFrames
     │ 构造 chat.Message
     ▼
 aiService.HandleChat(ctx, msg, violetAdapter)
-    │
+    │ 持久化任务
     ▼
-conversation.Processor.Handle
-    │
-    ├─ agent.Runtime (AI 模型 + 工具)
-    │
+agent.Runtime → task_events（完整增量与执行记录）
+    │ 文本增量异步合并
+    ├─ Send() → POST /chat/bot/conversations/{cid}/messages（稳定 Idempotency-Key）
+    ├─ Edit() → PATCH /chat/bot/conversations/{cid}/messages/{mid}（≥edit_interval_ms）
     ▼
-chat.Presenter (流式回调)
-    │
-    ├─ Send()    → POST /chat/bot/conversations/{cid}/messages（带 Idempotency-Key）→ 创建占位消息
-    ├─ Edit()    → PATCH /chat/bot/conversations/{cid}/messages/{mid} → 逐步更新（≥edit_interval_ms）
-    ├─ SetTyping → POST /chat/bot/conversations/{cid}/typing
-    └─ Finish()  → 最终 Edit 定稿（同一幂等节流路径，不可丢）
+任务终态入库 → 幂等 Send() 取回同一消息 ID → Edit() 定稿；失败重试
 ```
 
 ## 实施顺序

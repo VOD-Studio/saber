@@ -23,8 +23,10 @@ type Processor struct {
 	Run RunFunc
 	// History 可为空，表示不跨轮保存会话历史。
 	History *ContextManager
-	// Display 控制所有接入端共用的展示节流。
+	// Display 是没有平台专属设置时的展示策略。
 	Display chat.Display
+	// DisplayFor 按会话平台选择展示策略；为 nil 时使用 Display。
+	DisplayFor func(chat.Session) chat.Display
 	// Timeout 包含排队之后的运行与展示时间，零值默认 120 秒。
 	Timeout  time.Duration
 	mu       sync.Mutex
@@ -114,7 +116,11 @@ func (p *Processor) Handle(ctx context.Context, message chat.Message, req agent.
 		}
 		p.History.AddMessage(message.Session.Key(), RoleUser, text, message.SenderID)
 	}
-	result, runErr := Deliver(ctx, p.Run, req, message, adapter, p.Display, func(result agent.Result) {
+	display := p.Display
+	if p.DisplayFor != nil {
+		display = p.DisplayFor(message.Session)
+	}
+	result, runErr := Deliver(ctx, p.Run, req, message, adapter, display, func(result agent.Result) {
 		if p.History != nil {
 			p.History.AddMessage(message.Session.Key(), RoleAssistant, result.Content, "")
 		}

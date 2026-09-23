@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/sashabaranov/go-openai"
@@ -80,6 +81,8 @@ type Service struct {
 	tasks *task.Manager
 	// taskDir 是应用启动时的规范化工作目录，不执行全局 chdir。
 	taskDir string
+	// taskStreams 按平台保存可编辑的后台任务临时回复设置。
+	taskStreams sync.Map
 	// executor 同时管理本地容器工具和 MCP 工具权限。
 	executor *execution.Executor
 }
@@ -171,7 +174,12 @@ func NewService(appConfig *config.Config, opts ...ServiceOption) (*Service, erro
 	}
 	service.chatProcessor = &conversation.Processor{
 		Run: service.RunAgent, History: history, Timeout: time.Duration(appConfig.Agent.TimeoutSeconds) * time.Second,
-		Display: displayConfig(appConfig.Matrix.StreamEdit),
+		DisplayFor: func(session chat.Session) chat.Display {
+			if session.Platform == "matrix" {
+				return displayConfig(appConfig.Matrix.StreamEdit)
+			}
+			return chat.Display{}
+		},
 	}
 	service.toolExecutor = NewToolExecutor(service)
 	service.executor, err = execution.New(config.ExecutionConfig{}, nil, nil)

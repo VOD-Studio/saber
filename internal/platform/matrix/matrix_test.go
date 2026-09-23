@@ -164,18 +164,21 @@ func TestPlatformUnwired(t *testing.T) {
 	}
 }
 
-// TestPlatformAdapters 区分聊天展示与任务投递两种 adapter 的编辑能力。
+// TestPlatformAdapters 验证聊天和任务投递遵守同一个 Matrix 编辑开关。
 func TestPlatformAdapters(t *testing.T) {
 	p, cfg := newPlatform(t, nil, true)
 	if got := p.ChatAdapter(nil).Capabilities(); !got.Edit {
 		t.Fatalf("聊天 adapter 应支持编辑: %+v", got)
 	}
-	if got := p.DeliveryAdapter().Capabilities(); got.Edit {
-		t.Fatalf("投递 adapter 不应流式编辑: %+v", got)
+	if got := p.DeliveryAdapter().Capabilities(); !got.Edit {
+		t.Fatalf("任务投递 adapter 应支持编辑: %+v", got)
 	}
 	cfg.Matrix.StreamEdit.Enabled = false
 	if got := p.ChatAdapter(nil).Capabilities(); got.Edit {
 		t.Fatalf("关闭流式编辑后聊天 adapter 仍声明支持: %+v", got)
+	}
+	if got := p.DeliveryAdapter().Capabilities(); got.Edit {
+		t.Fatalf("关闭流式编辑后任务投递 adapter 仍声明支持: %+v", got)
 	}
 }
 

@@ -56,9 +56,9 @@ func (p *Platform) ChatAdapter(handler chat.Handler) *matrix.ChatAdapter {
 	return matrix.NewChatAdapter(p.commands, p.media, p.cfg.Matrix.Media, p.cfg.Matrix.StreamEdit.Enabled, handler)
 }
 
-// DeliveryAdapter 返回一次性发送的 adapter，用于任务与定时计划的结果投递。
+// DeliveryAdapter 返回任务投递 adapter，是否原地编辑由 Matrix 展示开关决定。
 func (p *Platform) DeliveryAdapter() chat.Adapter {
-	return matrix.NewChatAdapter(p.commands, p.media, p.cfg.Matrix.Media, false, nil)
+	return matrix.NewChatAdapter(p.commands, p.media, p.cfg.Matrix.Media, p.cfg.Matrix.StreamEdit.Enabled, nil)
 }
 
 // NormalizeCommand 实现 ai.ChatEntrypoint：把平台命令文本规范化为通用消息，

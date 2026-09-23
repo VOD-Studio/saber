@@ -78,7 +78,19 @@ func (s *Service) EnableTasks(path string) error {
 		if err := s.core.WaitForRateLimit(ctx); err != nil {
 			return agent.Result{}, err
 		}
-		return s.RunAgent(ctx, req, emit)
+		var progress *taskStream
+		if req.Stream {
+			progress = s.newTaskStream(ctx)
+		}
+		if progress != nil {
+			defer progress.close()
+		}
+		return s.RunAgent(ctx, req, func(event agent.Event) {
+			emit(event)
+			if progress != nil {
+				progress.event(event)
+			}
+		})
 	}, nil, task.Options{Context: s.contextPolicy(), Schedule: s.authorizeSchedule, Manage: func(identity chat.Identity) bool { return s.executor != nil && s.executor.IsTaskAdmin(identity) }})
 	if err != nil {
 		return err
@@ -93,7 +105,7 @@ func (s *Service) EnableTasks(path string) error {
 }
 
 // RegisterTaskDelivery 为指定平台注册任务结果投递器，由平台接入端在启动时调用。
-// adapter 只需具备出站发送能力，因此与聊天入站链路共用同一份平台账号作用域即可。
+// Matrix 使用自己的展示策略，Violet 只使用平台编辑间隔。
 func (s *Service) RegisterTaskDelivery(platform string, adapter chat.Adapter) error {
 	if s.tasks == nil {
 		return errors.New("任务服务未启用")
@@ -101,9 +113,22 @@ func (s *Service) RegisterTaskDelivery(platform string, adapter chat.Adapter) er
 	if adapter == nil {
 		return errors.New("任务投递需要平台 adapter")
 	}
-	return s.tasks.RegisterDelivery(platform, func(ctx context.Context, t task.Task) (string, error) {
+	if err := s.tasks.RegisterDelivery(platform, func(ctx context.Context, t task.Task) (string, error) {
 		return s.deliverTask(ctx, adapter, t)
-	})
+	}); err != nil {
+		return err
+	}
+	if adapter.Capabilities().Edit {
+		switch platform {
+		case "matrix":
+			if s.config.Matrix.StreamEdit.Enabled {
+				s.taskStreams.Store(platform, taskStreamConfig{adapter: adapter, display: displayConfig(s.config.Matrix.StreamEdit)})
+			}
+		case "violet":
+			s.taskStreams.Store(platform, taskStreamConfig{adapter: adapter, display: chat.Display{EditInterval: time.Duration(s.config.Platforms.Violet.EditIntervalMs) * time.Millisecond}})
+		}
+	}
+	return nil
 }
 
 func taskReply(t task.Task, kind, text string) chat.Reply {

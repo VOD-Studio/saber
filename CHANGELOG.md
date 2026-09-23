@@ -77,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Matrix 的 300 字节/3 秒首段阈值及 500ms/5 次编辑限制仅用于 Matrix；后台任务现在把模型增量合并成平台临时回复，Violet 使用自己的 `edit_interval_ms`（默认 200ms）原地更新，终态按稳定幂等键定稿
 - 聊天中的已完成任务只发送模型回答正文，不再附加「任务 #ID：completed」；空回答显示「任务已完成」，失败及中断仍保留编号和状态
 - Matrix 关闭时，执行器不再检查未启用入口的 E2EE 会话与密钥默认路径，源码工作区无需额外配置 `matrix.e2ee_session_path`
 - 平台注册不再被 Matrix 启用状态挡死：`internal/bot` 的 `initServices` 原先在 Matrix 客户端为空时提前返回，关掉 Matrix 后平台注册表永远是空的；现在 Matrix 与 Violet 各自按条件注册，人格服务、`!ai` 命令注册、主动聊天与 Meme 仍按原条件装配。新增可选端口 `platform.TaskDelivery`（`DeliveryAdapter`），`registerPlatform` 据此注册任务投递，没有该端口的平台只接即时消息；启用 violet 但 `platforms.violet` 不合法时在启动阶段直接报错，而不是只留一条平台 Start 失败的 warning

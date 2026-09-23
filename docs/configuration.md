@@ -163,7 +163,7 @@ matrix:
     timeout_seconds: 10
 ```
 
-Matrix 任务使用独立的结果投递器；旧的 `stream_edit` 参数不再暴露为配置。媒体下载、群聊触发、主动消息与 Meme 配置都归属 `matrix`，不影响 TUI。
+Matrix 任务使用平台专属的展示节流与结果投递器；`stream_edit` 目前只保留内部默认值，不在 YAML 暴露。媒体下载、群聊触发、主动消息与 Meme 配置都归属 `matrix`，不影响 TUI。
 
 ## 平台接入（platforms）
 
@@ -188,9 +188,8 @@ platforms:
 - Violet 的 `endpoint` 与 `bot_token` 在 `enabled: true` 时为必填项，协议必须是 `http(s)://`。凭据在 Violet 管理端 `/admin/chat-bots`（权限点 `chat:bot-manage`）注册签发，可反复回看明文；配置文件仍按 `0600` 保存，不要提交进仓库。
 - `account` 参与会话与历史的存储键，改动它等于换一份历史、限流额度也重新计。多实例接同一个站点时应当显式区分。
 - 触发规则：私聊由 `direct_chat_auto_reply` 控制，群聊由 `group_chat_mention_reply` 控制且必须被 `@` 到（Violet 服务端本来就只把被点名的群聊消息推给 bot，Saber 再判一次）。正文里的 `@(username:uuid)` 会降级成 `@username` 再交给模型；只 @ 一句没有内容不会触发回答。
-- `edit_interval_ms` 是平台自己的出站编辑下限。Violet 的写端点按 bot 用户限流，编辑配额约 300 次/分钟，因此流式回复的编辑会等待到该间隔再发（默认 200ms），而不是被丢弃——最终定稿同样走编辑，丢一次就等于丢掉答案。它独立于 `matrix.stream_edit` 的全局展示节奏。
+- `edit_interval_ms` 是 Violet 自己的出站编辑下限。写端点按 bot 用户限流，编辑配额约 300 次/分钟，因此任务文本增量会合并后按该间隔更新（默认 200ms）；最终定稿同样走编辑，失败时重试。300 字节、3 秒、500ms、最多 5 次的旧展示策略只用于 Matrix。
 - `http_timeout_seconds` 只作用于普通 API 请求，事件流是长连接，靠 30 秒心跳与 90 秒静默看门狗判活。
 - 断线恢复：Violet 的 bot 事件流不支持 `Last-Event-ID` 补发，Saber 在重连后按消息历史接口补齐水位之后的消息，并按消息 ID 去重；首次连接只打水位基线，不会把站内旧消息当新问题回答一遍。
 - 能力边界：Violet 只走 `HandleChat` 这条最小链路。`!ai <内容>` 会被剥掉前缀当提问，其余 `!` 开头命令（`!task`、`!schedule`、上下文命令）在本平台无落点、直接跳过；任务产出的文件不投递（上传通道仍按 Matrix 限定）；主动聊天未接入 Violet（`SendNotice` 没有对等语义）。
 - Matrix 的明细配置仍在顶层 `matrix:` 节。`platforms.matrix` 尚未接管它：直接搬迁会让 `platforms.matrix` 里的部分字段把顶层默认值覆盖掉，得先定清「别名与默认值的合并语义」，属独立批次。新平台的配置一律写进 `platforms.<name>`。
-
