@@ -169,6 +169,14 @@ func (s *appState) initConfig(args []string, stdout io.Writer) error {
 		}
 		return ExitSuccess()
 	}
+	// 配置文件可留在工作区作为指向私有状态目录的符号链接；运行状态须跟随真实配置路径保存。
+	if info, err := os.Lstat(s.flags.ConfigPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		resolved, err := filepath.EvalSymlinks(s.flags.ConfigPath)
+		if err != nil {
+			return fmt.Errorf("解析配置文件符号链接失败: %w", err)
+		}
+		s.flags.ConfigPath = resolved
+	}
 
 	if s.flags.Command == "chat" {
 		cfg, err := config.LoadOrDefault(s.flags.ConfigPath)

@@ -4,6 +4,7 @@ package bot
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -444,4 +445,44 @@ func writeFile(path, content string) error {
 	defer func() { _ = f.Close() }()
 	_, err = f.WriteString(content)
 	return err
+}
+
+// TestInitConfig_ConfigSymlinkFollowsRealPath 确认配置文件是符号链接时，
+// ConfigPath 收敛为真实路径，令牌、会话与任务数据库随之落到链接目标所在目录。
+func TestInitConfig_ConfigSymlinkFollowsRealPath(t *testing.T) {
+	realPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.GenerateExample(realPath); err != nil {
+		t.Fatalf("生成私有配置失败: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(realPath)
+	if err != nil {
+		t.Fatalf("解析真实路径失败: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		path func(t *testing.T) string
+		want string
+	}{
+		{"符号链接改为真实路径", func(t *testing.T) string {
+			link := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.Symlink(realPath, link); err != nil {
+				t.Fatalf("创建符号链接失败: %v", err)
+			}
+			return link
+		}, want},
+		{"普通路径保持原样", func(t *testing.T) string { return realPath }, realPath},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := &appState{info: matrix.BuildInfo{Version: "test"}}
+			if err := state.initConfig([]string{"-config", tt.path(t)}, &bytes.Buffer{}); err != nil {
+				t.Fatalf("initConfig 失败: %v", err)
+			}
+			if state.flags.ConfigPath != tt.want {
+				t.Errorf("ConfigPath = %q，期望 %q", state.flags.ConfigPath, tt.want)
+			}
+		})
+	}
 }
