@@ -204,6 +204,8 @@ func (c *Client) createResponse(ctx context.Context, req ChatCompletionRequest, 
 			slog.Debug("Failed to close Responses stream", "error", closeErr)
 		}
 	}()
+	// 百炼 Qwen3.8 的 reasoning_text.delta 是可展示摘要；其他模型可能返回原始推理。
+	qwenSummary := strings.HasPrefix(c.getModelName(req.Model), "qwen3.8-")
 	var text strings.Builder
 	for {
 		event, err := stream.Recv()
@@ -217,7 +219,10 @@ func (c *Client) createResponse(ctx context.Context, req ChatCompletionRequest, 
 			return nil, err
 		}
 		switch event.Type {
-		case openai.ResponseStreamEventReasoningSummaryTextDelta:
+		case openai.ResponseStreamEventReasoningSummaryTextDelta, openai.ResponseStreamEventReasoningTextDelta:
+			if event.Type == openai.ResponseStreamEventReasoningTextDelta && !qwenSummary {
+				break
+			}
 			if handler != nil && event.Delta != "" {
 				if thinking, ok := handler.(interface{ OnThinkingChunk(context.Context, string) }); ok {
 					thinking.OnThinkingChunk(ctx, event.Delta)

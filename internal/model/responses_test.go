@@ -182,6 +182,31 @@ func TestResponses_ToolLoop(t *testing.T) {
 	}
 }
 
+func TestResponses_QwenReasoningStreamsBeforeAnswer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeResponseSSE(t, w, `{"type":"response.reasoning_text.delta","delta":"公开增量"}`)
+		writeResponseSSE(t, w, `{"type":"response.output_text.delta","delta":"答案"}`)
+		writeResponseSSE(t, w, `{"type":"response.completed","response":{"status":"completed","model":"qwen3.8-flash","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"公开增量"}]},{"type":"message","content":[{"type":"output_text","text":"答案"}]}]}}`)
+	}))
+	defer server.Close()
+	client, err := NewClientWithModel(&config.ModelConfig{API: "openai-responses", BaseURL: server.URL + "/v1", APIKey: "test-key", Model: "qwen3.8-flash"})
+	require.NoError(t, err)
+	var deltas []agent.EventKind
+	response, err := AgentModel(func(string) (*Client, error) { return client, nil }, &RetryConfigWrapper{})(
+		context.Background(), agent.Request{Model: "podlink.qwen3.8-flash", Stream: true, Messages: []openai.ChatCompletionMessage{{Role: "user", Content: "test"}}},
+		func(event agent.Event) {
+			if event.Kind == agent.ThinkingDelta || event.Kind == agent.TextDelta {
+				deltas = append(deltas, event.Kind)
+			}
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "公开增量", response.Thinking)
+	require.Equal(t, "答案", response.Content)
+	require.Equal(t, []agent.EventKind{agent.ThinkingDelta, agent.TextDelta}, deltas)
+}
+
 func writeResponseSSE(t *testing.T, w http.ResponseWriter, data string) {
 	t.Helper()
 	if json.Valid([]byte(data)) {
