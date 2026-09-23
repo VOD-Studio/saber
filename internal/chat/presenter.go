@@ -168,6 +168,7 @@ func (p *Presenter) Finish(ctx context.Context, content string) error {
 	if p.capabilities.ReplyState {
 		reply.Status = ReplyCompleted
 		reply.Thinking = p.thinking.String()
+		return p.commitReplyState(ctx, reply)
 	}
 	if p.messageID != "" && p.capabilities.Edit {
 		return p.adapter.Edit(ctx, p.messageID, reply)
@@ -176,8 +177,8 @@ func (p *Presenter) Finish(ctx context.Context, content string) error {
 	return err
 }
 
-// Fail 将部分正文留在同一条消息上，并写入明确的失败状态。
-func (p *Presenter) Fail(ctx context.Context, code string) error {
+// Fail 将错误与部分正文留在同一条消息上，并写入明确的失败状态。
+func (p *Presenter) Fail(ctx context.Context, code, detail string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !p.capabilities.ReplyState || p.final {
@@ -187,9 +188,21 @@ func (p *Presenter) Fail(ctx context.Context, code string) error {
 	reply := p.reply
 	reply.Status, reply.ErrorCode = ReplyFailed, code
 	reply.Text, reply.Thinking = p.content.String(), p.thinking.String()
-	if p.messageID != "" {
-		return p.adapter.Edit(ctx, p.messageID, reply)
+	if detail != "" {
+		reply.Text = "⚠️ Saber 未能完成回复：" + detail + "\n\n" + reply.Text
 	}
-	_, err := p.adapter.Send(ctx, reply)
-	return err
+	return p.commitReplyState(ctx, reply)
+}
+
+func (p *Presenter) commitReplyState(ctx context.Context, reply Reply) error {
+	if p.messageID == "" {
+		pending := reply
+		pending.Status, pending.Text, pending.Thinking, pending.ErrorCode = ReplyPending, "", "", ""
+		id, err := p.adapter.Send(ctx, pending)
+		if err != nil {
+			return err
+		}
+		p.messageID = id
+	}
+	return p.adapter.Edit(ctx, p.messageID, reply)
 }

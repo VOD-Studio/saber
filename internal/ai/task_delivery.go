@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,10 +30,21 @@ func (s *Service) deliverTask(ctx context.Context, adapter chat.Adapter, t task.
 			} else {
 				reply.Status = chat.ReplyFailed
 				reply.ErrorCode = t.Status
-				reply.Text = partialTaskContent(t.Result)
+				detail := strings.TrimSpace(t.Error)
+				if detail == "" {
+					detail = t.Status
+				}
+				reply.Text = "⚠️ Saber 未能完成回复（任务 #" + fmt.Sprint(t.ID) + "）：" + detail
+				if partial := partialTaskContent(t.Result); partial != "" {
+					reply.Text += "\n\n" + partial
+				}
 			}
 		}
-		messageID, err := adapter.Send(ctx, reply)
+		created := reply
+		if adapter.Capabilities().ReplyState {
+			created.Status, created.Text, created.Thinking, created.ErrorCode = chat.ReplyPending, "", "", ""
+		}
+		messageID, err := adapter.Send(ctx, created)
 		if err != nil || !adapter.Capabilities().Edit {
 			return messageID, err
 		}

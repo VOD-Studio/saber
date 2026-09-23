@@ -249,7 +249,9 @@ Violet 是一个全栈博客平台，内置聊天系统。Saber 通过 Violet Bo
 - 正文按 Unicode 字符截到 10000 以内并留截断标记；只有 `pending`、`thinking`、`failed` Bot 回复可使用空正文，普通文本消息仍拒绝空白正文
 - 编辑有全局最小间隔节流（`edit_interval_ms`，默认 200ms ≈ 300 次/分钟配额）。后台任务合并模型增量后最多按此频率更新；最终投递也走 `Edit`，失败时按原幂等键重试
 
-回复生命周期请求采用 `{"content":"...","reply_to_id":"...","bot_reply":{"status":"streaming","thinking":"..."}}`。创建时 `status=pending` 且 `content` 可为空；后续 PATCH 始终传累计 `content` 和累计 `thinking`，状态为 `thinking`、`streaming`、`completed` 或 `failed`，失败可附 `error_code`。Saber 不写 `sender_kind`、`revision`、`updated_at`：它们由 Violet 服务端维护并通过历史和 `message.updated` SSE 返回。Violet 必须原子更新四项、拒绝终态回退，并以后台 Bot 开关控制 thinking 的保存和返回；这部分是跨仓协议依赖，Saber 的假服务端测试不能替代真实 Violet 联调。旧 Bot 未携带 `bot_reply` 时仍走普通文本消息行为。
+Violet 当前的写协议使用顶层字段：POST `{"content":"","reply_to_id":"...","status":"pending"}` 创建占位消息；PATCH `{"content":"...","thinking":"...","status":"streaming","revision":1}` 提交累计快照，之后每次修订递增 `revision`。失败使用 `status=failed`，报错写入 `content`，已生成正文接在报错后面。Violet 的读模型仍把状态放在 `bot_reply` 中；`sender_kind` 和 `updated_at` 由服务端维护，历史和 `message.updated` SSE 返回同一快照。Violet 原子更新正文、thinking、状态和版本，拒绝终态回退；后台 Bot 开关控制 thinking 的保存和返回。旧 Bot 省略 `status` 时仍走普通文本消息行为。
+
+占位 POST 失败后，任务流不按 200ms 编辑节拍重复发送；网络错误指数退避，429 依照 `Retry-After` 等待。聊天链路在创建任务前失败时，Saber 发送一条 `pending → failed` 的错误卡片；任务执行失败时由持久化终态投递把错误与部分正文放进原卡片。服务端拒绝写入时只能记录错误并等待可重试的终态投递，无法绕过 Violet 限流。
 
 ### 消息流转
 

@@ -303,13 +303,21 @@ func (f *fakeViolet) serveSendMessage(w http.ResponseWriter, r *http.Request, pa
 		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "Idempotency-Key 必填")
 		return
 	}
-	var body outgoingMessage
+	var body struct {
+		Content   string `json:"content"`
+		ReplyToID string `json:"reply_to_id"`
+		Status    string `json:"status"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
 		return
 	}
-	if strings.TrimSpace(body.Content) == "" && (body.BotReply == nil || body.BotReply.Status != "pending" && body.BotReply.Status != "thinking" && body.BotReply.Status != "failed") {
-		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "正文不能为空")
+	if strings.TrimSpace(body.Content) == "" && body.Status != "pending" {
+		writeAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "文本消息无效")
+		return
+	}
+	if body.Status != "" && body.Status != "pending" {
+		writeAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "创建时只能设置 pending 状态")
 		return
 	}
 	if len([]rune(body.Content)) > maxContentRunes {
@@ -336,13 +344,9 @@ func (f *fakeViolet) serveSendMessage(w http.ResponseWriter, r *http.Request, pa
 		SenderKind:     "bot",
 		CreatedAt:      time.Now().Format(time.RFC3339Nano),
 	}
-	if body.BotReply != nil {
-		state := botReplyDTO{Status: body.BotReply.Status, Thinking: body.BotReply.Thinking, ErrorCode: body.BotReply.ErrorCode}
-		state.Revision = 1
+	if body.Status == "pending" {
+		state := botReplyDTO{Status: body.Status}
 		state.UpdatedAt = time.Now().Format(time.RFC3339Nano)
-		if !f.allowThinking {
-			state.Thinking = ""
-		}
 		created.BotReply = &state
 	}
 	if body.ReplyToID != "" {
@@ -357,7 +361,12 @@ func (f *fakeViolet) serveSendMessage(w http.ResponseWriter, r *http.Request, pa
 func (f *fakeViolet) serveEdit(w http.ResponseWriter, r *http.Request, path string) {
 	id := conversationIDFrom(path)
 	messageID := path[strings.LastIndex(path, "/")+1:]
-	var body outgoingMessage
+	var body struct {
+		Content  string `json:"content"`
+		Thinking string `json:"thinking"`
+		Status   string `json:"status"`
+		Revision int64  `json:"revision"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
 		return
@@ -372,19 +381,18 @@ func (f *fakeViolet) serveEdit(w http.ResponseWriter, r *http.Request, path stri
 			writeAPIError(w, http.StatusForbidden, "FORBIDDEN", "不是本 bot 发的消息")
 			return
 		}
-		if message.BotReply != nil && (message.BotReply.Status == "completed" || message.BotReply.Status == "failed") && body.BotReply != nil && body.BotReply.Status != message.BotReply.Status {
+		if message.BotReply != nil && (message.BotReply.Status == "completed" || message.BotReply.Status == "failed") {
 			writeAPIError(w, http.StatusConflict, "CONFLICT", "回复已结束")
+			return
+		}
+		if body.Status != "" && (message.BotReply == nil || body.Revision <= message.BotReply.Revision) {
+			writeAPIError(w, http.StatusConflict, "CONFLICT", "Bot 回复版本已过期")
 			return
 		}
 		message.Content = body.Content
 		edited := time.Now()
-		if body.BotReply != nil {
-			state := botReplyDTO{Status: body.BotReply.Status, Thinking: body.BotReply.Thinking, ErrorCode: body.BotReply.ErrorCode}
-			if message.BotReply != nil {
-				state.Revision = message.BotReply.Revision + 1
-			} else {
-				state.Revision = 1
-			}
+		if body.Status != "" {
+			state := botReplyDTO{Status: body.Status, Thinking: body.Thinking, Revision: body.Revision}
 			state.UpdatedAt = edited.Format(time.RFC3339Nano)
 			if !f.allowThinking {
 				state.Thinking = ""

@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -165,6 +166,8 @@ func (p *taskStream) runReplyState(ctx context.Context) {
 	var messageID string
 	var shown uint64
 	var lastUpdate time.Time
+	var retryAt time.Time
+	var backoff time.Duration
 	for {
 		select {
 		case <-ctx.Done():
@@ -173,6 +176,9 @@ func (p *taskStream) runReplyState(ctx context.Context) {
 			return
 		case <-p.updates:
 		case <-ticker.C:
+		}
+		if time.Now().Before(retryAt) {
+			continue
 		}
 		p.mu.Lock()
 		text, thinking, status, version := strings.Clone(p.content.String()), strings.Clone(p.thinking.String()), p.status, p.version
@@ -185,10 +191,13 @@ func (p *taskStream) runReplyState(ctx context.Context) {
 			cancel()
 			if err != nil {
 				slog.Debug("取得任务回复占位消息失败", "task", p.task.ID, "error", err)
+				backoff = replyRetryDelay(err, backoff)
+				retryAt = time.Now().Add(backoff)
 				continue
 			}
 			messageID = id
 			lastUpdate = time.Now()
+			backoff = 0
 		}
 		if version == shown && time.Since(lastUpdate) < 15*time.Second {
 			continue
@@ -200,8 +209,23 @@ func (p *taskStream) runReplyState(ctx context.Context) {
 		cancel()
 		if err != nil {
 			slog.Debug("更新任务回复状态失败，终态仍会重试投递", "task", p.task.ID, "error", err)
+			backoff = replyRetryDelay(err, backoff)
+			retryAt = time.Now().Add(backoff)
 			continue
 		}
 		shown, lastUpdate = version, time.Now()
+		backoff = 0
 	}
+}
+
+func replyRetryDelay(err error, previous time.Duration) time.Duration {
+	delay := time.Second
+	if previous > 0 {
+		delay = min(previous*2, 30*time.Second)
+	}
+	var advised interface{ RetryDelay() time.Duration }
+	if errors.As(err, &advised) {
+		delay = max(delay, advised.RetryDelay())
+	}
+	return delay
 }

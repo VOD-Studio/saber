@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -138,6 +140,20 @@ func TestClient_Send(t *testing.T) {
 	}
 }
 
+func TestClient_RateLimitKeepsRetryAfter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "60")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = fmt.Fprint(w, `{"error":"rate_limit_exceeded","message":"请求过于频繁"}`)
+	}))
+	defer server.Close()
+	_, err := newClient(server.URL, testToken, 5).send(context.Background(), testDirectRoom, outgoingMessage{Status: "pending"}, "key")
+	var apiErr *apiError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusTooManyRequests || apiErr.RetryDelay() != time.Minute {
+		t.Fatalf("限流等待提示丢失: %v", err)
+	}
+}
+
 // TestClient_Edit 验证编辑会替换正文并留下编辑时间，且只能改自己发的消息。
 func TestClient_Edit(t *testing.T) {
 	t.Parallel()
@@ -146,16 +162,16 @@ func TestClient_Edit(t *testing.T) {
 	theirs := fake.pushMessage(testDirectRoom, "user-1", "alice", "别人的消息", time.Now())
 	api := newTestClient(fake)
 	ctx := context.Background()
-	if err := api.edit(ctx, testDirectRoom, mine.ID, outgoingMessage{Content: "最终答案"}); err != nil {
+	if _, err := api.edit(ctx, testDirectRoom, mine.ID, outgoingMessage{Content: "最终答案"}); err != nil {
 		t.Fatal(err)
 	}
 	if records := fake.editRecords(); len(records) != 1 || records[0].Content != "最终答案" {
 		t.Fatalf("编辑记录 = %+v", records)
 	}
-	if err := api.edit(ctx, testDirectRoom, theirs.ID, outgoingMessage{Content: "篡改"}); clientStatus(err) != 403 {
+	if _, err := api.edit(ctx, testDirectRoom, theirs.ID, outgoingMessage{Content: "篡改"}); clientStatus(err) != 403 {
 		t.Fatalf("编辑他人消息应报 403，got %v", err)
 	}
-	if err := api.edit(ctx, testDirectRoom, "msg-nope", outgoingMessage{Content: "内容"}); clientStatus(err) != 404 {
+	if _, err := api.edit(ctx, testDirectRoom, "msg-nope", outgoingMessage{Content: "内容"}); clientStatus(err) != 404 {
 		t.Fatalf("编辑不存在消息应报 404，got %v", err)
 	}
 }

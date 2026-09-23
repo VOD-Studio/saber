@@ -3,6 +3,7 @@ package chat_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,9 @@ func (s *sink) Send(_ context.Context, r chat.Reply) (string, error) {
 	if s.fail {
 		s.fail = false
 		return "", errors.New("temporary")
+	}
+	if s.caps.ReplyState && r.Status != chat.ReplyPending {
+		return "", errors.New("creation requires pending")
 	}
 	s.sends = append(s.sends, r)
 	return "sent", nil
@@ -99,7 +103,7 @@ func TestPresenter_ReplyStateKeepsOneMessageAndPartialFailure(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := p.Fail(ctx, "timed_out"); err != nil {
+	if err := p.Fail(ctx, "timed_out", "上游超时"); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.Heartbeat(ctx); err != nil {
@@ -109,8 +113,27 @@ func TestPresenter_ReplyStateKeepsOneMessageAndPartialFailure(t *testing.T) {
 		t.Fatalf("占位消息 = %+v", target.sends)
 	}
 	last := target.edits[len(target.edits)-1]
-	if last.Status != chat.ReplyFailed || last.Text != "部分" || last.Thinking != "公开摘要" || last.ErrorCode != "timed_out" {
+	if last.Status != chat.ReplyFailed || !strings.Contains(last.Text, "上游超时") || !strings.Contains(last.Text, "部分") || last.Thinking != "公开摘要" || last.ErrorCode != "timed_out" {
 		t.Fatalf("失败回复 = %+v", last)
+	}
+}
+
+func TestPresenter_ReplyStateRecoversFailedPlaceholder(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		target := &sink{caps: chat.Capabilities{Edit: true, ReplyState: true}, fail: true}
+		p := chat.NewPresenter(target, chat.Message{Session: chat.Session{Platform: "p", Account: "a", Conversation: "c"}}, chat.Display{})
+		if err := p.Start(context.Background()); err == nil {
+			t.Fatal("占位发送应先失败")
+		}
+		var err error
+		if failed {
+			err = p.Fail(context.Background(), "failed", "模型不可用")
+		} else {
+			err = p.Finish(context.Background(), "最终正文")
+		}
+		if err != nil || len(target.sends) != 1 || len(target.edits) != 1 {
+			t.Fatalf("占位失败后的终态未恢复: %v, sends=%+v, edits=%+v", err, target.sends, target.edits)
+		}
 	}
 }
 

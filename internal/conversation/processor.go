@@ -173,11 +173,11 @@ func Deliver(ctx context.Context, run RunFunc, req agent.Request, message chat.M
 		}
 	})
 	if err != nil {
-		markReplyFailed(ctx, presenter, result.Status)
+		markReplyFailed(ctx, presenter, result.Status, err)
 		return result, err
 	}
 	if result.Status != agent.Completed {
-		markReplyFailed(ctx, presenter, result.Status)
+		markReplyFailed(ctx, presenter, result.Status, fmt.Errorf("agent ended without a final answer: %s", result.Status))
 		return result, fmt.Errorf("agent ended without a final answer: %s", result.Status)
 	}
 	if save != nil {
@@ -189,14 +189,14 @@ func Deliver(ctx context.Context, run RunFunc, req agent.Request, message chat.M
 	return result, nil
 }
 
-func markReplyFailed(ctx context.Context, presenter *chat.Presenter, status agent.Status) {
+func markReplyFailed(ctx context.Context, presenter *chat.Presenter, status agent.Status, cause error) {
 	code := string(status)
 	if code == "" {
 		code = string(agent.Failed)
 	}
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := presenter.Fail(cleanup, code); err != nil {
+	if err := presenter.Fail(cleanup, code, cause.Error()); err != nil {
 		slog.Debug("标记回复失败失败", "error", err)
 	}
 }

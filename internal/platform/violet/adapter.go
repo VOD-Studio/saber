@@ -56,11 +56,18 @@ func (t *editThrottle) wait(ctx context.Context) error {
 
 // Adapter 实现 chat.Adapter：把通用回复翻译成 Violet Bot API 调用。
 type Adapter struct {
-	api      *client
-	account  string
-	throttle *editThrottle
+	api       *client
+	account   string
+	throttle  *editThrottle
+	mu        sync.Mutex
+	revisions map[string]replyRevision
 	// platformName 用于校验回复确实属于本接入端，避免拿别的平台的会话往 Violet 发。
 	platformName string
+}
+
+type replyRevision struct {
+	value  int64
+	status string
 }
 
 // newAdapter 构造出站 adapter。throttle 应在同一平台实例间共享，才能守住全局编辑配额。
@@ -68,13 +75,16 @@ func newAdapter(api *client, account string, throttle *editThrottle) *Adapter {
 	return &Adapter{api: api, account: account, throttle: throttle, platformName: platformName}
 }
 
-// Capabilities 返回 Violet 的展示能力：可原地编辑、可上报输入状态、可引用回复。
+// Capabilities 返回 Violet 的编辑、输入提示、引用及生成状态能力。
 func (a *Adapter) Capabilities() chat.Capabilities {
 	return chat.Capabilities{Edit: true, Typing: true, Reply: true, ReplyState: true}
 }
 
 // Send 创建一条文本消息并返回可供编辑的消息 ID。
 func (a *Adapter) Send(ctx context.Context, reply chat.Reply) (string, error) {
+	if reply.Status != "" && reply.Status != chat.ReplyPending {
+		return "", errors.New("violet 创建生成回复只能使用 pending 状态")
+	}
 	content, err := a.prepare(ctx, reply)
 	if err != nil {
 		return "", err
@@ -86,11 +96,23 @@ func (a *Adapter) Send(ctx context.Context, reply chat.Reply) (string, error) {
 	if created.ID == "" {
 		return "", errors.New("violet 发送消息未返回消息 ID")
 	}
+	if created.BotReply != nil {
+		a.mu.Lock()
+		if a.revisions == nil {
+			a.revisions = make(map[string]replyRevision)
+		}
+		if created.BotReply.Revision >= a.revisions[created.ID].value {
+			a.revisions[created.ID] = replyRevision{created.BotReply.Revision, created.BotReply.Status}
+		}
+		a.mu.Unlock()
+	}
 	return created.ID, nil
 }
 
 // Edit 整体替换此前发出消息的正文。
 func (a *Adapter) Edit(ctx context.Context, messageID string, reply chat.Reply) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if messageID == "" {
 		return errors.New("violet 编辑消息缺少消息 ID")
 	}
@@ -98,13 +120,28 @@ func (a *Adapter) Edit(ctx context.Context, messageID string, reply chat.Reply) 
 	if err != nil {
 		return err
 	}
+	if previous := a.revisions[messageID]; (previous.status == string(chat.ReplyCompleted) || previous.status == string(chat.ReplyFailed)) && previous.status == string(reply.Status) {
+		delete(a.revisions, messageID)
+		return nil
+	}
 	if err := a.throttle.wait(ctx); err != nil {
 		return err
 	}
 	body := outgoing(reply, content)
 	body.ReplyToID = ""
-	if err := a.api.edit(ctx, reply.Session.Conversation, messageID, body); err != nil {
+	if reply.Status != "" {
+		body.Revision = a.revisions[messageID].value + 1
+	}
+	updated, err := a.api.edit(ctx, reply.Session.Conversation, messageID, body)
+	if err != nil {
 		return fmt.Errorf("violet 编辑消息失败: %w", err)
+	}
+	if updated.BotReply != nil {
+		if updated.BotReply.Status == string(chat.ReplyCompleted) || updated.BotReply.Status == string(chat.ReplyFailed) {
+			delete(a.revisions, messageID)
+		} else {
+			a.revisions[messageID] = replyRevision{updated.BotReply.Revision, updated.BotReply.Status}
+		}
 	}
 	return nil
 }
@@ -148,6 +185,9 @@ func (a *Adapter) prepare(ctx context.Context, reply chat.Reply) (string, error)
 	if strings.TrimSpace(reply.Text) == "" && reply.Status != chat.ReplyPending && reply.Status != chat.ReplyThinking && reply.Status != chat.ReplyFailed {
 		return "", errors.New("violet 不接受空白正文")
 	}
+	if reply.Status == chat.ReplyPending && strings.TrimSpace(reply.Text) != "" {
+		return "", errors.New("violet pending 回复不能携带正文")
+	}
 	if reply.Status == "" && (reply.Thinking != "" || reply.ErrorCode != "") {
 		return "", errors.New("violet 生成信息缺少回复状态")
 	}
@@ -164,11 +204,7 @@ func (a *Adapter) prepare(ctx context.Context, reply chat.Reply) (string, error)
 }
 
 func outgoing(reply chat.Reply, content string) outgoingMessage {
-	body := outgoingMessage{Content: content, ReplyToID: reply.ReplyTo}
-	if reply.Status != "" {
-		body.BotReply = &outgoingBotReply{Status: string(reply.Status), Thinking: reply.Thinking, ErrorCode: reply.ErrorCode}
-	}
-	return body
+	return outgoingMessage{Content: content, ReplyToID: reply.ReplyTo, Status: string(reply.Status), Thinking: reply.Thinking}
 }
 
 // idempotencyKey 取上层给定的事务 ID，缺省时生成一个随机键。

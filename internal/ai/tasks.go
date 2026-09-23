@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -187,9 +188,13 @@ func (s *Service) submitTask(ctx context.Context, message chat.Message, req agen
 		pending.Status = chat.ReplyPending
 		messageID, sendErr := reply.Send(ackCtx, pending)
 		if sendErr != nil {
-			return sendErr
+			slog.Warn("violet 回复占位消息暂时无法创建，任务终态仍会重试投递", "task", t.ID, "error", sendErr)
+			return nil
 		}
-		return s.tasks.RememberMessage(ackCtx, t.ID, messageID)
+		if rememberErr := s.tasks.RememberMessage(ackCtx, t.ID, messageID); rememberErr != nil {
+			slog.Warn("记录 violet 回复消息 ID 失败", "task", t.ID, "error", rememberErr)
+		}
+		return nil
 	}
 	if !s.config.Agent.TaskReceiptEnabled {
 		return nil

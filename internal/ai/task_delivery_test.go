@@ -111,9 +111,11 @@ func TestTaskDelivery_SlowMultipleFilesResumeWithoutReupload(t *testing.T) {
 }
 
 type replyStateSink struct {
-	mu      sync.Mutex
-	replies map[string]chat.Reply
-	sends   int
+	mu       sync.Mutex
+	replies  map[string]chat.Reply
+	sends    int
+	attempts int
+	sendErr  error
 }
 
 func (s *replyStateSink) Capabilities() chat.Capabilities {
@@ -122,6 +124,13 @@ func (s *replyStateSink) Capabilities() chat.Capabilities {
 func (s *replyStateSink) Send(_ context.Context, reply chat.Reply) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.attempts++
+	if s.sendErr != nil {
+		return "", s.sendErr
+	}
+	if reply.Status != "" && reply.Status != chat.ReplyPending {
+		return "", errors.New("创建时只能设置 pending 状态")
+	}
 	if s.replies == nil {
 		s.replies = make(map[string]chat.Reply)
 	}
@@ -130,6 +139,23 @@ func (s *replyStateSink) Send(_ context.Context, reply chat.Reply) (string, erro
 		s.sends++
 	}
 	return reply.TransactionID, nil
+}
+
+func TestTaskStream_FailedPendingUsesBackoff(t *testing.T) {
+	sink := &replyStateSink{sendErr: errors.New("API 400")}
+	p := &taskStream{
+		task:    task.Task{ID: 1, Message: chat.Message{Session: chat.Session{Platform: "violet", Account: "bot", Conversation: "room"}, ID: "question"}},
+		adapter: sink, display: chat.Display{EditInterval: time.Millisecond}, status: chat.ReplyPending,
+		updates: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
+	}
+	go p.run(context.Background())
+	p.event(agent.Event{Kind: agent.ModelStarted})
+	time.Sleep(50 * time.Millisecond)
+	p.close()
+	sink.mu.Lock()
+	attempts := sink.attempts
+	sink.mu.Unlock()
+	require.Equal(t, 1, attempts, "占位消息失败后不应按编辑节拍持续重发")
 }
 func (s *replyStateSink) Edit(_ context.Context, id string, reply chat.Reply) error {
 	s.mu.Lock()
@@ -172,7 +198,7 @@ func TestTaskDelivery_ReplyStateKeepsPartialFailure(t *testing.T) {
 		sink.mu.Lock()
 		defer sink.mu.Unlock()
 		for _, reply := range sink.replies {
-			return reply.Status == chat.ReplyFailed && reply.Text == "部分正文" && reply.Thinking == "公开摘要" && reply.ErrorCode == "failed" && sink.sends == 1
+			return reply.Status == chat.ReplyFailed && strings.Contains(reply.Text, "upstream failed") && strings.Contains(reply.Text, "部分正文") && reply.Thinking == "公开摘要" && reply.ErrorCode == "failed" && sink.sends == 1
 		}
 		return false
 	}, 5*time.Second, 20*time.Millisecond)

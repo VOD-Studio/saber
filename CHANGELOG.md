@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- 修正 Violet Bot API 生成回复使用顶层 `status`、`thinking` 和递增 `revision` 的写协议；空正文占位不再被误判为普通文本并返回 400，失败重试遵守退避与 `Retry-After`，避免快速耗尽发送配额；Saber 处理错误会写入同一条失败回复卡片
 - `ai.enabled: false` 时启动不再 panic：`initServices` 提前返回使平台注册表保持 nil，`run()` 调用 `Registry.Enabled` 会空指针崩溃（同时带走 `internal/bot` 整包测试），现无论 AI 是否启用先建注册表
 
 - 上下文预算应用于持久化续聊和每次模型调用，按完整轮次裁剪并同步清理 Responses 推理数据；保留数据库历史，当前输入过大时明确终止

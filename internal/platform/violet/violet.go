@@ -334,12 +334,48 @@ func (p *Platform) handle(ctx context.Context, item inbound) {
 		return
 	}
 	slog.Info("violet 消息触发 AI 回复", "conversation", message.Session.Conversation, "sender", message.SenderID, "message", message.ID)
-	result, err := p.handler(ctx, message, p.adapter)
+	reply := &responseTracker{Adapter: p.adapter}
+	result, err := p.handler(ctx, message, reply)
 	if err != nil {
 		slog.Warn("violet 消息处理失败", "conversation", message.Session.Conversation, "message", message.ID, "error", err)
+		if !reply.sent && ctx.Err() == nil {
+			p.reportFailure(ctx, message, err)
+		}
 		return
 	}
 	slog.Debug("violet 消息处理完成", "message", message.ID, "status", string(result.Status), "rounds", len(result.Rounds))
+}
+
+// responseTracker 避免共享聊天链路已创建回复后，再为同一次错误发送第二张卡片。
+type responseTracker struct {
+	chat.Adapter
+	sent bool
+}
+
+func (a *responseTracker) Send(ctx context.Context, reply chat.Reply) (string, error) {
+	id, err := a.Adapter.Send(ctx, reply)
+	if err == nil {
+		a.sent = true
+	}
+	return id, err
+}
+
+func (p *Platform) reportFailure(ctx context.Context, message chat.Message, cause error) {
+	failed := chat.Reply{
+		Session: message.Session, ReplyTo: message.ID,
+		TransactionID: "saber-error-" + message.ID, Status: chat.ReplyPending,
+	}
+	updateCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	id, err := p.adapter.Send(updateCtx, failed)
+	if err == nil {
+		failed.Status = chat.ReplyFailed
+		failed.Text = "⚠️ Saber 未能完成回复：" + strings.TrimSpace(cause.Error())
+		err = p.adapter.Edit(updateCtx, id, failed)
+	}
+	if err != nil {
+		slog.Warn("violet 失败卡片发送失败", "conversation", message.Session.Conversation, "message", message.ID, "error", err)
+	}
 }
 
 // normalizeMessage 把 Violet 消息快照翻译为 chat.Message，并按配置判定是否应当回答。

@@ -91,8 +91,14 @@ func TestAdapter_ReplyLifecycle(t *testing.T) {
 	fake.mu.Lock()
 	final := fake.history[testDirectRoom][0]
 	fake.mu.Unlock()
-	if final.BotReply == nil || final.BotReply.Status != "failed" || final.BotReply.Thinking != "公开摘要" || final.BotReply.Revision != 4 || final.BotReply.ErrorCode != "timed_out" || final.Content != "部分正文" || final.EditedAt != "" {
+	if final.BotReply == nil || final.BotReply.Status != "failed" || final.BotReply.Thinking != "公开摘要" || final.BotReply.Revision != 3 || final.Content != "部分正文" || final.EditedAt != "" {
 		t.Fatalf("回复终态 = %+v", final)
+	}
+	if err := adapter.Edit(ctx, id, reply); err != nil {
+		t.Fatalf("已定稿回复的重复投递应幂等: %v", err)
+	}
+	if got := len(fake.editRecords()); got != 3 {
+		t.Fatalf("重复终态又发了 PATCH: %d", got)
 	}
 	reply.Status = chat.ReplyStreaming
 	if err := adapter.Edit(ctx, id, reply); clientStatus(err) != 409 {
@@ -104,9 +110,13 @@ func TestAdapter_ThinkingCanBeHiddenByViolet(t *testing.T) {
 	t.Parallel()
 	fake := newFakeViolet(t) // 模拟后台默认关闭展示。
 	_, adapter := newTestAdapterViaPlatform(t, fake)
-	reply := chat.Reply{Session: testSession(adapter, testDirectRoom), Status: chat.ReplyThinking, Thinking: "公开摘要"}
+	reply := chat.Reply{Session: testSession(adapter, testDirectRoom), Status: chat.ReplyPending}
 	id, err := adapter.Send(context.Background(), reply)
 	if err != nil {
+		t.Fatal(err)
+	}
+	reply.Status, reply.Thinking = chat.ReplyThinking, "公开摘要"
+	if err := adapter.Edit(context.Background(), id, reply); err != nil {
 		t.Fatal(err)
 	}
 	fake.mu.Lock()
@@ -135,6 +145,9 @@ func TestAdapter_SendRejectsForeignSession(t *testing.T) {
 	}
 	if _, err := adapter.Send(ctx, chat.Reply{Session: testSession(adapter, testDirectRoom), Text: "  \n "}); err == nil {
 		t.Fatal("空白正文应被拒，而不是换一个服务端 400")
+	}
+	if _, err := adapter.Send(ctx, chat.Reply{Session: testSession(adapter, testDirectRoom), Text: "正文", Status: chat.ReplyPending}); err == nil {
+		t.Fatal("pending 不能夹带正文")
 	}
 	if err := adapter.Edit(ctx, "", chat.Reply{Session: testSession(adapter, testDirectRoom), Text: "答案"}); err == nil {
 		t.Fatal("缺少消息 ID 的编辑应被拒")

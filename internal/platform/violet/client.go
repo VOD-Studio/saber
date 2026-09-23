@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -28,10 +29,14 @@ const contentTruncatedSuffix = "\n\n…（内容过长，已截断）"
 // apiError 携带状态码、Violet 错误码与消息：401/403 与 5xx 的处置方式不同，
 // 只留一句文本会让上层没法判断「凭据失效」和「站点暂时不可用」。
 type apiError struct {
-	Code    string
-	Message string
-	Status  int
+	Code       string
+	Message    string
+	Status     int
+	retryDelay time.Duration
 }
+
+// RetryDelay 返回服务端 Retry-After 提示，供任务回复的重试节奏使用。
+func (e *apiError) RetryDelay() time.Duration { return e.retryDelay }
 
 // Error 实现 error。
 func (e *apiError) Error() string {
@@ -145,9 +150,13 @@ func (c *client) send(ctx context.Context, conversationID string, body outgoingM
 }
 
 // edit 整体替换自己发过的消息正文，流式回复靠它逐步定稿。
-func (c *client) edit(ctx context.Context, conversationID, messageID string, body outgoingMessage) error {
+func (c *client) edit(ctx context.Context, conversationID, messageID string, body outgoingMessage) (messageDTO, error) {
 	path := "/conversations/" + url.PathEscape(conversationID) + "/messages/" + url.PathEscape(messageID)
-	return c.request(ctx, http.MethodPatch, path, nil, body, "", nil)
+	var out messageDTO
+	if err := c.request(ctx, http.MethodPatch, path, nil, body, "", &out); err != nil {
+		return messageDTO{}, err
+	}
+	return out, nil
 }
 
 // setTyping 上报输入状态，204 无响应体。
@@ -251,6 +260,9 @@ func statusError(resp *http.Response) error {
 		return &apiError{Status: resp.StatusCode, Message: "响应体读取失败"}
 	}
 	apiErr := &apiError{Status: resp.StatusCode}
+	if seconds, parseErr := strconv.Atoi(resp.Header.Get("Retry-After")); parseErr == nil && seconds > 0 {
+		apiErr.retryDelay = time.Duration(seconds) * time.Second
+	}
 	var body errorBody
 	if json.Unmarshal(payload, &body) == nil {
 		apiErr.Code = body.Error

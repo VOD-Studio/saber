@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
+	"rua.plus/saber/internal/conversation"
 	"rua.plus/saber/internal/platform"
 )
 
@@ -96,6 +98,73 @@ func TestPlatform_WrongTokenKeepsRetrying(t *testing.T) {
 		t.Fatalf("鉴权失败属于运行期问题，不该让启动报错: %v", err)
 	}
 	platform.Stop()
+}
+
+// TestPlatform_HandlerFailureReturnsCard 验证聊天链路在创建任务前失败时仍回传一张失败卡片。
+func TestPlatform_HandlerFailureReturnsCard(t *testing.T) {
+	fake := newFakeViolet(t)
+	p := New(newTestConfig(fake.endpoint()))
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { p.Stop(); cancel() })
+	if err := p.Start(ctx, func(context.Context, chat.Message, chat.Adapter) (agent.Result, error) {
+		return agent.Result{}, errors.New("模型不可用")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fake.deliver(t, testDirectRoom, "user-1", "alice", "你好", time.Now())
+	deadline := time.After(2 * time.Second)
+	for {
+		fake.mu.Lock()
+		var reply messageDTO
+		for _, message := range fake.history[testDirectRoom] {
+			if message.Sender.ID == testBotUserID {
+				reply = message
+				break
+			}
+		}
+		fake.mu.Unlock()
+		if reply.BotReply != nil && reply.BotReply.Status == "failed" && strings.Contains(reply.Content, "模型不可用") {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("未返回失败卡片: %+v", reply)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func TestPlatform_ModelFailureDoesNotSendSecondCard(t *testing.T) {
+	fake := newFakeViolet(t)
+	p := New(newTestConfig(fake.endpoint()))
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { p.Stop(); cancel() })
+	done := make(chan struct{})
+	if err := p.Start(ctx, func(ctx context.Context, message chat.Message, adapter chat.Adapter) (agent.Result, error) {
+		defer close(done)
+		return conversation.Deliver(ctx, func(_ context.Context, _ agent.Request, emit func(agent.Event)) (agent.Result, error) {
+			emit(agent.Event{Kind: agent.TextDelta, Text: "部分正文"})
+			return agent.Result{Status: agent.Failed}, errors.New("模型断流")
+		}, agent.Request{}, message, adapter, chat.Display{}, nil)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fake.deliver(t, testDirectRoom, "user-1", "alice", "你好", time.Now())
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("模型处理未结束")
+	}
+	time.Sleep(20 * time.Millisecond) // 让调用方完成错误分支，核对它没有补发第二张卡片。
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.sent) != 1 || len(fake.edits) == 0 {
+		t.Fatalf("失败回复重复发送: sent=%+v edits=%+v", fake.sent, fake.edits)
+	}
+	final := fake.history[testDirectRoom][0]
+	if final.BotReply == nil || final.BotReply.Status != "failed" || !strings.Contains(final.Content, "模型断流") || !strings.Contains(final.Content, "部分正文") {
+		t.Fatalf("模型失败卡片 = %+v", final)
+	}
 }
 
 // TestPlatform_DirectMessageAnswers 验证私聊消息被规范化后交给共享聊天链路。

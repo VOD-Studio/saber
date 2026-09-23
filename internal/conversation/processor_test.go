@@ -85,7 +85,7 @@ func TestDeliver_ReplyStateFailureKeepsPartialContent(t *testing.T) {
 		t.Fatal("运行错误未返回")
 	}
 	replies := adapter.Replies()
-	if len(replies) != 1 || replies[0].Status != chat.ReplyFailed || replies[0].Text != "部分正文" || replies[0].Thinking != "摘要" {
+	if len(replies) != 1 || replies[0].Status != chat.ReplyFailed || !strings.Contains(replies[0].Text, "upstream failed") || !strings.Contains(replies[0].Text, "部分正文") || replies[0].Thinking != "摘要" {
 		t.Fatalf("回复未保留部分内容: %+v", replies)
 	}
 }

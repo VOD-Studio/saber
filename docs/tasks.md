@@ -2,7 +2,7 @@
 
 启用 AI 后，应用自动在配置文件同目录创建 `tasks.db`（权限 `0600`）。`!ai <内容>`、模型快捷命令、已启用的私聊自动回复、群聊提及和回复机器人都会创建任务。数据库写入成功后模型调用和工具执行在后台继续；完成时聊天中显示回答正文。Matrix 在失败或中断时显示任务编号和状态，Violet 则在同一回复卡片上显示失败状态并保留部分正文。`agent.task_receipt_enabled: true` 时 Matrix 额外回复「已接收，任务 #42」，默认不发送。数据库写入失败时不执行任务。
 
-Violet 在任务入库后立即创建空正文 `pending` 回复，因此即使关闭 `agent.stream`，首段正文出现前也有持久化反馈；它不受 `agent.task_receipt_enabled` 控制，也不再额外发送任务编号回执。运行开始标为 `thinking`，收到正文后标为 `streaming`；启用 `agent.stream` 时按 `platforms.violet.edit_interval_ms` 合并增量，静默期间每 15 秒续期。终态入库后以相同幂等键取回消息并编辑为 `completed` 或 `failed`；失败时保留最后一次模型尝试的部分正文。Matrix 仍按原有展示阈值更新临时回复。临时编辑失败不会重跑任务；重启后可重试终态投递。
+Violet 在任务入库后立即创建空正文 `pending` 回复，因此即使关闭 `agent.stream`，首段正文出现前也有持久化反馈；它不受 `agent.task_receipt_enabled` 控制，也不再额外发送任务编号回执。运行开始标为 `thinking`，收到正文后标为 `streaming`；启用 `agent.stream` 时按 `platforms.violet.edit_interval_ms` 合并增量，静默期间每 15 秒续期。终态入库后以相同幂等键取回消息并编辑为 `completed` 或 `failed`；失败卡片显示错误并保留最后一次模型尝试的部分正文。Matrix 仍按原有展示阈值更新临时回复。临时编辑失败不会重跑任务；重启后可重试终态投递。
 
 ```text
 !task run 检查这个项目并总结问题
