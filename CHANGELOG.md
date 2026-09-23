@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `web_fetch` 在 DNS 解析前拒绝十进制、十六进制、八进制及缩写形式的 IPv4 主机名，避免 SSRF 防护结果随系统解析器变化
 - 百炼 Qwen3.8 的 Responses `reasoning_text.delta` 按公开摘要增量实时上报，生成中即可展示思考内容；其他模型仍只转发 `reasoning_summary_text.delta`
 - Violet 流式回复跨模型轮次和重试保留已展示的思考摘要与草稿，新尝试的首段正文到来时原地替换草稿，避免工具调用后卡片内容短暂消失
 - 修正 Violet Bot API 生成回复使用顶层 `status`、`thinking` 和递增 `revision` 的写协议；空正文占位不再被误判为普通文本并返回 400，失败重试遵守退避与 `Retry-After`，避免快速耗尽发送配额；Saber 处理错误会写入同一条失败回复卡片

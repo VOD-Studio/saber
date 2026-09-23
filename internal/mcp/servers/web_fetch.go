@@ -39,6 +39,9 @@ var (
 	baseRegex       = regexp.MustCompile(`(?i)<base[^>]*/?>`)
 	dangerousAttrs  = regexp.MustCompile(`(?i)\s+on\w+\s*=\s*["'][^"']*["']`)
 
+	// 非标准数字 IPv4 的解析结果依赖系统；在 DNS 解析前一律拒绝。
+	numericHostPattern = regexp.MustCompile(`(?i)^(?:0x[0-9a-f]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|[0-9]+))*\.?$`)
+
 	// dangerousHostPatterns 危险主机名模式（用于 SSRF 防护）
 	// 这些主机名可能解析为内部服务或绕过 IP 过滤
 	dangerousHostPatterns = []*regexp.Regexp{
@@ -231,8 +234,8 @@ func handleFetchURL(ctx context.Context, _ *mcp.CallToolRequest, input FetchInpu
 //
 // 验证步骤：
 // 1. 检查主机名是否匹配危险模式（localhost、*.local 等）
-// 2. 解析 DNS 获取 IP 地址
-// 3. 检查 IP 是否为私有地址
+// 2. 检查标准 IP，并拒绝可能由系统解析为 IP 的非标准数字地址
+// 3. 解析 DNS 获取 IP 地址，并检查是否为私有地址
 func validateHost(host string) error {
 	// 1. 检查危险主机名模式
 	for _, pattern := range dangerousHostPatterns {
@@ -247,6 +250,9 @@ func validateHost(host string) error {
 			return fmt.Errorf("禁止访问私有 IP 地址: %s", ip.String())
 		}
 		return nil
+	}
+	if numericHostPattern.MatchString(host) {
+		return fmt.Errorf("禁止访问非标准 IP 地址: %s", host)
 	}
 
 	// 3. 解析主机名获取 IP 地址

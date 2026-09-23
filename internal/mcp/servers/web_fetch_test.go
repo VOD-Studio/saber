@@ -297,6 +297,26 @@ func TestValidateHost_DirectIP(t *testing.T) {
 	}
 }
 
+// TestValidateHost_NonCanonicalNumericIP 测试在 DNS 解析前拒绝非标准数字 IP。
+func TestValidateHost_NonCanonicalNumericIP(t *testing.T) {
+	tests := []string{
+		"2130706433", // 十进制回环地址
+		"0x7f000001", // 十六进制回环地址
+		"0177.0.0.1", // 八进制回环地址
+		"127.1",      // 缩写回环地址
+		"0x7f.0.0.1", // 混合进制回环地址
+	}
+
+	for _, host := range tests {
+		t.Run(host, func(t *testing.T) {
+			err := validateHost(host)
+			if err == nil || !strings.Contains(err.Error(), "非标准 IP 地址") {
+				t.Errorf("validateHost(%q) = %v，期望在 DNS 解析前拒绝非标准 IP 地址", host, err)
+			}
+		})
+	}
+}
+
 // TestValidateHost_InvalidHost 测试无效主机名。
 func TestValidateHost_InvalidHost(t *testing.T) {
 	tests := []struct {
