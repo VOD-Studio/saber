@@ -106,5 +106,5 @@ func TestTaskDelivery_SlowMultipleFilesResumeWithoutReupload(t *testing.T) {
 	require.Equal(t, 2, uploads)
 	require.Equal(t, 1, sends["first.txt"])
 	require.Equal(t, 2, sends["second.txt"])
-	require.Equal(t, 1, sends["任务 #1：completed\ndone"])
+	require.Equal(t, 1, sends["done"])
 }

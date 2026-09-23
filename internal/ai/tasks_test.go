@@ -60,7 +60,7 @@ func TestTasks_MatrixReceiptIsolationCommandsAndRetry(t *testing.T) {
 				return
 			}
 			mu.Lock()
-			isResult := strings.Contains(content.Body, "：completed")
+			isResult := strings.HasPrefix(content.Body, "finished ")
 			if isResult {
 				results = append(results, content)
 				resultPaths = append(resultPaths, r.URL.Path)

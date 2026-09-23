@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/execution"
@@ -12,7 +13,14 @@ import (
 
 func (s *Service) deliverTask(ctx context.Context, adapter chat.Adapter, t task.Task) (string, error) {
 	messageID, err := s.tasks.DeliverPart(ctx, t.ID, "result", func(context.Context) ([]byte, error) { return nil, nil }, func(ctx context.Context, _ []byte) (string, error) {
-		return adapter.Send(ctx, taskReply(t, "result", task.Report(t)))
+		text := task.Report(t)
+		if t.Status == "completed" {
+			text = t.Result.Content
+			if strings.TrimSpace(text) == "" {
+				text = "任务已完成"
+			}
+		}
+		return adapter.Send(ctx, taskReply(t, "result", text))
 	})
 	if err != nil || s.executor == nil || t.Status != "completed" {
 		return messageID, err

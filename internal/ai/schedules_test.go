@@ -53,7 +53,7 @@ func TestSchedules_CommandsRestartReportAndNaturalTool(t *testing.T) {
 		if strings.Contains(r.URL.Path, "/send/") {
 			var content event.MessageEventContent
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&content))
-			if strings.Contains(content.Body, "：completed") {
+			if content.Body == "服务正常" {
 				mu.Lock()
 				reports = append(reports, content)
 				paths = append(paths, r.URL.Path)
