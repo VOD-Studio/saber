@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-23
+
 ### Added
 
 - Agent 流式事件新增独立 `thinking_delta`，仅转发 Responses 明确标为公开的思考摘要；加密推理和原始推理文本仍只用于模型协议，不进入聊天展示
@@ -403,9 +405,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 结构化日志
 - 基础命令系统（`!ping`, `!help`）
 
-[Unreleased]: https://github.com/your-username/saber/compare/v0.0.5...HEAD
-[0.0.5]: https://github.com/your-username/saber/compare/v0.0.4...v0.0.5
-[0.0.4]: https://github.com/your-username/saber/compare/v0.0.3...v0.0.4
-[0.0.3]: https://github.com/your-username/saber/compare/v0.0.2...v0.0.3
-[0.0.2]: https://github.com/your-username/saber/compare/v0.0.1...v0.0.2
-[0.0.1]: https://github.com/your-username/saber/releases/tag/v0.0.1
+[Unreleased]: https://github.com/VOD-Studio/saber/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/VOD-Studio/saber/compare/v0.0.5...v0.1.0
+[0.0.5]: https://github.com/VOD-Studio/saber/compare/v0.0.4...v0.0.5
+[0.0.4]: https://github.com/VOD-Studio/saber/compare/v0.0.3...v0.0.4
+[0.0.3]: https://github.com/VOD-Studio/saber/compare/v0.0.2...v0.0.3
+[0.0.2]: https://github.com/VOD-Studio/saber/compare/v0.0.1...v0.0.2
+[0.0.1]: https://github.com/VOD-Studio/saber/releases/tag/v0.0.1
