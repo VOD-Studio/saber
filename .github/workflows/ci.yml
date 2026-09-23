@@ -2,110 +2,104 @@ name: CI / CD
 
 on:
   push:
-    # 推送到任意分支都运行（含 develop/feature/* 等），标签推送用于触发 Release
     branches:
       - '**'
     tags:
-      - 'v*'
+      - 'v*.*.*'
   pull_request:
-    branches: [ "master", "main" ]
+    branches: [master, main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  test:
-    name: Build & Test
+  lint:
+    name: Format & Lint
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
-          go-version-file: 'go.mod'
-          cache: true
-
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
       - name: Check code formatting
-        run: |
-          if [ -n "$(gofmt -l .)" ]; then
-            echo "The following files are not formatted properly:"
-            gofmt -l .
-            exit 1
-          fi
-
+        run: make fmt-check
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.13.2
 
+  test:
+    name: Test & Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
       - name: Run tests
         run: make test
-
-      - name: Run coverage check
+      - name: Check coverage
         run: make test-cover-check
 
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
       - name: Build binary
         run: make build
 
   release:
     name: Build & Publish Release
-    needs: test
-    if: startsWith(github.ref, 'refs/tags/')
+    needs: [lint, test, build]
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
-          go-version-file: 'go.mod'
-          cache: true
-
-      - name: Extract Release Notes from CHANGELOG.md
-        id: extract_changelog
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Validate version and extract release notes
         run: |
-          python3 -c '
-          import re, os
-          tag = os.environ.get("GITHUB_REF_NAME", "")
-          version = tag.lstrip("v")
-          changelog = "CHANGELOG.md"
-          notes = ""
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
 
-          if os.path.exists(changelog):
-              with open(changelog, "r", encoding="utf-8") as f:
-                  content = f.read()
-              pattern = re.compile(rf"^##\s+\[?v?{re.escape(version)}\]?.*$", re.MULTILINE | re.IGNORECASE)
-              match = pattern.search(content)
-              if match:
-                  start = match.end()
-                  next_match = re.search(r"^##\s+", content[start:], re.MULTILINE)
-                  notes = content[start:start + next_match.start()].strip() if next_match else content[start:].strip()
-                  notes = re.sub(r"\n\[[0-9a-zA-Zv\.\-]+\]:\s*https?://.*", "", notes).strip()
+          version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          makefile = Path("Makefile").read_text(encoding="utf-8")
+          if not re.search(rf"^VERSION := {re.escape(version)}$", makefile, re.MULTILINE):
+              raise SystemExit(f"Makefile VERSION 与标签 v{version} 不一致")
 
-          if notes:
-              with open("RELEASE_NOTES.md", "w", encoding="utf-8") as f:
-                  f.write(notes + "\n")
-              print("Successfully extracted changelog for version", version)
-          else:
-              print("No matching changelog section found for version", version)
-          '
-
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          match = re.search(rf"^## \[{re.escape(version)}\](?:[ \t]+-[ \t]+[^\n]+)?$", changelog, re.MULTILINE)
+          if not match:
+              raise SystemExit(f"CHANGELOG.md 缺少 {version} 的发布说明")
+          remaining = changelog[match.end():]
+          next_heading = re.search(r"^## ", remaining, re.MULTILINE)
+          notes = remaining[:next_heading.start() if next_heading else None].strip()
+          if not notes:
+              raise SystemExit(f"CHANGELOG.md 中 {version} 的发布说明为空")
+          Path("RELEASE_NOTES.md").write_text(notes + "\n", encoding="utf-8")
+          PY
       - name: Build all platform release binaries
         run: |
-          make build-all VERSION=${{ github.ref_name }}
-
+          VERSION="${GITHUB_REF_NAME#v}" make build-all
+          (cd bin/release && sha256sum saber-* > SHA256SUMS)
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
-          files: bin/release/*
           body_path: RELEASE_NOTES.md
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: bin/release/*
+          fail_on_unmatched_files: true

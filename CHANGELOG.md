@@ -82,6 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- CI 将格式与 lint、测试与覆盖率、构建拆为独立任务，并固定兼容 Go 1.27 的 lint 版本；标签发布前校验版本和发布说明，上传 11 个平台的二进制文件及 SHA256 校验值
 - Matrix 的 300 字节/3 秒首段阈值及 500ms/5 次编辑限制仅用于 Matrix；后台任务现在把模型增量合并成平台临时回复，Violet 使用自己的 `edit_interval_ms`（默认 200ms）原地更新，终态按稳定幂等键定稿
 - 聊天中的已完成任务只发送模型回答正文，不再附加「任务 #ID：completed」；空回答显示「任务已完成」，失败及中断仍保留编号和状态
 - Matrix 关闭时，执行器不再检查未启用入口的 E2EE 会话与密钥默认路径，源码工作区无需额外配置 `matrix.e2ee_session_path`

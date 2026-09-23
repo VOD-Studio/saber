@@ -85,12 +85,12 @@ test-cover-func: ## 显示函数级别覆盖率详情
 	go tool cover -func=coverage.out
 
 test-cover-check: ## CI 覆盖率门禁检查（阈值 60%）
-	@go test -cover -coverprofile=coverage.out -tags goolm ./... 2>/dev/null
-	@total=$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}' | sed 's/%//'); \
-	if [ $$(echo "$$total < 60" | bc -L) -eq 1 ]; then \
-		echo "覆盖率 $$total% 低于 60% 阈值"; exit 1; \
-	fi; \
-	echo "覆盖率 $$total% 达标"
+	@go test -cover -coverprofile=coverage.out -tags goolm ./...
+	@go tool cover -func=coverage.out | awk '$$1 == "total:" { \
+		found = 1; coverage = $$3; sub(/%$$/, "", coverage); \
+		if (coverage < 60) { printf "覆盖率 %s%% 低于 60%% 阈值\n", coverage; exit 1 } \
+		printf "覆盖率 %s%% 达标\n", coverage \
+	} END { if (!found) exit 1 }'
 
 fmt: ## 使用 goimports 格式化代码
 	goimports -w .

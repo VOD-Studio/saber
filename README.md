@@ -763,7 +763,13 @@ make clean       # 清理构建产物
 |-------------------|------------------------------------------|----------|
 | `make build`      | 纯 Go，静态链接                          | 日常开发 |
 | `make build-prod` | 纯 Go + 激进内联优化 (`-gcflags="-l=4"`) | 生产部署 |
-| `make build-all`  | 交叉编译 6 个平台 × 2 架构               | 发布版本 |
+| `make build-all`  | 交叉编译 11 个目标：macOS、Linux、Windows、FreeBSD、OpenBSD | 发布版本 |
+
+### CI 与发布
+
+每次向任意分支推送时，GitHub Actions 会分别运行格式与 lint、测试与覆盖率门禁、当前平台构建；向 `master` 或 `main` 提交的 PR 也会运行这些检查。
+
+发布时先更新 `Makefile` 的 `VERSION` 和 `CHANGELOG.md` 中对应的版本说明。把提交推送并确认 CI 通过后，推送形如 `v0.1.0` 的标签。标签对应的 CI 检查全部通过后，Release 任务会交叉编译 macOS amd64/arm64、Linux amd64/arm64/loong64、Windows amd64/arm64、FreeBSD amd64/arm64、OpenBSD amd64/arm64，将 11 个二进制文件及 `SHA256SUMS` 上传至 GitHub Release。
 
 **构建参数说明**：
 
