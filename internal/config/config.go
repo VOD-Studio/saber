@@ -72,11 +72,12 @@ type AIConfig struct {
 
 // AgentConfig 定义所有接入共用的任务执行策略。
 type AgentConfig struct {
-	ToolCallingConfig `yaml:",inline"`
-	Context           ContextConfig        `yaml:"context"`         // 上下文管理配置
-	StreamEnabled     bool                 `yaml:"stream"`          // 是否启用流式响应
-	Retry             RetryConfig          `yaml:"retry"`           // 重试配置
-	CircuitBreaker    CircuitBreakerConfig `yaml:"circuit_breaker"` // 熔断器配置
+	ToolCallingConfig  `yaml:",inline"`
+	Context            ContextConfig        `yaml:"context"`              // 上下文管理配置
+	StreamEnabled      bool                 `yaml:"stream"`               // 是否启用流式响应
+	TaskReceiptEnabled bool                 `yaml:"task_receipt_enabled"` // 是否在任务入库后发送接收回执
+	Retry              RetryConfig          `yaml:"retry"`                // 重试配置
+	CircuitBreaker     CircuitBreakerConfig `yaml:"circuit_breaker"`      // 熔断器配置
 }
 
 // ContextConfig 存储上下文管理配置
@@ -264,11 +265,12 @@ func DefaultAIConfig() AIConfig {
 // DefaultAgentConfig 返回通用任务默认策略。
 func DefaultAgentConfig() AgentConfig {
 	return AgentConfig{
-		Context:           DefaultContextConfig(),
-		StreamEnabled:     true,
-		Retry:             DefaultRetryConfig(),
-		ToolCallingConfig: DefaultToolCallingConfig(),
-		CircuitBreaker:    DefaultCircuitBreakerConfig(),
+		Context:            DefaultContextConfig(),
+		StreamEnabled:      true,
+		TaskReceiptEnabled: false,
+		Retry:              DefaultRetryConfig(),
+		ToolCallingConfig:  DefaultToolCallingConfig(),
+		CircuitBreaker:     DefaultCircuitBreakerConfig(),
 	}
 }
 
@@ -858,6 +860,7 @@ ai:
 
 agent:
   stream: true # 模型传输开关，所有接入共同遵守
+  task_receipt_enabled: false # 默认不发送「已接收，任务 #...」；结果仍正常投递
   max_rounds: 5 # 包含最终回答
   timeout_seconds: 600 # 整次任务，包含请求、重试等待与工具执行
   max_tool_output_bytes: 32768

@@ -158,6 +158,9 @@ func (s *Service) submitTask(ctx context.Context, message chat.Message, req agen
 	if err != nil {
 		return err
 	}
+	if !s.config.Agent.TaskReceiptEnabled {
+		return nil
+	}
 	ackCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	messageID, err := reply.Send(ackCtx, taskReply(t, "received", fmt.Sprintf("已接收，任务 #%d", t.ID)))

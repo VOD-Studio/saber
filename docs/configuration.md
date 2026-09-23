@@ -53,6 +53,7 @@ ai:
 ```yaml
 agent:
   stream: true
+  task_receipt_enabled: false
   max_rounds: 5
   timeout_seconds: 600
   max_tool_output_bytes: 32768
@@ -74,7 +75,9 @@ agent:
     reset_timeout: 30
 ```
 
-`stream` 控制模型传输，TUI 和 Matrix 都遵守。关闭后 TUI 仍显示任务状态，在完整回答到达后展示正文。TUI 自己管理刷新和 Markdown 渲染，没有 Matrix 消息编辑阈值配置。
+`stream` 控制模型传输，TUI、Matrix 和 Violet 都遵守。关闭后 TUI 仍显示任务状态，聊天平台在完整回答到达后展示正文。TUI 自己管理刷新和 Markdown 渲染，没有 Matrix 消息编辑阈值配置。
+
+`task_receipt_enabled` 默认关闭，控制聊天平台在任务入库后是否发送「已接收，任务 #…」。关闭后任务仍会运行并投递最终结果；设为 `true` 可恢复接收回执。TUI 自己展示任务状态，不发送这条聊天回执。
 
 `max_rounds` 包含最终回答；`timeout_seconds` 覆盖整次任务的模型请求、重试等待与工具执行。`execution.timeout_seconds` 单独限制一次执行工具调用。
 

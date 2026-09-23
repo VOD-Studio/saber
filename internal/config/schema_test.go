@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -140,5 +141,20 @@ func TestDocumentedConfiguration(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestAgentConfigDefaults 固定任务策略默认值：模型传输默认开启，
+// 聊天平台的任务接收回执默认关闭，避免每次交办都多一条噪音消息。
+func TestAgentConfigDefaults(t *testing.T) {
+	cfg := DefaultAgentConfig()
+	if !cfg.StreamEnabled {
+		t.Error("agent.stream 默认应开启")
+	}
+	if cfg.TaskReceiptEnabled {
+		t.Error("agent.task_receipt_enabled 默认应关闭，任务结果仍照常投递")
+	}
+	if !strings.Contains(ExampleConfig(), "task_receipt_enabled: false") {
+		t.Error("示例配置应说明任务回执开关及其默认值")
 	}
 }

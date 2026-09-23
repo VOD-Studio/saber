@@ -94,6 +94,7 @@ func TestTasks_MatrixReceiptIsolationCommandsAndRetry(t *testing.T) {
 	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: modelServer.URL, APIKey: "test"}}
 	cfg.AI.DefaultModel = "openai.local"
 	cfg.Agent.StreamEnabled = false
+	cfg.Agent.TaskReceiptEnabled = true
 	cfg.AI.SystemPrompt = "task system"
 	service, err := NewService(&cfg, WithMatrix(commands, nil))
 	require.NoError(t, err)
