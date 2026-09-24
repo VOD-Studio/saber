@@ -5,10 +5,7 @@ import (
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"maunium.net/go/mautrix/id"
 	"rua.plus/saber/internal/agent"
-	"rua.plus/saber/internal/chat"
-	"rua.plus/saber/internal/conversation"
 	"rua.plus/saber/internal/execution"
 	"rua.plus/saber/internal/model"
 )
@@ -51,34 +48,6 @@ func (s *Service) runAgent(ctx context.Context, req agent.Request, emit func(age
 		},
 	}
 	return runtime.Run(ctx, req, emit)
-}
-
-// runAgentReply 兼容预先构造请求的旧调用方，展示复用通用 Presenter。
-func (s *Service) runAgentReply(ctx context.Context, req agent.Request, roomID id.RoomID, client *Client) (*ChatCompletionResponse, error) {
-	timeout := time.Duration(s.config.Agent.TimeoutSeconds) * time.Second
-	if timeout == 0 {
-		timeout = 600 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	if s.entry == nil {
-		return nil, ErrNoChatEntrypoint
-	}
-	adapter := s.entry.OutboundAdapter()
-	message := chat.Message{Session: s.entry.Session(ctx, roomID), ID: s.eventID(ctx)}
-	result, err := conversation.Deliver(ctx, func(ctx context.Context, req agent.Request, emit func(agent.Event)) (agent.Result, error) {
-		return s.runAgent(ctx, req, emit, client)
-	}, req, message, adapter, displayConfig(s.config.Matrix.StreamEdit), func(result agent.Result) {
-		if s.contextManager != nil {
-			s.contextManager.history.AddMessage(message.Session.Key(), RoleAssistant, result.Content, "")
-		}
-	})
-	if err != nil {
-		return nil, err
-	}
-	response := result.Rounds[len(result.Rounds)-1].Response
-	response.Usage = result.Usage
-	return &response, nil
 }
 
 func (s *Service) contextPolicy() agent.ContextPolicy {

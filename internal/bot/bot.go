@@ -23,6 +23,7 @@ import (
 
 	"rua.plus/saber/internal/ai"
 	"rua.plus/saber/internal/cli"
+	"rua.plus/saber/internal/command"
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/execution"
 	"rua.plus/saber/internal/matrix"
@@ -42,6 +43,7 @@ type services struct {
 	mcpManager       *mcp.Manager
 	proactiveManager *ai.ProactiveManager
 	commandService   *matrix.CommandService
+	commandRegistry  *command.Registry
 	eventHandler     *matrix.EventHandler
 	presence         *matrix.PresenceService
 	mediaService     *matrix.MediaService
@@ -118,7 +120,7 @@ func run(parent context.Context, info matrix.BuildInfo) error {
 	}
 	// 先让平台接上共享聊天入口，再开始投递事件，避免入站消息找不到处理链路。
 	for _, p := range state.services.platforms.Enabled(state.cfg) {
-		if err := p.Start(ctx, state.services.aiService.HandleChat); err != nil {
+		if err := p.Start(ctx, state.handleChat); err != nil {
 			slog.Warn("平台启动失败", "platform", p.Name(), "error", err)
 		}
 	}
@@ -244,7 +246,6 @@ func (s *appState) initMatrixClient() (*services, error) {
 	commandService := matrix.NewCommandService(mautrixClient, client.GetUserID(), &s.info)
 	// 注入加密服务到 CommandService
 	commandService.SetCryptoService(client.GetCryptoService())
-	matrix.RegisterBuiltinCommands(commandService)
 
 	return &services{
 		client:         client,
@@ -283,9 +284,21 @@ func (s *appState) initServices() error {
 	// 平台注册表与 AI 是否启用无关：run() 与 shutdown() 都会遍历它，
 	// 缺少这一步时关闭 AI 会拿到 nil 注册表并 panic。
 	svc.platforms = platform.NewRegistry()
+	if err := s.cfg.Commands.Validate(); err != nil {
+		return fmt.Errorf("命令授权配置无效: %w", err)
+	}
 
 	if !s.cfg.AI.Enabled {
-		return nil
+		if svc.client != nil {
+			svc.platforms.Register(platformmatrix.New(s.cfg, svc.commandService, nil))
+		}
+		if s.cfg.Platforms.Violet.Enabled {
+			if err := s.cfg.Platforms.Violet.Validate(); err != nil {
+				return fmt.Errorf("violet 平台配置无效: %w", err)
+			}
+			svc.platforms.Register(violetplatform.New(s.cfg))
+		}
+		return s.buildCommands()
 	}
 
 	slog.Info("正在初始化AI服务...")
@@ -310,9 +323,6 @@ func (s *appState) initServices() error {
 	}
 
 	svc.mcpManager = s.initMCPManager()
-	if svc.mcpManager != nil && svc.commandService != nil {
-		matrix.RegisterMCPCommands(svc.commandService, svc.mcpManager)
-	}
 
 	// 媒体下载仅在 Matrix 接入时初始化。
 	if svc.client != nil {
@@ -342,17 +352,17 @@ func (s *appState) initServices() error {
 	if err := aiService.EnableTasks(filepath.Join(configDir, "tasks.db")); err != nil {
 		return fmt.Errorf("任务服务初始化失败: %w", err)
 	}
-	// Matrix 作为平台接入端持有聊天命令入口与任务投递器，ai 核心不再构造平台 adapter。
-	// 命令入口暂时只有 Matrix 能挂：ai.ChatEntrypoint 既是单例 setter，签名又带 mautrix 类型。
+	s.initPersonaService()
+	s.initMemeService()
+	// Matrix 与 Violet 共享命令入口，各自保留平台投递器。
 	if svc.client != nil {
-		matrixPlatform := platformmatrix.New(s.cfg, svc.commandService, svc.mediaService, aiService.HandleChatModel)
-		aiService.SetChatEntrypoint(matrixPlatform)
+		matrixPlatform := platformmatrix.New(s.cfg, svc.commandService, svc.mediaService)
 		if err := s.registerPlatform(matrixPlatform, aiService); err != nil {
 			return err
 		}
 	}
 
-	// Violet 不挂命令入口，只接管「私聊直答 + 群聊被 @」这条最小链路。
+	// Violet 在私聊或被寻址的群聊中使用同一命令入口。
 	// 注册必须留在下面 Matrix 专属装配的提前 return 之前：否则关掉 Matrix 就什么都注册不了。
 	if s.cfg.Platforms.Violet.Enabled {
 		if err := s.cfg.Platforms.Violet.Validate(); err != nil {
@@ -363,13 +373,10 @@ func (s *appState) initServices() error {
 		}
 	}
 
-	// 可选的 Matrix 功能（人格、!ai 命令注册、主动聊天、meme）只在启用该入口时装配。
+	// Matrix 自动回复与主动聊天仅在启用 Matrix 时装配。
 	if svc.client == nil {
-		return nil
+		return s.buildCommands()
 	}
-
-	// 初始化人格服务
-	s.initPersonaService()
 
 	s.registerAICommands()
 
@@ -381,16 +388,12 @@ func (s *appState) initServices() error {
 		svc.proactiveManager = mgr
 	}
 
-	// 初始化 Meme 服务
-	s.initMemeService()
-
-	return nil
+	return s.buildCommands()
 }
 
 // registerPlatform 接入一个聊天平台：能收任务结果的先注册投递器，然后进注册表等待 Start。
 //
-// 命令入口不在这里挂：那仍由 Matrix 独占（见 ai.ChatEntrypoint 的单例限制），
-// 新平台先按各自的触发规则走 HandleChat。没有实现 platform.TaskDelivery 的平台
+// 平台接入端按各自的触发规则走同一 Handler。没有实现 platform.TaskDelivery 的平台
 // 只接即时消息，任务与计划结果不会投到它那里。
 func (s *appState) registerPlatform(p platform.Platform, aiService *ai.Service) error {
 	if delivery, ok := p.(platform.TaskDelivery); ok {
@@ -424,31 +427,14 @@ func (s *appState) initMCPManager() *mcp.Manager {
 	return mgr
 }
 
-// registerAICommands 注册 AI 相关命令。
+// registerAICommands 装配 Matrix 自动回复触发；文本命令由共享注册表执行。
 func (s *appState) registerAICommands() {
 	svc := s.services
 	cs := svc.commandService
-	aiSvc := svc.aiService
-
-	// 创建 AI 命令路由器，统一处理 !ai <subcommand> 格式
-	aiRouter := ai.NewAICommandRouter(aiSvc)
-	aiRouter.RegisterSubcommand("clear", ai.NewClearContextCommand(aiSvc))
-	aiRouter.RegisterSubcommand("context", ai.NewContextInfoCommand(aiSvc))
-	aiRouter.RegisterSubcommand("models", ai.NewModelsCommand(aiSvc))
-	aiRouter.RegisterSubcommand("switch", ai.NewSwitchModelCommand(aiSvc))
-	aiRouter.RegisterSubcommand("current", ai.NewCurrentModelCommand(aiSvc))
-
-	cs.RegisterCommandWithDesc("ai", "AI 相关命令 (用法: !ai <子命令>)", aiRouter)
-
-	// 注册模型快捷命令（如 !ai-gpt-4）
-	for modelName := range s.cfg.AI.Models {
-		commandName := fmt.Sprintf("ai-%s", modelName)
-		desc := fmt.Sprintf("使用%s模型与AI对话", modelName)
-		cs.RegisterCommandWithDesc(commandName, desc, ai.NewMultiModelAICommand(aiSvc, modelName))
-	}
+	chatAdapter := matrix.NewChatAdapter(cs, svc.mediaService, s.cfg.Matrix.Media, s.cfg.Matrix.StreamEdit.Enabled, s.handleChat)
 
 	if s.cfg.Matrix.DirectChatAutoReply {
-		cs.SetDirectChatAIHandler(ai.NewAICommand(aiSvc))
+		cs.SetDirectChatAIHandler(chatAdapter)
 		slog.Info("私聊自动回复已启用")
 	}
 
@@ -459,14 +445,14 @@ func (s *appState) registerAICommands() {
 			slog.Warn("获取机器人显示名称失败，mention 功能可能受限", "error", err)
 		}
 		cs.SetMentionService(mentionService)
-		cs.SetMentionAIHandler(ai.NewAICommand(aiSvc))
+		cs.SetMentionAIHandler(chatAdapter)
 		slog.Info("群聊 mention 响应已启用",
 			"bot_id", svc.client.GetUserID().String(),
 			"display_name", mentionService.GetDisplayName())
 	}
 
 	if s.cfg.Matrix.ReplyToBotReply {
-		cs.SetReplyAIHandler(ai.NewAICommand(aiSvc))
+		cs.SetReplyAIHandler(chatAdapter)
 		slog.Info("回复机器人自己的回复已启用",
 			"bot_id", svc.client.GetUserID().String())
 	}
@@ -488,16 +474,20 @@ func (s *appState) initPersonaService() {
 		return
 	}
 	svc.personaService = personaSvc
+	if account := s.cfg.Commands.LegacyPersonaAccount; account != "" && svc.client != nil {
+		if account != svc.client.GetUserID().String() {
+			slog.Warn("旧人格归属账号与当前 Matrix bot 不同，保留待核查", "configured_account", account)
+		} else if migrated, err := personaSvc.MigrateLegacyMatrix(context.Background(), account); err != nil {
+			slog.Warn("迁移旧 Matrix 人格绑定失败，保留待核查", "error", err)
+		} else if migrated > 0 {
+			slog.Info("已按明确配置关联旧 Matrix 人格绑定", "count", migrated)
+		}
+	}
 
 	// 设置 AI 服务的人格服务
 	svc.aiService.SetPromptProvider(personaSvc)
 
 	// 注册 persona 命令
-	cs := svc.commandService
-	cs.RegisterCommandWithDesc("persona",
-		"人格管理 (用法: !persona [list|set|clear|status|new|del])",
-		persona.NewPersonaCommand(cs, personaSvc))
-
 	slog.Info("人格服务已启用", "db_path", dbPath)
 }
 
@@ -513,17 +503,8 @@ func (s *appState) initMemeService() {
 	}
 
 	svc := s.services
-	mautrixClient := svc.client.GetClient()
-
 	memeSvc := meme.NewService(&s.cfg.Matrix.Meme)
 	svc.memeService = memeSvc
-
-	cs := svc.commandService
-
-	// 注册主命令，支持 --gif/--sticker/--meme 参数
-	cs.RegisterCommandWithDesc("meme",
-		"搜索并发送梗图 (用法: !meme [--gif|--sticker|--meme] <关键词>)",
-		meme.NewMemeCommand(cs, mautrixClient, memeSvc))
 
 	slog.Info("Meme 服务已启用")
 }

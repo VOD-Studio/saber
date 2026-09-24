@@ -8,7 +8,6 @@ import (
 	"strconv"
 
 	"github.com/sashabaranov/go-openai"
-	"maunium.net/go/mautrix/id"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/execution"
 )
@@ -42,12 +41,6 @@ func (te *ToolExecutor) ExecuteToolCallingLoop(ctx context.Context, messages []o
 		Model: modelName, Messages: messages, Tools: tools, MaxTokens: cfg.MaxTokens, Temperature: cfg.Temperature,
 	}, nil)
 	return result.Content, err
-}
-
-// ExecuteStreamingWithToolCalling 兼容旧入口，执行循环由 Runtime 统一管理。
-func (te *ToolExecutor) ExecuteStreamingWithToolCalling(ctx context.Context, client *Client, req ChatCompletionRequest, roomID id.RoomID, messages []openai.ChatCompletionMessage, tools []openai.Tool, model string) (any, error) {
-	req.Messages, req.Tools, req.Model, req.Stream = messages, tools, model, true
-	return te.service.runAgentReply(ctx, req, roomID, client)
 }
 
 // ExecuteToolCall 执行单个工具调用。

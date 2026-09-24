@@ -14,7 +14,7 @@ import (
 	"rua.plus/saber/internal/task"
 )
 
-func (s *Service) sendTaskLogs(ctx context.Context, identity chat.Identity, taskID int64) (string, error) {
+func (s *Service) sendTaskLogs(ctx context.Context, identity chat.Identity, taskID int64, source string) (string, error) {
 	t, err := s.tasks.Get(ctx, identity.Session, taskID)
 	if err != nil {
 		return "", err
@@ -51,7 +51,6 @@ func (s *Service) sendTaskLogs(ctx context.Context, identity chat.Identity, task
 		}
 	}
 	// 每次下载请求有独立幂等键；重复事件和中途失败复用已上传/已发送步骤。
-	source := s.eventID(ctx)
 	if source == "" {
 		source = fmt.Sprintf("agent-%d", task.ID(ctx))
 	}

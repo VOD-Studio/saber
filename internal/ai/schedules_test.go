@@ -97,11 +97,11 @@ func TestSchedules_CommandsRestartReportAndNaturalTool(t *testing.T) {
 	s := start()
 	defer func() { s.Stop() }()
 	ctx := matrix.WithMessageRelations(matrix.WithEventID(context.Background(), "$source"), "", "$thread")
-	command, ok := commands.GetCommand("schedule")
-	require.True(t, ok)
 	args := []string{"once", time.Now().Add(3 * time.Second).Format(time.RFC3339), "Asia/Shanghai", "检查服务"}
-	require.NoError(t, command.Handler.Handle(ctx, "@alice:test", "!room:test", args))
-	require.NoError(t, command.Handler.Handle(ctx, "@alice:test", "!room:test", args))
+	adapter := matrix.NewChatAdapter(commands, nil, cfg.Matrix.Media, false, nil)
+	message := adapter.Message(ctx, "@alice:test", "!room:test", "!schedule "+strings.Join(args, " "))
+	require.NoError(t, s.ScheduleCommand(ctx, message, adapter, args[0], strings.Join(args[1:], " ")))
+	require.NoError(t, s.ScheduleCommand(ctx, message, adapter, args[0], strings.Join(args[1:], " ")))
 	session := chat.Session{Platform: "matrix", Account: "@bot:test", Conversation: "!room:test", Thread: "$thread"}
 	plans, err := s.tasks.ListSchedules(ctx, session)
 	require.NoError(t, err)
@@ -133,7 +133,7 @@ func TestSchedules_CommandsRestartReportAndNaturalTool(t *testing.T) {
 	other.EventKey += ":next"
 	require.NotEqual(t, taskReply(finished, "result", "").TransactionID, taskReply(other, "result", "").TransactionID)
 	naturalCtx := matrix.WithEventID(ctx, "$natural")
-	require.NoError(t, s.handleAICommand(naturalCtx, "@alice:test", "!room:test", s.GetModelRegistry().GetDefault(), []string{"用自然语言建立计划"}))
+	require.NoError(t, runMatrixChat(s, naturalCtx, "@alice:test", "!room:test", s.GetModelRegistry().GetDefault(), "用自然语言建立计划"))
 	require.Eventually(t, func() bool {
 		p, e := s.tasks.ListSchedules(ctx, session)
 		return e == nil && len(p) == 2

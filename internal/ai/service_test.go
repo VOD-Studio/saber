@@ -289,50 +289,6 @@ func TestService_IsEnabled(t *testing.T) {
 	})
 }
 
-// TestAICommand_New 测试 AICommand 创建。
-func TestAICommand_New(t *testing.T) {
-	cfg := createTestAIConfig()
-	service, _ := NewService(cfg)
-
-	cmd := NewAICommand(service)
-	if cmd == nil {
-		t.Error("NewAICommand returned nil")
-	}
-}
-
-// TestMultiModelAICommand_New 测试 MultiModelAICommand 创建。
-func TestMultiModelAICommand_New(t *testing.T) {
-	cfg := createTestAIConfig()
-	service, _ := NewService(cfg)
-
-	cmd := NewMultiModelAICommand(service, "gpt-3.5-turbo")
-	if cmd == nil {
-		t.Error("NewMultiModelAICommand returned nil")
-	}
-}
-
-// TestClearContextCommand_New 测试 ClearContextCommand 创建。
-func TestClearContextCommand_New(t *testing.T) {
-	cfg := createTestAIConfig()
-	service, _ := NewService(cfg)
-
-	cmd := NewClearContextCommand(service)
-	if cmd == nil {
-		t.Error("NewClearContextCommand returned nil")
-	}
-}
-
-// TestContextInfoCommand_New 测试 ContextInfoCommand 创建。
-func TestContextInfoCommand_New(t *testing.T) {
-	cfg := createTestAIConfig()
-	service, _ := NewService(cfg)
-
-	cmd := NewContextInfoCommand(service)
-	if cmd == nil {
-		t.Error("NewContextInfoCommand returned nil")
-	}
-}
-
 // TestService_ContextIntegration 测试上下文集成。
 func TestService_ContextIntegration(t *testing.T) {
 	cfg := createTestAIConfig()

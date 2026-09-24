@@ -13,15 +13,12 @@ import (
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"maunium.net/go/mautrix"
-	"maunium.net/go/mautrix/id"
 	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/chat/memory"
 	"rua.plus/saber/internal/config"
 	appcontext "rua.plus/saber/internal/context"
 	"rua.plus/saber/internal/execution"
-	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/mcp"
 )
 
@@ -128,73 +125,6 @@ func TestService_RunAgentMCPFailure(t *testing.T) {
 	}
 	if executed.Load() != 1 {
 		t.Fatal("denied MCP call reached external server")
-	}
-}
-
-func TestService_RunAgentReply(t *testing.T) {
-	for _, stream := range []bool{false, true} {
-		for _, failureMode := range []string{"none", "all", "preview"} {
-			if failureMode == "preview" && !stream {
-				continue
-			}
-			sendFails := failureMode == "all"
-			t.Run(fmt.Sprintf("stream_%t_failure_%s", stream, failureMode), func(t *testing.T) {
-				var modelRequests atomic.Int32
-				model, _ := setupMockServer(t, func(w http.ResponseWriter, r *http.Request) {
-					modelRequests.Add(1)
-					var body string
-					if stream {
-						w.Header().Set("Content-Type", "text/event-stream")
-						body = "data: " + `{"choices":[{"delta":{"content":"hello"},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
-					} else {
-						body = `{"choices":[{"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]}`
-					}
-					if _, err := fmt.Fprint(w, body); err != nil {
-						t.Error(err)
-					}
-				})
-				var sent atomic.Int32
-				matrixServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if strings.Contains(r.URL.Path, "/send/") {
-						sent.Add(1)
-						if sendFails || failureMode == "preview" && sent.Load() == 1 {
-							w.WriteHeader(http.StatusForbidden)
-							if _, err := fmt.Fprint(w, `{"errcode":"M_FORBIDDEN","error":"denied"}`); err != nil {
-								t.Error(err)
-							}
-							return
-						}
-					}
-					if _, err := fmt.Fprint(w, `{"event_id":"$test"}`); err != nil {
-						t.Error(err)
-					}
-				}))
-				defer matrixServer.Close()
-				client, err := mautrix.NewClient(matrixServer.URL, "@bot:local", "test")
-				if err != nil {
-					t.Fatal(err)
-				}
-				cfg := *config.DefaultConfig()
-				cfg.AI.Enabled = true
-				cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "http://unused.invalid", APIKey: "test"}}
-				cfg.AI.DefaultModel = "openai.local"
-				cfg.Matrix.StreamEdit.CharThreshold = 1
-				service, err := NewService(&cfg, WithMatrix(matrix.NewCommandService(client, id.UserID("@bot:local"), &matrix.BuildInfo{}), nil))
-				if err != nil {
-					t.Fatal(err)
-				}
-				wireMatrixPlatform(t, service, service.matrixService, service.mediaService)
-				defer service.Stop()
-				response, err := service.runAgentReply(context.Background(), agent.Request{Model: cfg.AI.DefaultModel, Stream: stream}, "!test:local", model)
-				if (err != nil) != sendFails || modelRequests.Load() != 1 || sent.Load() == 0 {
-					t.Fatalf("response=%+v err=%v requests=%d sent=%d", response, err, modelRequests.Load(), sent.Load())
-				}
-				history := service.contextManager.GetContext("!test:local")
-				if len(history) != 1 || history[0].Content != "hello" {
-					t.Fatalf("answer not saved exactly once: %+v", history)
-				}
-			})
-		}
 	}
 }
 

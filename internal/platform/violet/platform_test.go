@@ -194,7 +194,7 @@ func TestPlatform_DirectMessageAnswers(t *testing.T) {
 	if !strings.Contains(mentioned.Text, "讲个笑话") {
 		t.Fatalf("提及 token 未剥离: %q", mentioned.Text)
 	}
-	handler.waitForText(t, "今天天气如何") // !ai 前缀必须剥掉，否则模型会把自己当成命令解析器
+	handler.waitForText(t, "!ai 今天天气如何") // 共享命令入口负责解析，平台保留原文。
 }
 
 // TestPlatform_IgnoredInbound 验证自回声、非文本、缺发送者、被删消息与
@@ -215,11 +215,6 @@ func TestPlatform_IgnoredInbound(t *testing.T) {
 	fake.pushEvent(deleted)
 	anonymous := fake.pushMessage(testDirectRoom, "", "", "没有作者", now.Add(4*time.Second))
 	fake.pushEvent(anonymous)
-	otherCommand := fake.pushMessage(testDirectRoom, "user-1", "alice", "!task list", now.Add(5*time.Second))
-	fake.pushEvent(otherCommand)
-	bareCommand := fake.pushMessage(testDirectRoom, "user-1", "alice", "!ai", now.Add(6*time.Second))
-	fake.pushEvent(bareCommand)
-
 	waitForIdle(t, 400*time.Millisecond)
 	if got := handler.messages(); len(got) != 0 {
 		t.Fatalf("不该回答的消息被投递了: %+v", got)
@@ -243,6 +238,33 @@ func TestPlatform_GroupMentionGate(t *testing.T) {
 	waitForIdle(t, 300*time.Millisecond)
 	if got := len(handler.messages()); got != 1 {
 		t.Fatalf("群聊回答条数 = %d, want 1（未被 @ 的那条不该回答）", got)
+	}
+}
+
+func TestPlatform_GroupCommandNeedsExactLeadingTarget(t *testing.T) {
+	fake := newFakeViolet(t)
+	cfg := newTestConfig(fake.endpoint())
+	cfg.Platforms.Violet.DirectChatAutoReply = false
+	cfg.Platforms.Violet.GroupChatMentionReply = false
+	p := New(cfg)
+	p.setIdentity(fake.profile)
+	for _, tc := range []struct {
+		name, conversation, content, want string
+		accept                            bool
+	}{
+		{"self", testGroupRoom, "@(saber:bot-user-1) /task status @(other:other-id)", "/task status @(other:other-id)", true},
+		{"other_then_self_argument", testGroupRoom, "@(other:other-id) /task status @(saber:bot-user-1)", "", false},
+		{"bare_group", testGroupRoom, "/task list @(saber:bot-user-1)", "", false},
+		{"spoofed_name", testGroupRoom, "@(saber:other-id) /task list @(saber:bot-user-1)", "", false},
+		{"direct", testDirectRoom, "/task list", "/task list", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := inbound{conversationID: tc.conversation, message: messageDTO{ID: tc.name, Sender: userDTO{ID: "user"}, Type: "text", Content: tc.content}}
+			message, ok := p.normalizeMessage(context.Background(), item)
+			if ok != tc.accept || ok && message.Text != tc.want {
+				t.Fatalf("normalizeMessage = %q,%v，期望 %q,%v", message.Text, ok, tc.want, tc.accept)
+			}
+		})
 	}
 }
 
@@ -429,9 +451,8 @@ func ids(messages []messageDTO) []string {
 	return out
 }
 
-// TestPlatform_CommandPrefixOnlyAi 复述一次命令前缀规则在平台侧的落点：
-// !ai 前缀剥掉后交给模型，其它 !xxx 命令在 normalizeMessage 里被跳过。
-func TestPlatform_CommandPrefixOnlyAi(t *testing.T) {
+// TestPlatform_CommandPrefixesReachSharedHandler 验证平台原样传递新旧命令前缀。
+func TestPlatform_CommandPrefixesReachSharedHandler(t *testing.T) {
 	t.Parallel()
 	fake := newFakeViolet(t)
 	handler := newRecordingHandler()
@@ -440,10 +461,12 @@ func TestPlatform_CommandPrefixOnlyAi(t *testing.T) {
 	fake.deliver(t, testDirectRoom, "user-1", "alice", "!ai 帮我看这段日志", now)
 	fake.deliver(t, testDirectRoom, "user-1", "alice", "!ai-switch gpt", now.Add(time.Second))
 	fake.deliver(t, testDirectRoom, "user-1", "alice", "!schedule list", now.Add(2*time.Second))
-	handler.waitForText(t, "帮我看这段日志")
+	handler.waitForText(t, "!ai 帮我看这段日志")
+	handler.waitForText(t, "!ai-switch gpt")
+	handler.waitForText(t, "!schedule list")
 	waitForIdle(t, 400*time.Millisecond)
-	if got := handler.messages(); len(got) != 1 {
-		t.Fatalf("不支持的命令被当成提问回答了: %+v", texts(got))
+	if got := handler.messages(); len(got) != 3 {
+		t.Fatalf("命令没有全部交给共享入口: %+v", texts(got))
 	}
 }
 

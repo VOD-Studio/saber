@@ -4,14 +4,12 @@ package ai
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/sashabaranov/go-openai"
-	"maunium.net/go/mautrix/id"
 
 	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
@@ -30,27 +28,6 @@ import (
 type PromptProvider interface {
 	GetSystemPrompt(session chat.Session, basePrompt string) string
 }
-
-// ChatEntrypoint 是平台接入端注入的聊天命令入口。
-// 实现负责把该平台的原生命令规范化为 chat.Message，并携带 adapter 交给 Service 处理，
-// 因此 ai 核心无需知道具体平台的 adapter 构造方式。
-type ChatEntrypoint interface {
-	// HandleCommand 处理平台聊天命令，modelName 为空时使用默认模型。
-	HandleCommand(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string, modelName string) error
-	// NormalizeCommand 把平台命令文本（含 "!task list" 这样的前缀）规范化为通用消息，
-	// 并返回面向该会话的出站 adapter，供只读命令复用同一套会话作用域与回复能力。
-	NormalizeCommand(ctx context.Context, userID id.UserID, roomID id.RoomID, text string) (chat.Message, chat.Adapter, error)
-	// Session 解析一次入站事件所在的会话作用域（账号与线程隔离），
-	// 使上下文类命令无需自行拼平台的会话标识。
-	Session(ctx context.Context, roomID id.RoomID) chat.Session
-	// OutboundAdapter 返回该平台具备流式编辑与媒体解析的出站 adapter，用于交付 Agent 结果。
-	OutboundAdapter() chat.Adapter
-	// EventID 返回触发当前处理的原生事件标识；没有入站事件时返回空串。
-	EventID(ctx context.Context) string
-}
-
-// ErrNoChatEntrypoint 表示当前没有平台接入端接管聊天命令。
-var ErrNoChatEntrypoint = errors.New("未接入聊天平台，无法处理聊天命令")
 
 // Service 装配模型、通用聊天处理器以及旧 Matrix 命令兼容入口。
 type Service struct {
@@ -71,8 +48,6 @@ type Service struct {
 	mediaService *matrix.MediaService
 	// promptProvider 是提示词提供者（可选字段）。
 	promptProvider PromptProvider
-	// entry 是平台注入的聊天命令入口，负责把平台原生命令规范化为 chat.Message。
-	entry ChatEntrypoint
 	// chatProcessor 是所有聊天平台共享的消息处理链路。
 	chatProcessor *conversation.Processor
 	// toolExecutor 是工具执行器。
@@ -223,12 +198,6 @@ func (s *Service) IsEnabled() bool {
 // 提示词提供者用于获取房间的系统提示词（合并基础提示词和人格提示词）。
 func (s *Service) SetPromptProvider(pp PromptProvider) {
 	s.promptProvider = pp
-}
-
-// SetChatEntrypoint 注入平台聊天命令入口。未注入时平台命令会被拒绝，
-// 但聊天核心仍可经 HandleChat 由其他 adapter 直接调用。
-func (s *Service) SetChatEntrypoint(entry ChatEntrypoint) {
-	s.entry = entry
 }
 
 // GetModelRegistry 获取模型注册表。
@@ -435,62 +404,18 @@ func (s *Service) GenerateStreamingSimpleResponse(ctx context.Context, modelName
 	return resp.Content, nil
 }
 
-// handleAICommand 把平台聊天命令交给注入的入口处理，ai 自身不再构造平台 adapter。
-func (s *Service) handleAICommand(ctx context.Context, userID id.UserID, roomID id.RoomID, modelName string, args []string) error {
-	if s.entry == nil {
-		return ErrNoChatEntrypoint
-	}
-	return s.entry.HandleCommand(ctx, userID, roomID, args, modelName)
-}
-
-// NormalizeCommand 由注入的平台入口把命令文本规范化为通用消息与出站 adapter。
-func (s *Service) NormalizeCommand(ctx context.Context, userID id.UserID, roomID id.RoomID, text string) (chat.Message, chat.Adapter, error) {
-	if s.entry == nil {
-		return chat.Message{}, nil, ErrNoChatEntrypoint
-	}
-	return s.entry.NormalizeCommand(ctx, userID, roomID, text)
-}
-
-// eventID 返回触发当前处理的原生事件标识，未接入平台时为空。
-func (s *Service) eventID(ctx context.Context) string {
-	if s.entry == nil {
-		return ""
-	}
-	return s.entry.EventID(ctx)
-}
-
-// Session 由注入的平台入口解析会话作用域，未接入平台时返回 ErrNoChatEntrypoint。
-func (s *Service) Session(ctx context.Context, roomID id.RoomID) (chat.Session, error) {
-	if s.entry == nil {
-		return chat.Session{}, ErrNoChatEntrypoint
-	}
-	return s.entry.Session(ctx, roomID), nil
-}
-
-// replyCommand 经注入的平台入口把一次性回执发回命令所在会话。
-// text 使用 Markdown 书写，具体渲染（如 Matrix 的 HTML 富文本）由平台 adapter 完成；
-// 未接入平台时返回 ErrNoChatEntrypoint。
-func (s *Service) replyCommand(ctx context.Context, userID id.UserID, roomID id.RoomID, command, text string) error {
-	message, adapter, err := s.NormalizeCommand(ctx, userID, roomID, command)
-	if err != nil {
-		return err
-	}
-	_, err = adapter.Send(ctx, chat.Reply{Session: message.Session, ReplyTo: message.ID, Text: text})
-	return err
-}
-
 // HandleChat 是内存或其他聊天 adapter 可复用的统一消息入口。
 func (s *Service) HandleChat(ctx context.Context, message chat.Message, reply chat.Adapter) (agent.Result, error) {
-	return s.handleChat(ctx, message, reply, s.GetModelRegistry().GetDefault())
+	return s.handleChat(ctx, message, reply, s.GetModelRegistry().GetDefault(), true)
 }
 
 // HandleChatModel 与 HandleChat 相同，但由平台指定本轮使用的模型。
 // 供接入端在解析平台专属命令（例如 !ai-gpt-4）后复用同一条聊天链路。
 func (s *Service) HandleChatModel(ctx context.Context, message chat.Message, reply chat.Adapter, modelName string) (agent.Result, error) {
-	return s.handleChat(ctx, message, reply, modelName)
+	return s.handleChat(ctx, message, reply, modelName, true)
 }
 
-func (s *Service) handleChat(ctx context.Context, message chat.Message, reply chat.Adapter, modelName string) (agent.Result, error) {
+func (s *Service) handleChat(ctx context.Context, message chat.Message, reply chat.Adapter, modelName string, allowNaturalControl bool) (agent.Result, error) {
 	if !s.IsEnabled() {
 		return agent.Result{}, fmt.Errorf("AI功能未启用")
 	}
@@ -498,8 +423,10 @@ func (s *Service) handleChat(ctx context.Context, message chat.Message, reply ch
 		return agent.Result{}, err
 	}
 	if s.tasks != nil {
-		if action, taskID, ok := naturalTaskCommand(message.CommandText()); ok {
-			return agent.Result{}, s.replyTaskCommand(ctx, message, reply, action, taskID)
+		if allowNaturalControl {
+			if action, taskID, ok := naturalTaskCommand(message.CommandText()); ok {
+				return agent.Result{}, s.replyTaskCommand(ctx, message, reply, action, taskID)
+			}
 		}
 	} else {
 		if err := s.core.WaitForRateLimit(ctx); err != nil {

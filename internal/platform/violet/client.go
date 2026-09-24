@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"rua.plus/saber/internal/command"
 )
 
 // apiPrefix 是 Violet Bot API 的挂载路径。
@@ -98,6 +100,17 @@ func (c *client) profile(ctx context.Context) (botProfileDTO, error) {
 		return botProfileDTO{}, err
 	}
 	return out, nil
+}
+
+// publishCommands 整体替换当前 Bot Token 所属账号的目录；空数组撤销旧目录。
+func (c *client) publishCommands(ctx context.Context, commands []command.Descriptor) error {
+	if commands == nil {
+		commands = []command.Descriptor{}
+	}
+	return c.request(ctx, http.MethodPut, "/commands", nil, struct {
+		SchemaVersion int                  `json:"schema_version"`
+		Commands      []command.Descriptor `json:"commands"`
+	}{SchemaVersion: 1, Commands: commands}, "", nil)
 }
 
 // conversation 读取单个会话，主要用于拿 kind 判定私聊还是群聊。

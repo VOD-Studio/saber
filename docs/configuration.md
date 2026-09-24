@@ -43,7 +43,7 @@ ai:
 - `temperature` 的模型值覆盖全局值，显式 0 不等于省略。Responses 仅在思考等级为 `none` 时发送温度。
 - 思考等级：TUI 本轮选择 > 模型/别名 > 提供商 > AI 全局；省略或空字符串表示继承。全部为空时使用上游默认。等级由对应模型决定，Saber 原样传递，不自动降级。
 - `request_timeout_seconds` 是单次 HTTP 请求的总时限，包含等待与流式读取。模型可覆盖全局值。它独立于整个任务的时限。
-- `rate_limit_per_minute: 0` 表示不限制；`system_prompt` 对各接入通用，Matrix 还可合并人格提示。
+- `rate_limit_per_minute: 0` 表示不限制；`system_prompt` 对各接入通用，Matrix 与 Violet 可按完整会话键合并人格提示。
 - `ai.models` 可定义快捷别名，使用 `provider` 引用 `ai.providers` 中的名称；省略时沿用默认模型的提供商。提供商专用扩展放在 `extra` 下。
 
 完整 Podlink 模型清单见 [Responses 接入](responses.md)。
@@ -106,6 +106,10 @@ mcp:
   enabled: false
 execution:
   enabled: false
+commands:
+  admins: []
+  session_writers: []
+  legacy_persona_account: ""
 shutdown:
   timeout_seconds: 30
 ```
@@ -113,6 +117,26 @@ shutdown:
 令牌和任务数据库位于配置文件目录，令牌首次启动自动创建，权限为 `0600`。不同服务实例必须使用独立的数据目录和监听端口。
 
 MCP 默认关闭，不加载内置或外部服务器。开启后还必须通过 `execution` 配置当前身份的工作区、工具列表、`mcp_requirements` 和所需能力。只把 `mcp.enabled` 改为 true 不代表工具已授权；本地 TUI 也不自动获得权限。具体配置见 [执行与 MCP 授权](execution.md)。
+
+`commands.admins` 单独授权全局 `ai switch` 和共享人格 `new/del`；`commands.session_writers` 授权精确会话内的 `ai clear` 与人格 `set/clear`。两者均按 `platform`、`account`、完整用户 ID 匹配；会话写入还要求 `room` 和 `thread`（省略表示主会话），不接受通配符，也不继承 `execution.task_admins`。例如：
+
+```yaml
+commands:
+  admins:
+    - platform: violet
+      account: blog.example.com
+      users: ["<violet-user-uuid>"]
+  session_writers:
+    - platform: matrix
+      account: "@saber:matrix.org"
+      room: "!room:matrix.org"
+      users: ["@owner:matrix.org"]
+  legacy_persona_account: "" # 确认旧 room_personas 全属当前 Matrix bot 后填其完整用户 ID
+```
+
+接入端确认是仅有 bot 与发送者的私聊时，发送者可清理该私聊上下文或修改该私聊人格；群聊写入需要上面的精确授权。全局命令无论私聊还是群聊都需要 `admins`。
+
+旧 `persona.db` 的 `room_personas` 没有账号字段，Saber 不会把它自动复制到多个账号；归属未确认时保留旧记录并记录数量。`legacy_persona_account` 必须与当前已登录 Matrix bot 的用户 ID 完全相同才会关联。`ai clear` 会切换持久化任务续接代号；清理前任务仍可按编号查询，但新消息引用它们时从新上下文开始。
 
 ## Matrix 接入示例
 

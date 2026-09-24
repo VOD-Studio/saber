@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"rua.plus/saber/internal/chat"
+	"rua.plus/saber/internal/chat/memory"
 	"rua.plus/saber/internal/cli"
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/matrix"
@@ -51,6 +53,11 @@ func TestInitServices_RegistersVioletWithoutMatrix(t *testing.T) {
 	enabled := state.services.platforms.Enabled(cfg)
 	require.Len(t, enabled, 1)
 	require.Equal(t, "violet", enabled[0].Name())
+	adapter := memory.New("bot", chat.Capabilities{}, state.handleChat)
+	_, err := adapter.Receive(context.Background(), chat.Message{Session: chat.Session{Conversation: "room"}, ID: "source", SenderID: "user", Text: "/task list"})
+	require.NoError(t, err)
+	require.Len(t, adapter.Replies(), 1)
+	require.Contains(t, adapter.Replies()[0].Text, "暂无任务")
 }
 
 // TestInitServices_RejectsInvalidVioletConfig 验证配置问题在启动阶段就报出来，

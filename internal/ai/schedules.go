@@ -6,12 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sashabaranov/go-openai"
-	"maunium.net/go/mautrix/id"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/task"
 )
@@ -37,40 +35,6 @@ func (s *Service) authorizeSchedule(identity chat.Identity, dir string) error {
 		return errors.New("计划工作目录与当前授权不同，计划暂停")
 	}
 	return nil
-}
-
-type scheduleCommand struct{ service *Service }
-
-func (c *scheduleCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
-	s := c.service
-	msg, adapter, err := s.NormalizeCommand(ctx, userID, roomID, "!schedule "+strings.Join(args, " "))
-	if err != nil {
-		return err
-	}
-	in := scheduleInput{}
-	if len(args) == 1 && args[0] == "list" {
-		in.Action = "list"
-	}
-	if len(args) == 2 && (args[0] == "status" || args[0] == "pause" || args[0] == "delete") {
-		if n, err := strconv.ParseInt(strings.TrimPrefix(args[1], "#"), 10, 64); err == nil && n > 0 {
-			in.Action, in.ID = args[0], n
-		}
-	}
-	if len(args) >= 4 && (args[0] == "once" || args[0] == "every" || args[0] == "weekdays") {
-		in.Action, in.Goal = "create", strings.Join(args[3:], " ")
-		in.Spec = task.ScheduleSpec{Kind: args[0], Timezone: args[2]}
-		if args[0] == "every" {
-			in.Spec.Every = args[1]
-		} else {
-			in.Spec.At = args[1]
-		}
-	}
-	text, err := s.scheduleOperation(ctx, msg, in)
-	if err != nil {
-		text = "计划操作失败：" + err.Error()
-	}
-	_, err = adapter.Send(ctx, chat.Reply{Session: msg.Session, ReplyTo: msg.ID, Text: taskText(text)})
-	return err
 }
 
 func (s *Service) scheduleOperation(ctx context.Context, msg chat.Message, in scheduleInput) (string, error) {

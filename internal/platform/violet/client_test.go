@@ -2,6 +2,7 @@ package violetplatform
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -9,7 +10,48 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"rua.plus/saber/internal/command"
 )
+
+func TestClient_PublishCommandsSnapshot(t *testing.T) {
+	var snapshots []struct {
+		SchemaVersion int                  `json:"schema_version"`
+		Commands      []command.Descriptor `json:"commands"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/chat/bot/commands" || r.Header.Get("Authorization") != "Bearer "+testToken {
+			t.Errorf("目录请求 = %s %s %q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var body struct {
+			SchemaVersion int                  `json:"schema_version"`
+			Commands      []command.Descriptor `json:"commands"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		snapshots = append(snapshots, body)
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte(`{"data":{}}`)); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	c := newClient(server.URL, testToken, 5)
+	if err := c.publishCommands(context.Background(), []command.Descriptor{{ID: "task.status", Path: []string{"task", "status"}, Description: "查看任务状态", Scope: "conversation"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.publishCommands(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshots) != 2 || snapshots[0].SchemaVersion != 1 || len(snapshots[0].Commands) != 1 || snapshots[1].Commands == nil || len(snapshots[1].Commands) != 0 {
+		t.Fatalf("目录快照 = %+v", snapshots)
+	}
+}
 
 // newTestClient 构造指向假服务端的客户端。
 func newTestClient(fake *fakeViolet) *client {

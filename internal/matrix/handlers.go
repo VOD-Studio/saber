@@ -45,6 +45,8 @@ type CommandService struct {
 	mu sync.RWMutex
 	// commands 已注册的命令，键为命令名称（小写）。
 	commands map[string]CommandInfo
+	// dispatch 在旧 Matrix 命令表之前处理通用文本命令。
+	dispatch func(context.Context, id.UserID, id.RoomID, string) (bool, error)
 	// client Matrix 客户端，用于发送消息。
 	client *mautrix.Client
 	// botID 机器人的 Matrix 用户 ID。
@@ -61,6 +63,11 @@ type CommandService struct {
 	buildInfo *BuildInfo
 	// cryptoService 端到端加密服务，为 nil 时禁用 E2EE。
 	cryptoService CryptoService
+}
+
+// SetCommandDispatcher 接入共享命令注册表，保留旧注册表供独立调用方兼容。
+func (s *CommandService) SetCommandDispatcher(dispatch func(context.Context, id.UserID, id.RoomID, string) (bool, error)) {
+	s.dispatch = dispatch
 }
 
 // NewCommandService 创建一个新的命令服务。
@@ -185,6 +192,11 @@ func (s *CommandService) isDirectChat(ctx context.Context, roomID id.RoomID) boo
 	}
 
 	return joinedCount == 2
+}
+
+// IsDirectChat 只在接入端需要授权私聊写入命令时查询当前成员状态。
+func (s *CommandService) IsDirectChat(ctx context.Context, roomID id.RoomID) bool {
+	return s.isDirectChat(ctx, roomID)
 }
 
 // isReplyToBot 检查回复的目标消息是否是 bot 发送的。
@@ -508,8 +520,20 @@ func (s *CommandService) HandleEvent(ctx context.Context, evt *event.Event) erro
 
 	// 解析命令
 	commandBody := content.Body
-	if clean := event.TrimReplyFallbackText(content.Body); strings.HasPrefix(strings.TrimSpace(clean), "!") {
+	if clean := event.TrimReplyFallbackText(content.Body); strings.HasPrefix(clean, "!") || strings.HasPrefix(clean, "/") {
 		commandBody = clean
+	}
+	if s.dispatch != nil {
+		dispatchBody := commandBody
+		if rest, ok := strings.CutPrefix(dispatchBody, string(s.botID)); ok && len(rest) > 1 && (rest[0] == ' ' || rest[0] == '\t') {
+			trimmed := strings.TrimLeft(rest, " \t")
+			if strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "!") {
+				dispatchBody = trimmed
+			}
+		}
+		if handled, err := s.dispatch(ctx, sender, roomID, dispatchBody); handled || err != nil {
+			return err
+		}
 	}
 	parsed := s.ParseCommand(commandBody)
 

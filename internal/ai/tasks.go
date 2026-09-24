@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/sashabaranov/go-openai"
-	"maunium.net/go/mautrix/id"
 	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
@@ -95,10 +94,6 @@ func (s *Service) EnableTasks(path string) error {
 	}
 	s.tasks, s.taskDir = manager, dir
 	close(ready)
-	if s.matrixService != nil {
-		s.matrixService.RegisterCommandWithDesc("task", "后台任务：run <内容> | list | status <ID> | cancel <ID> | logs <ID>", &taskCommand{service: s})
-		s.matrixService.RegisterCommandWithDesc("schedule", "定时计划：once/every/weekdays <时间> <时区> <目标> | list | status/pause/delete <ID>", &scheduleCommand{service: s})
-	}
 	return nil
 }
 
@@ -209,32 +204,6 @@ func (s *Service) submitTask(ctx context.Context, message chat.Message, req agen
 	return err
 }
 
-type taskCommand struct{ service *Service }
-
-func (c *taskCommand) Handle(ctx context.Context, userID id.UserID, roomID id.RoomID, args []string) error {
-	s := c.service
-	if len(args) > 1 && args[0] == "run" {
-		return s.handleAICommand(ctx, userID, roomID, s.GetModelRegistry().GetDefault(), args[1:])
-	}
-	message, adapter, err := s.NormalizeCommand(ctx, userID, roomID, "!task "+strings.Join(args, " "))
-	if err != nil {
-		return err
-	}
-	action := ""
-	var taskID int64
-	if len(args) == 1 && args[0] == "list" {
-		action = "list"
-	}
-	if len(args) == 2 && (args[0] == "status" || args[0] == "cancel" || args[0] == "logs") {
-		var err error
-		taskID, err = strconv.ParseInt(strings.TrimPrefix(args[1], "#"), 10, 64)
-		if err == nil && taskID > 0 {
-			action = args[0]
-		}
-	}
-	return s.replyTaskCommand(ctx, message, adapter, action, taskID)
-}
-
 var naturalTaskID = regexp.MustCompile(`^(查看|查询|取消)任务\s*#?([0-9]+)\s*(?:的状态)?[。！!？?]?$`)
 
 func naturalTaskCommand(text string) (string, int64, bool) {
@@ -270,7 +239,7 @@ func (s *Service) replyTaskCommand(ctx context.Context, message chat.Message, re
 	return sendErr
 }
 
-func (s *Service) taskOperation(ctx context.Context, identity chat.Identity, action string, taskID int64) (string, error) {
+func (s *Service) taskOperation(ctx context.Context, identity chat.Identity, action string, taskID int64, sourceID ...string) (string, error) {
 	if s.tasks == nil {
 		return "", errors.New("任务服务未启用")
 	}
@@ -312,7 +281,10 @@ func (s *Service) taskOperation(ctx context.Context, identity chat.Identity, act
 		}
 		return text, nil
 	case "logs":
-		return s.sendTaskLogs(ctx, identity, taskID)
+		if len(sourceID) > 0 {
+			return s.sendTaskLogs(ctx, identity, taskID, sourceID[0])
+		}
+		return s.sendTaskLogs(ctx, identity, taskID, "")
 	case "cancel":
 		t, err := s.tasks.Cancel(ctx, identity, taskID)
 		if err != nil {

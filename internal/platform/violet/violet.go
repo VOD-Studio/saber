@@ -1,9 +1,7 @@
 // Package violetplatform 是 Violet 博客平台的聊天接入端：以 Bot API 的 bot 虚拟用户身份
 // 订阅站内聊天事件，把消息规范化为 chat.Message 交给共享聊天链路，并实现出站 chat.Adapter。
 //
-// 与 Matrix 接入端的差别集中在三处：入站是 SSE 事件流而非 sync 循环、断线恢复靠消息历史
-// 而不是事件补发、以及不接管 ai 的聊天命令入口（!ai/!task 依赖单例且带 Matrix 类型签名的
-// ChatEntrypoint，因此 violet 只走「私聊直答 + 群聊被 @ 触发」这条最小链路）。
+// 入站使用 SSE；断线恢复靠消息历史补拉。命令交给共享分发器，平台只确认群聊目标。
 package violetplatform
 
 import (
@@ -20,6 +18,7 @@ import (
 	"time"
 
 	"rua.plus/saber/internal/chat"
+	"rua.plus/saber/internal/command"
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/platform"
 )
@@ -40,7 +39,6 @@ const (
 	inboundQueueSize   = 64
 	backfillPageSize   = 50
 	maxBackfillPages   = 2
-	aiCommandPrefix    = "!ai"
 	inboundMessageType = "text"
 )
 
@@ -63,6 +61,7 @@ type Platform struct {
 	throttle *editThrottle
 	states   *conversationStates
 	seen     *seenMessages
+	commands []command.Descriptor
 
 	// handler 是共享聊天链路，由 Start 注入。
 	handler chat.Handler
@@ -79,6 +78,11 @@ type Platform struct {
 
 	identityMu sync.RWMutex
 	identity   botProfileDTO
+}
+
+// SetCommands 设置启动与重连时发布的完整目录快照。
+func (p *Platform) SetCommands(commands []command.Descriptor) {
+	p.commands = append([]command.Descriptor(nil), commands...)
 }
 
 // New 绑定 Violet 配置。构造只准备客户端与 adapter，不发起任何请求，
@@ -199,6 +203,9 @@ func (p *Platform) supervise(ctx context.Context) {
 func (p *Platform) connectOnce(ctx context.Context) (bool, error) {
 	if err := p.ensureIdentity(ctx); err != nil {
 		return false, err
+	}
+	if err := p.api.publishCommands(ctx, p.commands); err != nil {
+		slog.Warn("violet 命令目录同步失败，聊天继续可用", "error", err)
 	}
 	firstConnect := !p.connected.Swap(true)
 	if firstConnect {
@@ -402,19 +409,22 @@ func (p *Platform) normalizeMessage(ctx context.Context, item inbound) (chat.Mes
 		return chat.Message{}, false
 	}
 
-	// 提及判定看原文（token 还在），交给模型的正文看剥离后。
+	// 提及判定看原文（token 还在），命令额外要求群聊开头精确寻址本 bot。
 	mentionsSelf := p.mentionsSelf(message.Content)
-	if allowed, reason := p.shouldAnswer(ctx, item.conversationID, mentionsSelf); !allowed {
-		slog.Debug("violet 消息未触发回复", "conversation", item.conversationID, "message", message.ID, "reason", reason)
-		return chat.Message{}, false
-	}
 	if mentionResidue(message.Content) == "" {
 		slog.Debug("violet 消息只有点名没有内容，跳过", "message", message.ID)
 		return chat.Message{}, false
 	}
-	text, ok := commandText(stripMentions(message.Content))
-	if !ok {
-		slog.Debug("violet 侧不支持该命令，已跳过", "message", message.ID)
+	text := stripMentions(message.Content)
+	if body, isCommand, addressed := addressedCommand(message.Content, botUserID); isCommand {
+		kind, _ := p.conversationKind(ctx, item.conversationID)
+		if kind != kindDirect && !addressed {
+			slog.Debug("violet 群聊命令未在开头寻址本 bot，已跳过", "message", message.ID)
+			return chat.Message{}, false
+		}
+		text = body
+	} else if allowed, reason := p.shouldAnswer(ctx, item.conversationID, mentionsSelf); !allowed {
+		slog.Debug("violet 消息未触发回复", "conversation", item.conversationID, "message", message.ID, "reason", reason)
 		return chat.Message{}, false
 	}
 	if text == "" {
@@ -434,6 +444,7 @@ func (p *Platform) normalizeMessage(ctx context.Context, item inbound) (chat.Mes
 		},
 		ID:       message.ID,
 		SenderID: message.Sender.ID,
+		Direct:   p.states.get(item.conversationID).storedKind() == kindDirect,
 		Text:     text,
 		ReplyTo:  replyTo,
 	}, true
@@ -571,33 +582,6 @@ func (p *Platform) pullSince(ctx context.Context, conversationID string, since t
 	}
 	slog.Warn("violet 断线期间消息过多，仅补拉最近部分", "conversation", conversationID, "pages", maxBackfillPages)
 	return collected
-}
-
-// commandText 处理命令前缀。Violet 没有聊天命令入口，只认 !ai：
-// 其余 !xxx 命令（!task、!schedule、上下文命令等）在本平台无落点，跳过而不是
-// 把命令原文当问题丢给模型。
-func commandText(content string) (string, bool) {
-	trimmed := strings.TrimSpace(content)
-	switch {
-	case trimmed == "":
-		return "", true
-	case strings.HasPrefix(trimmed, aiCommandPrefix):
-		rest := trimmed[len(aiCommandPrefix):]
-		// 前缀后必须是空白才算命令：!ai-switch 这类别名命令在 violet 没有落点，
-		// 把 "-switch gpt" 当正文回答只会答非所问。
-		if rest != "" && !strings.HasPrefix(rest, " ") && !strings.HasPrefix(rest, "\t") {
-			return "", false
-		}
-		body := strings.TrimSpace(rest)
-		if body == "" {
-			return "", false // 光秃秃的 !ai 没有提问内容
-		}
-		return body, true
-	case strings.HasPrefix(trimmed, "!"):
-		return "", false
-	default:
-		return trimmed, true
-	}
 }
 
 // botUserID 返回本 bot 的虚拟用户 ID，未取到身份时为空串。

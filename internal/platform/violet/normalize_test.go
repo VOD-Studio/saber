@@ -108,28 +108,25 @@ func TestParseTimestamp(t *testing.T) {
 	}
 }
 
-// TestCommandText 验证只认 !ai 前缀，其它 !xxx 命令不在 violet 上冒充可用能力。
-func TestCommandText(t *testing.T) {
+// TestAddressedCommand 验证群聊命令只接受正文开头精确寻址的 bot 用户 ID。
+func TestAddressedCommand(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name, in, want string
-		accept         bool
+		name, in, want     string
+		command, addressed bool
 	}{
-		{name: "普通提问", in: "帮我看看这段代码", want: "帮我看看这段代码", accept: true},
-		{name: "带 ai 前缀", in: "!ai 帮我看看这段代码", want: "帮我看看这段代码", accept: true},
-		{name: "前后空白", in: "  你好  ", want: "你好", accept: true},
-		{name: "光秃秃的 ai", in: "!ai", accept: false},
-		{name: "拼接命令", in: "!ai!task list", accept: false},
-		{name: "任务命令", in: "!task list", accept: false},
-		{name: "模型命令", in: "!ai-switch gpt", accept: false},
+		{name: "私聊裸命令", in: "/task list", want: "/task list", command: true},
+		{name: "精确寻址", in: "@(saber:bot-id) /task status @(other:other-id)", want: "/task status @(other:other-id)", command: true, addressed: true},
+		{name: "提及后的 NBSP", in: "@(saber:bot-id)\u00a0/task list", want: "/task list", command: true, addressed: true},
+		{name: "其他 bot", in: "@(other:other-id) /task list @(saber:bot-id)", want: "/task list @(saber:bot-id)", command: true},
+		{name: "用户名冒充", in: "@(saber:other-id) !ai hello", want: "!ai hello", command: true},
+		{name: "正文斜杠", in: "看一下 /task list"},
+		{name: "转义斜杠", in: "//task list"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, accept := commandText(tc.in)
-			if accept != tc.accept {
-				t.Fatalf("commandText(%q) accept = %v, want %v", tc.in, accept, tc.accept)
-			}
-			if accept && got != tc.want {
-				t.Fatalf("commandText(%q) = %q, want %q", tc.in, got, tc.want)
+			got, command, addressed := addressedCommand(tc.in, "bot-id")
+			if command != tc.command || addressed != tc.addressed || got != tc.want {
+				t.Fatalf("addressedCommand(%q) = %q,%v,%v, want %q,%v,%v", tc.in, got, command, addressed, tc.want, tc.command, tc.addressed)
 			}
 		})
 	}

@@ -11,9 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 新增平台无关的聊天命令注册表，统一解析 `!` 与 `/` 前缀、别名、权限、平台能力和目录描述；命令一经识别不会进入模型
 - 人格绑定使用完整会话键；旧 Matrix 房间绑定保留待核查，明确确认所属账号后才关联到该账号
+- Matrix 与 Violet 共用 `ping/help/version`、AI、任务、计划、MCP 和人格命令执行；Violet 启动与重连时使用 Bot Token 发布协议版本 1 的命令目录，旧服务不支持目录接口时聊天继续运行
+- 新增精确配置的命令管理员和会话写入授权；模型切换、共享人格写入及上下文清理按完整平台身份检查，重复事件重发持久化回执而不重复执行副作用
 
 ### Changed
 
+- 删除仅供 Matrix 使用的 `ai.ChatEntrypoint` 单例及旧 AI 子命令路由；Matrix 自动回复由接入端显式提供消息来源和 adapter，任务日志下载由命令入口传递事件 ID
 - `ai clear/context` 覆盖持久化任务续接代号，清理后的新轮次不会恢复旧任务链，旧任务和日志仍可查询
 - Matrix 启用开关从 `matrix.enabled` 移至 `platforms.matrix.enabled`，与 Violet 平行；账号及媒体等明细仍在顶层 `matrix`，旧开关需手动迁移
 

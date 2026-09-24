@@ -154,7 +154,7 @@ func TestTaskAutonomousDockerWorkflow(t *testing.T) {
 	require.NoError(t, service.EnableTasks(filepath.Join(t.TempDir(), "tasks.db")))
 	ctx := matrix.WithMessageRelations(matrix.WithEventID(context.Background(), "$source"), "", "$thread")
 	// 一个群聊请求驱动多轮操作，第一次命令失败后继续修正并交付。
-	require.NoError(t, service.handleAICommand(ctx, "@alice:test", "!room:test", service.GetModelRegistry().GetDefault(), []string{"生成一个文件并交付"}))
+	require.NoError(t, runMatrixChat(service, ctx, "@alice:test", "!room:test", service.GetModelRegistry().GetDefault(), "生成一个文件并交付"))
 	session := chat.Session{Platform: "matrix", Account: "@bot:test", Conversation: "!room:test", Thread: "$thread"}
 	require.Eventually(t, func() bool {
 		tasks, err := service.tasks.List(context.Background(), session)
@@ -178,7 +178,7 @@ func TestTaskAutonomousDockerWorkflow(t *testing.T) {
 	require.Error(t, err)
 	// !task cancel 终止正在执行的容器，而不只是停止聊天端等待。
 	cancelCtx := matrix.WithEventID(context.Background(), "$cancel-source")
-	require.NoError(t, service.handleAICommand(cancelCtx, "@alice:test", "!room:test", service.GetModelRegistry().GetDefault(), []string{"取消测试"}))
+	require.NoError(t, runMatrixChat(service, cancelCtx, "@alice:test", "!room:test", service.GetModelRegistry().GetDefault(), "取消测试"))
 	canonicalLogs, err := filepath.EvalSymlinks(logs)
 	require.NoError(t, err)
 	owner := fmt.Sprintf("%x", sha256.Sum256([]byte(canonicalLogs)))

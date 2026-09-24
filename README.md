@@ -179,19 +179,26 @@ make docker-push DOCKER_REGISTRY=your-registry.com/
 | `!ai clear`            | 清除对话上下文              |
 | `!ai context`          | 显示上下文信息              |
 | `!ai models`           | 列出所有可用模型            |
-| `!ai switch <id>`      | 切换默认模型                |
+| `!ai switch <id>`      | 切换全局默认模型（需命令管理员） |
 | `!ai current`          | 显示当前默认模型            |
+| `!task run <goal>`      | 创建后台任务                |
+| `!task list/status/cancel` | 查询或控制当前会话任务   |
+| `!task logs <id>`      | 下载获授权任务的完整日志    |
+| `!schedule once/every/weekdays` | 创建定时计划       |
+| `!schedule list/status/pause/delete` | 查询或管理计划 |
 | `!mcp list`            | 列出所有 MCP 服务器和工具   |
 | `!meme <keyword>`      | 搜索并发送 GIF/Sticker/Meme |
 | `!meme --gif <kw>`     | 搜索并发送 GIF 动图         |
 | `!meme --sticker <kw>` | 搜索并发送 Sticker 贴纸     |
 | `!meme --meme <kw>`    | 搜索并发送 Meme 图片        |
 | `!persona list`        | 列出所有可用人格            |
-| `!persona set <id>`    | 设置当前房间的人格          |
-| `!persona clear`       | 清除当前房间的人格设置      |
-| `!persona status`      | 显示当前房间的人格状态      |
-| `!persona new ...`     | 创建新的自定义人格          |
-| `!persona del <id>`    | 删除自定义人格              |
+| `!persona set <id>`    | 设置当前会话人格            |
+| `!persona clear`       | 清除当前会话人格            |
+| `!persona status`      | 显示当前会话人格            |
+| `!persona new ...`     | 创建共享人格（需命令管理员） |
+| `!persona del <id>`    | 删除共享人格（需命令管理员） |
+
+Matrix 继续推荐 `!` 前缀；Violet 使用同一路径的 `/` 前缀，例如 `/task list`。群聊命令由 Violet 在正文开头插入目标 bot 提及：`@(saber:<bot-user-id>) /task list`。`/ai <问题>`保留原文，问题恰好以 `clear` 等命令词开头时写 `/ai -- <问题>`。未知命令和参数错误会直接回复，不会交给模型。全局及会话写入权限见 [配置](docs/configuration.md)。Violet 暂不发布需要文件或图片发送能力的 `task logs`、`meme`。
 
 ### 私聊
 
@@ -642,8 +649,10 @@ saber/
   internal/
     chat/                          # 通用消息、会话、回复与展示能力契约
       memory/                      # 无网络聊天 adapter
+    command/                       # 统一命令注册、解析、执行与目录
     platform/                      # 可插拔平台接入端接口与注册表
-      matrix/                      # Matrix 平台接入端：聊天命令入口、任务投递与主动聊天房间端口
+      matrix/                      # Matrix 平台接入端：消息适配与任务投递
+      violet/                      # Violet Bot API、SSE 与命令目录发布
     conversation/                  # 平台无关的历史、串行调度与回复交付
     task/                          # SQLite 任务与定时计划、执行日志、目录互斥和结果重试
     execution/                     # 容器命令/文件工具、权限检查、日志与交付文件
@@ -652,6 +661,7 @@ saber/
       types.go                     # 模型与工具接口、运行事件和每轮记录
     bot/
       bot.go                       # 机器人初始化和生命周期
+      chat_commands.go             # 通用命令装配与平台能力
       errors.go                    # 错误定义
     server/                        # 本机会话接口、令牌认证和持久化事件流
     tui/                           # Charm 聊天界面、模型选择、断线续读
@@ -659,6 +669,7 @@ saber/
       flags.go                     # 命令行标志解析
     config/
       config.go                    # 配置加载和验证
+      commands.go                  # 命令管理员与会话写入权限
       provider.go                  # 提供商配置和模型 ID 解析
     context/
       keys.go                      # 上下文键定义
@@ -693,11 +704,11 @@ saber/
       stream_tool_handler.go       # 模型增量拼接
       retry_handler.go             # 重试逻辑和退避
       circuit_breaker.go           # 熔断器
-    ai/                            # 应用装配与旧 Matrix 命令兼容层
+    ai/                            # 模型、任务与通用聊天处理
       service.go                   # 装配通用聊天处理器
-      agent.go                     # 模型/MCP 装配与旧回复入口兼容
+      chat_commands.go             # AI、任务及计划的通用命令处理
+      agent.go                     # 模型/MCP 装配与 Agent Runtime
       model_compat.go              # 旧模型名称兼容，不包含重复实现
-      commands.go                  # Matrix AI 命令路由
       context_manager.go           # Matrix 历史命令适配通用存储
       proactive.go                 # 主动聊天管理器
       proactive_rooms.go           # 主动聊天的平台房间端口与会话降级
@@ -723,11 +734,13 @@ saber/
         http.go                    # HTTP MCP 服务器
     meme/
       service.go                   # Meme 服务（Klipy API）
+      chat_command.go              # 通用图片命令处理
       command.go                   # !meme 命令处理
     persona/
       types.go                     # Persona 结构体定义
       builtin.go                   # 内置人格定义
-      service.go                   # 人格服务（CRUD、房间映射）
+      service.go                   # 人格服务（CRUD、完整会话键映射）
+      chat_commands.go             # 通用人格命令处理
       commands.go                  # !persona 命令处理
 ```
 

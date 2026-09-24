@@ -104,8 +104,7 @@ func TestTasks_MatrixReceiptIsolationCommandsAndRetry(t *testing.T) {
 	require.NoError(t, service.EnableTasks(path))
 	require.Error(t, service.EnableTasks(path))
 	wireMatrixPlatform(t, service, commands, nil)
-	commands.RegisterCommand("ai", NewAICommand(service))
-	commands.SetReplyAIHandler(NewAICommand(service))
+	commands.SetReplyAIHandler(matrix.NewChatAdapter(commands, nil, cfg.Matrix.Media, false, service.HandleChat))
 	eventFor := func(eventID, sender, body string) *event.Event {
 		return &event.Event{Type: event.EventMessage, ID: id.EventID(eventID), Sender: id.UserID(sender), RoomID: "!room:test", Content: event.Content{Parsed: &event.MessageEventContent{MsgType: event.MsgText, Body: body, RelatesTo: &event.RelatesTo{Type: event.RelThread, EventID: "$thread"}}}}
 	}
@@ -184,7 +183,7 @@ func TestTasks_MatrixReceiptIsolationCommandsAndRetry(t *testing.T) {
 	require.Contains(t, status, "completed")
 	require.Contains(t, status, "https://matrix.to/#/!room:test/$alice")
 	followCtx := matrix.WithMessageRelations(matrix.WithEventID(context.Background(), "$follow"), "$alice", "$thread")
-	require.NoError(t, service2.handleAICommand(followCtx, "@alice:test", "!room:test", service2.GetModelRegistry().GetDefault(), []string{"再检查一下"}))
+	require.NoError(t, runMatrixChat(service2, followCtx, "@alice:test", "!room:test", service2.GetModelRegistry().GetDefault(), "再检查一下"))
 	release <- struct{}{}
 	require.Eventually(t, func() bool {
 		ts, err := service2.tasks.List(context.Background(), session)
@@ -277,9 +276,10 @@ func TestTasks_MatrixReplyKeepsQuoteUnlessContinuingTask(t *testing.T) {
 			defer service.Stop()
 			require.NoError(t, service.EnableTasks(filepath.Join(t.TempDir(), "tasks.db")))
 			wireMatrixPlatform(t, service, commands, nil)
-			commands.SetReplyAIHandler(NewAICommand(service))
+			chatAdapter := matrix.NewChatAdapter(commands, nil, cfg.Matrix.Media, false, service.HandleChat)
+			commands.SetReplyAIHandler(chatAdapter)
 			if direct {
-				commands.SetDirectChatAIHandler(NewAICommand(service))
+				commands.SetDirectChatAIHandler(chatAdapter)
 			}
 			session := chat.Session{Platform: "matrix", Account: "@bot:test", Conversation: "!room:test"}
 			for _, replyTo := range []string{"$proactive", "$help", "$legacy", "$known"} {

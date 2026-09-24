@@ -4,7 +4,32 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"rua.plus/saber/internal/command"
 )
+
+// addressedCommand 只信任正文开头 token 中的完整用户 ID，参数中的提及不参与寻址。
+func addressedCommand(content, botUserID string) (body string, commandLike, addressed bool) {
+	if _, _, _, ok := command.Parse(content); ok {
+		return content, true, false
+	}
+	indices := mentionTokenPattern.FindStringSubmatchIndex(content)
+	if len(indices) < 6 || indices[0] != 0 {
+		return "", false, false
+	}
+	rest := content[indices[1]:]
+	gap, _ := utf8.DecodeRuneInString(rest)
+	if rest == "" || !unicode.IsSpace(gap) {
+		return "", false, false
+	}
+	rest = strings.TrimLeftFunc(rest, unicode.IsSpace)
+	if _, _, _, ok := command.Parse(rest); !ok {
+		return "", false, false
+	}
+	return rest, true, content[indices[4]:indices[5]] == botUserID
+}
 
 // mentionTokenPattern 匹配 Violet 的提及占位符 @(username:uuid)。
 //

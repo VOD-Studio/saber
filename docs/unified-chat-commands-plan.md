@@ -1,12 +1,12 @@
 # 通用聊天命令与 Violet 接入方案
 
-状态：待实施。本文记录 Saber 侧的命令定义、执行和目录发布约定；Violet 侧的接口、存储与聊天框交互见其仓库 `docs/prd/0030-saber-slash-commands.md`。两份文档共同定义跨仓库协议，实施时须同步修改。
+状态：通用文本命令已实施；Violet 媒体能力与真实平台验收待完成。本文记录 Saber 侧的命令定义、执行和目录发布约定；Violet 侧的接口、存储与聊天框交互见其仓库 `docs/prd/0030-saber-slash-commands.md`。两份文档共同定义跨仓库协议。
 
 ## 目标与现状
 
 目标是在 Matrix 和 Violet 使用同一份命令定义与处理逻辑。Matrix 保留现有 `!` 用法；Violet 以 `/` 作为菜单和输入用法。命令仍作为普通聊天消息收发，回复由消息来源平台的 adapter 投递。
 
-当前 `ai.ChatEntrypoint` 是单例，方法签名使用 mautrix 用户和房间类型；Matrix 注册 `!ai`、`!task` 等命令，Violet 则只把普通提问和 `!ai <正文>` 交给共享聊天链路，跳过其他 `!` 命令。`!ai clear/context` 只作用于同步聊天历史，持久化任务的续接上下文仍独立存在。人格按 Matrix 房间 ID 绑定，任务日志和 meme 使用 Matrix 文件上传。通用化必须分别处理这些实际依赖，不能仅放开 Violet 的命令前缀过滤。
+实施前 `ai.ChatEntrypoint` 是单例，方法签名使用 mautrix 用户和房间类型；Matrix 注册 `!ai`、`!task` 等命令，Violet 则只把普通提问和 `!ai <正文>` 交给共享聊天链路，跳过其他 `!` 命令。`!ai clear/context` 只作用于同步聊天历史，持久化任务的续接上下文仍独立存在。人格按 Matrix 房间 ID 绑定，任务日志和 meme 使用 Matrix 文件上传。通用化分别处理了这些实际依赖。
 
 ## 命令接口
 
@@ -97,3 +97,9 @@ Violet 侧查询端点为 `GET /api/v1/chat/conversations/{conversationId}/bot-c
 5. 补齐 Violet 文件和图片能力后启用 `task logs`、`meme`；目录与实际可执行能力保持一致。
 
 每个可独立验证的功能点按仓库规范单独提交并更新 `CHANGELOG.md`。Saber 检查 `make fmt-check lint test-cover-check build` 和 `make test`，所有 Go 命令带 `goolm` 标签。模拟平台与 `httptest` 只证明本地链路；真实 Matrix、Violet、模型、重连和多 bot 投递需要单独验收。
+
+### 实施记录（2026-09-24）
+
+- 已完成步骤 1–4 的文本命令链路：Saber 共用注册表、完整会话授权和持久化命令回执；Violet 已保存目录、按目标投递并提供聊天框补全。Violet 用户提及后的 NBSP 与普通空格均可作为命令前导分隔。
+- `task logs` 与 `meme` 在 Violet 手输时返回平台不支持，目录不发布；Violet Bot API 仍无文件或图片上传发送通道，步骤 5 及对应真实媒体验收待该接口完成。
+- 本地验证：Saber `make fmt-check lint test-cover-check build test`（覆盖率 77.6%）；Violet `make api-test api-lint api-build`、`make web-lint web-typecheck`、关闭 Node 26 实验性 Web Storage 后的 `make web-test web-build`（1214 通过、1 跳过），以及 Playwright 聊天命令和乐观消息场景（3 通过）。Violet PostgreSQL 集成测试因未配置 `BLOG_TEST_PG_DSN` 跳过；真实平台、模型与多 bot 联调尚未执行。

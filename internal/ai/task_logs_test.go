@@ -18,7 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
-	"maunium.net/go/mautrix/id"
 	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
@@ -117,7 +116,7 @@ func TestTaskLogs_FailedTimedOutCancelledAndInterrupted(t *testing.T) {
 			_, err = s.taskOperation(ctx, identity, "logs", source.ID)
 			require.Error(t, err)
 			identity.SenderID = "alice"
-			reply, err := s.taskOperation(matrix.WithEventID(ctx, "$download-"+id.EventID(status)), identity, "logs", source.ID)
+			reply, err := s.taskOperation(ctx, identity, "logs", source.ID, "$download-"+status)
 			require.NoError(t, err)
 			require.Contains(t, reply, "1 份命令日志")
 			mu.Lock()
