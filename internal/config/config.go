@@ -18,6 +18,7 @@ type Config struct {
 	Agent     AgentConfig      `yaml:"agent"`
 	Server    HTTPServerConfig `yaml:"server"`
 	Execution ExecutionConfig  `yaml:"execution"`
+	Commands  CommandConfig    `yaml:"commands"`
 	Matrix    MatrixConfig     `yaml:"matrix"`
 	Platforms PlatformsConfig  `yaml:"platforms"`
 	AI        AIConfig         `yaml:"ai"`
@@ -888,6 +889,10 @@ mcp:
   enabled: false # 开启后仍须 execution 中的身份及工具授权
 execution:
   enabled: false
+commands:
+  admins: [] # 全局模型切换、共享人格创建和删除；按 platform/account/users 精确配置
+  session_writers: [] # 当前会话上下文和人格修改；按 platform/account/room/users 精确配置
+  legacy_persona_account: "" # 确认旧 room_personas 全属此 Matrix bot 时填其完整用户 ID，空值保留待核查
 shutdown:
   timeout_seconds: 30
 `
