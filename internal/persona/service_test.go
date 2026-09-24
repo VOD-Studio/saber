@@ -272,17 +272,19 @@ func TestServiceGetSystemPrompt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// 清除之前的人格设置
-			_ = svc.ClearRoomPersona(ctx, roomID)
+			session := chat.Session{Platform: "matrix", Account: "@bot:example.com", Conversation: string(roomID)}
+			if err := svc.SetSessionPersona(ctx, session, ""); err != nil {
+				t.Fatal(err)
+			}
 
 			if tt.personaID != "" {
-				err := svc.SetRoomPersona(ctx, roomID, tt.personaID)
+				err := svc.SetSessionPersona(ctx, session, tt.personaID)
 				if err != nil {
-					t.Fatalf("SetRoomPersona() error = %v", err)
+					t.Fatalf("SetSessionPersona() error = %v", err)
 				}
 			}
 
-			result := svc.GetSystemPrompt(chat.Session{Platform: "matrix", Conversation: string(roomID)}, tt.basePrompt)
+			result := svc.GetSystemPrompt(session, tt.basePrompt)
 
 			if tt.wantEmpty && result != "" {
 				t.Errorf("期望空提示词，实际: %q", result)
@@ -298,6 +300,51 @@ func TestServiceGetSystemPrompt(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestServiceSessionPersonaIsolationAndLegacyMigration(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "personas.db")
+	svc, err := NewService(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	room := id.RoomID("!room:example.com")
+	if err := svc.SetRoomPersona(ctx, room, "catgirl"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	svc, err = NewService(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = svc.Close() }()
+	first := chat.Session{Platform: "matrix", Account: "@first:example.com", Conversation: string(room)}
+	second := first
+	second.Account = "@second:example.com"
+	if svc.GetSessionPersona(first) != nil || svc.GetSessionPersona(second) != nil {
+		t.Fatal("归属不明的旧绑定被自动复制")
+	}
+	count, err := svc.MigrateLegacyMatrix(ctx, first.Account)
+	if err != nil || count != 1 {
+		t.Fatalf("迁移 = %d, %v", count, err)
+	}
+	if svc.GetSessionPersona(first) == nil || svc.GetSessionPersona(second) != nil {
+		t.Fatal("迁移后的账号隔离错误")
+	}
+	if err := svc.SetSessionPersona(ctx, second, "butler"); err != nil {
+		t.Fatal(err)
+	}
+	if svc.GetSessionPersona(first).ID != "catgirl" || svc.GetSessionPersona(second).ID != "butler" {
+		t.Fatal("不同账号的人格相互覆盖")
+	}
+	thread := first
+	thread.Thread = "topic"
+	if svc.GetSessionPersona(thread) != nil {
+		t.Fatal("主会话人格越过话题边界")
 	}
 }
 

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - 新增平台无关的聊天命令注册表，统一解析 `!` 与 `/` 前缀、别名、权限、平台能力和目录描述；命令一经识别不会进入模型
+- 人格绑定使用完整会话键；旧 Matrix 房间绑定保留待核查，明确确认所属账号后才关联到该账号
 
 ### Changed
 

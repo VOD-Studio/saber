@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +26,8 @@ type Service struct {
 
 	// roomPersonas 缓存房间人格映射，key 为房间 ID
 	roomPersonas map[id.RoomID]string
+	// sessionPersonas 按完整平台、账号、会话和话题隔离新绑定。
+	sessionPersonas map[chat.SessionID]string
 
 	// mu 保护缓存数据的并发访问
 	mu sync.RWMutex
@@ -46,9 +49,10 @@ func NewService(dbPath string) (*Service, error) {
 	}
 
 	svc := &Service{
-		db:           db,
-		personas:     make(map[string]*Persona),
-		roomPersonas: make(map[id.RoomID]string),
+		db:              db,
+		personas:        make(map[string]*Persona),
+		roomPersonas:    make(map[id.RoomID]string),
+		sessionPersonas: make(map[chat.SessionID]string),
 	}
 
 	// 加载内置人格
@@ -96,6 +100,14 @@ func initSchema(db *sql.DB) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("创建 room_personas 表失败: %w", err)
+	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS session_personas (
+		session_key TEXT NOT NULL PRIMARY KEY,
+		persona_id TEXT NOT NULL REFERENCES personas(id) ON DELETE CASCADE,
+		updated_at INTEGER NOT NULL
+	)`)
+	if err != nil {
+		return fmt.Errorf("创建 session_personas 表失败: %w", err)
 	}
 
 	return nil
@@ -165,6 +177,27 @@ func (s *Service) loadFromDB() error {
 			return fmt.Errorf("扫描房间人格映射失败: %w", err)
 		}
 		s.roomPersonas[id.RoomID(roomID)] = personaID
+	}
+	if err := roomRows.Err(); err != nil {
+		return err
+	}
+	sessionRows, err := s.db.Query("SELECT session_key,persona_id FROM session_personas")
+	if err != nil {
+		return fmt.Errorf("查询会话人格映射失败: %w", err)
+	}
+	defer func() { _ = sessionRows.Close() }()
+	for sessionRows.Next() {
+		var key, personaID string
+		if err := sessionRows.Scan(&key, &personaID); err != nil {
+			return err
+		}
+		s.sessionPersonas[chat.SessionID(key)] = personaID
+	}
+	if err := sessionRows.Err(); err != nil {
+		return err
+	}
+	if len(s.roomPersonas) > 0 {
+		slog.Warn("仍有无法自动确认账号归属的旧 Matrix 人格绑定，保留在 room_personas", "count", len(s.roomPersonas))
 	}
 
 	return nil
@@ -260,6 +293,11 @@ func (s *Service) Delete(id string) error {
 			delete(s.roomPersonas, roomID)
 		}
 	}
+	for key, personaID := range s.sessionPersonas {
+		if personaID == id {
+			delete(s.sessionPersonas, key)
+		}
+	}
 
 	delete(s.personas, id)
 	slog.Info("删除人格", "id", id)
@@ -329,17 +367,85 @@ func (s *Service) clearRoomPersonaLocked(roomID id.RoomID) error {
 }
 
 // GetSystemPrompt 获取指定会话的系统提示词。
-// 将基础提示词与房间人格提示词合并；当前仅 Matrix 平台维护房间人格，
-// 其他平台原样返回 basePrompt，便于 ai.Service 以平台无关方式调用。
 func (s *Service) GetSystemPrompt(session chat.Session, basePrompt string) string {
-	if session.Platform != "matrix" {
-		return basePrompt
-	}
-	persona := s.GetRoomPersona(id.RoomID(session.Conversation))
+	persona := s.GetSessionPersona(session)
 	if persona == nil {
 		return basePrompt
 	}
 	return persona.FullPrompt(basePrompt)
+}
+
+// GetSessionPersona 读取完整会话键绑定的人格。
+func (s *Service) GetSessionPersona(session chat.Session) *Persona {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.personas[s.sessionPersonas[session.Key()]]
+}
+
+// SetSessionPersona 设置或清除完整会话的人格绑定。
+func (s *Service) SetSessionPersona(ctx context.Context, session chat.Session, personaID string) error {
+	if err := session.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if personaID == "" {
+		if _, err := s.db.ExecContext(ctx, "DELETE FROM session_personas WHERE session_key=?", session.Key()); err != nil {
+			return err
+		}
+		delete(s.sessionPersonas, session.Key())
+		return nil
+	}
+	if s.personas[personaID] == nil {
+		return fmt.Errorf("人格 %q 不存在", personaID)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO session_personas(session_key,persona_id,updated_at) VALUES(?,?,?)
+		ON CONFLICT(session_key) DO UPDATE SET persona_id=excluded.persona_id,updated_at=excluded.updated_at`, session.Key(), personaID, time.Now().Unix()); err != nil {
+		return err
+	}
+	s.sessionPersonas[session.Key()] = personaID
+	return nil
+}
+
+// MigrateLegacyMatrix 在管理员明确确认旧库所属 Matrix 账号后关联可识别的房间绑定。
+func (s *Service) MigrateLegacyMatrix(ctx context.Context, account string) (int, error) {
+	if account == "" {
+		return 0, fmt.Errorf("旧 Matrix 账号不能为空")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	count := 0
+	for room, personaID := range s.roomPersonas {
+		if !strings.HasPrefix(string(room), "!") || !strings.Contains(string(room), ":") {
+			continue
+		}
+		session := chat.Session{Platform: "matrix", Account: account, Conversation: string(room)}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO session_personas(session_key,persona_id,updated_at) VALUES(?,?,?) ON CONFLICT(session_key) DO NOTHING`, session.Key(), personaID, time.Now().Unix()); err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM room_personas WHERE room_id=?", string(room)); err != nil {
+			return 0, err
+		}
+		count++
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	for room, personaID := range s.roomPersonas {
+		if strings.HasPrefix(string(room), "!") && strings.Contains(string(room), ":") {
+			session := chat.Session{Platform: "matrix", Account: account, Conversation: string(room)}
+			if s.sessionPersonas[session.Key()] == "" {
+				s.sessionPersonas[session.Key()] = personaID
+			}
+			delete(s.roomPersonas, room)
+		}
+	}
+	return count, nil
 }
 
 // boolToInt 将布尔值转换为整数（0 或 1）。
