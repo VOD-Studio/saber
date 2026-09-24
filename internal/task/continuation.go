@@ -22,6 +22,35 @@ func (m *Manager) RememberMessage(ctx context.Context, taskID int64, messageID s
 	return err
 }
 
+// ClearContext 开始当前会话的新上下文代号。旧任务仍可查询，但新轮次不能续接它们。
+func (m *Manager) ClearContext(ctx context.Context, session chat.Session) (int64, error) {
+	if err := session.Validate(); err != nil {
+		return 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var generation int64
+	err := m.store.db.QueryRowContext(ctx, `INSERT INTO session_contexts(platform,account,room,thread,generation)
+		VALUES(?,?,?,?,1) ON CONFLICT(platform,account,room,thread)
+		DO UPDATE SET generation=generation+1 RETURNING generation`,
+		session.Platform, session.Account, session.Conversation, session.Thread).Scan(&generation)
+	return generation, err
+}
+
+// ContextGeneration 返回当前有效代号；没有清理记录的旧会话属于代号 0。
+func (m *Manager) ContextGeneration(ctx context.Context, session chat.Session) (int64, error) {
+	if err := session.Validate(); err != nil {
+		return 0, err
+	}
+	var generation int64
+	err := m.store.db.QueryRowContext(ctx, `SELECT generation FROM session_contexts WHERE platform=? AND account=? AND room=? AND thread=?`,
+		session.Platform, session.Account, session.Conversation, session.Thread).Scan(&generation)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return generation, err
+}
+
 // Continue 保存独立后续轮次，等待前序终态后恢复上下文，权限仍取当前发言人。
 func (m *Manager) Continue(ctx context.Context, message chat.Message, dir string, req agent.Request) (Task, error) {
 	m.mu.Lock()
@@ -36,6 +65,9 @@ func (m *Manager) Continue(ctx context.Context, message chat.Message, dir string
 	if err != nil {
 		return Task{}, err
 	}
+	if parent.Message.Session.Thread != message.Session.Thread {
+		return Task{}, sql.ErrNoRows
+	}
 	// 同一引用的连续补充接到最新后续轮次，避免遗漏更早的补充要求。
 	var latest int64
 	err = m.store.db.QueryRowContext(ctx, `WITH RECURSIVE chain(id) AS (SELECT ? UNION ALL SELECT l.task_id FROM task_links l JOIN chain c ON l.parent_id=c.id) SELECT max(id) FROM chain`, parent.ID).Scan(&latest)
@@ -45,6 +77,18 @@ func (m *Manager) Continue(ctx context.Context, message chat.Message, dir string
 	parent, err = m.Get(ctx, message.Session, latest)
 	if err != nil {
 		return Task{}, err
+	}
+	current, err := m.ContextGeneration(ctx, message.Session)
+	if err != nil {
+		return Task{}, err
+	}
+	var previous int64
+	err = m.store.db.QueryRowContext(ctx, `SELECT generation FROM task_generations WHERE task_id=?`, parent.ID).Scan(&previous)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return Task{}, err
+	}
+	if previous != current {
+		return Task{}, sql.ErrNoRows
 	}
 	dir, err = canonicalDir(dir)
 	if err != nil {

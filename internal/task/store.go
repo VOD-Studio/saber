@@ -97,6 +97,20 @@ func openStore(path string) (*store, error) {
  );
  CREATE TABLE IF NOT EXISTS task_links (
   task_id INTEGER PRIMARY KEY REFERENCES tasks(id), parent_id INTEGER NOT NULL REFERENCES tasks(id)
+ );
+ CREATE TABLE IF NOT EXISTS session_contexts (
+  platform TEXT NOT NULL, account TEXT NOT NULL, room TEXT NOT NULL, thread TEXT NOT NULL,
+  generation INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(platform,account,room,thread)
+ );
+ CREATE TABLE IF NOT EXISTS task_generations (
+  task_id INTEGER PRIMARY KEY REFERENCES tasks(id), generation INTEGER NOT NULL
+ );
+ CREATE TABLE IF NOT EXISTS command_receipts (
+  platform TEXT NOT NULL, account TEXT NOT NULL, room TEXT NOT NULL,
+  event TEXT NOT NULL, command_id TEXT NOT NULL, state TEXT NOT NULL,
+  reply TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(platform,account,room,event,command_id)
  );` + scheduleSchema)
 	if err != nil {
 		return nil, errors.Join(err, db.Close())
@@ -161,6 +175,17 @@ func (s *store) submit(ctx context.Context, message chat.Message, dir string, re
 	count, err := inserted.RowsAffected()
 	if err != nil {
 		return Task{}, err
+	}
+	if count > 0 {
+		var generation int64
+		err = tx.QueryRowContext(ctx, `SELECT generation FROM session_contexts WHERE platform=? AND account=? AND room=? AND thread=?`,
+			message.Session.Platform, message.Session.Account, message.Session.Conversation, message.Session.Thread).Scan(&generation)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return Task{}, err
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO task_generations(task_id,generation) VALUES(?,?)`, t.ID, generation); err != nil {
+			return Task{}, err
+		}
 	}
 	if count > 0 && len(parent) > 0 && t.ID != parent[0] {
 		if _, err = tx.ExecContext(ctx, `INSERT INTO task_links(task_id,parent_id) VALUES(?,?) ON CONFLICT(task_id) DO NOTHING`, t.ID, parent[0]); err != nil {

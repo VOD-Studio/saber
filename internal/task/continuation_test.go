@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -13,6 +14,42 @@ import (
 	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
 )
+
+func TestManager_ClearContextSeparatesOldTaskChain(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, err := openStore(filepath.Join(t.TempDir(), "tasks.db"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, store.db.Close()) }()
+	m := &Manager{store: store, ctx: ctx}
+	source := message("source", "alice")
+	parent, err := m.Submit(ctx, source, dir, request("old goal"))
+	require.NoError(t, err)
+	gen, err := m.ClearContext(ctx, source.Session)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, gen)
+	_, err = m.Get(ctx, source.Session, parent.ID)
+	require.NoError(t, err)
+	follow := message("follow", "alice")
+	follow.ReplyTo = source.ID
+	_, err = m.Continue(ctx, follow, dir, request("new goal"))
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	newRoot, err := m.Submit(ctx, follow, dir, request("new goal"))
+	require.NoError(t, err)
+	child := message("child", "alice")
+	child.ReplyTo = follow.ID
+	_, err = m.Continue(ctx, child, dir, request("continue new goal"))
+	require.NoError(t, err)
+	otherThread := child
+	otherThread.ID = "other-thread"
+	otherThread.Session.Thread = "different"
+	_, err = m.Continue(ctx, otherThread, dir, request("cross thread"))
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	storedGen, err := m.ContextGeneration(ctx, source.Session)
+	require.NoError(t, err)
+	require.Equal(t, gen, storedGen)
+	require.NotEqual(t, parent.ID, newRoot.ID)
+}
 
 func TestManager_ContinuationWaitsAndSurvivesRestart(t *testing.T) {
 	ctx := context.Background()

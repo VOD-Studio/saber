@@ -78,6 +78,8 @@ func (m *Manager) Submit(ctx context.Context, message chat.Message, dir string, 
 	if err := m.ctx.Err(); err != nil {
 		return Task{}, err
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	t, err := m.store.submit(ctx, message, dir, req)
 	m.notify()
 	return t, err

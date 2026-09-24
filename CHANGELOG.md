@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `ai clear/context` 覆盖持久化任务续接代号，清理后的新轮次不会恢复旧任务链，旧任务和日志仍可查询
 - Matrix 启用开关从 `matrix.enabled` 移至 `platforms.matrix.enabled`，与 Violet 平行；账号及媒体等明细仍在顶层 `matrix`，旧开关需手动迁移
 
 ### Fixed
