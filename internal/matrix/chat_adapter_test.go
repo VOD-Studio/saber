@@ -266,3 +266,36 @@ func TestChatAdapter_EditRendersMarkdown(t *testing.T) {
 		t.Fatalf("编辑内容未渲染表格: %+v", sent[0].NewContent)
 	}
 }
+
+func TestChatAdapter_SendImage(t *testing.T) {
+	var sent event.MessageEventContent
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "/upload"):
+			if _, err := fmt.Fprint(w, `{"content_uri":"mxc://local/image"}`); err != nil {
+				t.Error(err)
+			}
+		case strings.Contains(r.URL.Path, "/send/"):
+			if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+				t.Error(err)
+			}
+			if _, err := fmt.Fprint(w, `{"event_id":"$image"}`); err != nil {
+				t.Error(err)
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	client, err := mautrix.NewClient(server.URL, "@bot:local", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := matrix.NewChatAdapter(matrix.NewCommandService(client, "@bot:local", nil), nil, config.MediaConfig{}, false, nil)
+	reply := chat.Reply{Session: chat.Session{Platform: "matrix", Account: "@bot:local", Conversation: "!room:local"}, ReplyTo: "$question", TransactionID: "meme-txn"}
+	id, err := adapter.SendImage(context.Background(), reply, []byte("gif-data"), "image/gif", "cat.gif", 40, 30)
+	if err != nil || id != "$image" || sent.MsgType != event.MsgImage || sent.URL != "mxc://local/image" || sent.RelatesTo.GetReplyTo() != "$question" || sent.Info.Width != 40 {
+		t.Fatalf("图片发送 = %q, %+v, %v", id, sent, err)
+	}
+}

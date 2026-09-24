@@ -117,6 +117,23 @@ func (a *ChatAdapter) Send(ctx context.Context, reply chat.Reply) (string, error
 	return string(messageID), err
 }
 
+// SendImage 上传图片并在原会话回复来源消息。
+func (a *ChatAdapter) SendImage(ctx context.Context, reply chat.Reply, data []byte, mimeType, filename string, width, height int) (string, error) {
+	if err := a.validate(ctx, reply.Session); err != nil {
+		return "", err
+	}
+	if len(data) == 0 || mimeType == "" {
+		return "", errors.New("图片内容或 MIME 类型为空")
+	}
+	upload, err := a.service.client.UploadBytes(ctx, data, mimeType)
+	if err != nil {
+		return "", err
+	}
+	content := &event.MessageEventContent{MsgType: event.MsgImage, Body: filename, URL: id.ContentURIString(upload.ContentURI.String()), RelatesTo: chatReplyRelation(reply), Info: &event.FileInfo{MimeType: mimeType, Width: width, Height: height}}
+	eventID, err := a.service.sendContentWithOptions(ctx, id.RoomID(reply.Session.Conversation), content, mautrix.ReqSendEvent{TransactionID: reply.TransactionID})
+	return string(eventID), err
+}
+
 // Edit 只更新该运行此前创建的 Matrix 消息。
 func (a *ChatAdapter) Edit(ctx context.Context, messageID string, reply chat.Reply) error {
 	if err := a.validate(ctx, reply.Session); err != nil {
