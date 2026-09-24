@@ -71,6 +71,8 @@ type Message struct {
 	ID string
 	// SenderID 是当前平台账号作用域内的用户标识。
 	SenderID string
+	// Direct 表示接入端已确认这是仅有 bot 与发送者的私聊。
+	Direct bool
 	// Text 是去掉平台命令或提及前缀后的内容。
 	Text string
 	// ControlText 是接入端剥离平台引用回退后的用户原文，用于识别控制指令；
@@ -168,6 +170,11 @@ type Adapter interface {
 	SetTyping(context.Context, Session, bool) error
 }
 
+// ImageAdapter 是能够发送图片的可选出站能力。
+type ImageAdapter interface {
+	SendImage(context.Context, Reply, []byte, string, string, int, int) (string, error)
+}
+
 // Handler 是所有聊天 adapter 共用的消息处理入口。
 type Handler func(context.Context, Message, Adapter) (agent.Result, error)
 
@@ -177,6 +184,8 @@ type Identity struct {
 	Session Session
 	// SenderID 是平台原生发送者 ID。
 	SenderID string
+	// Direct 只用于会话命令写入授权，不改变执行器的精确身份键。
+	Direct bool
 }
 
 type identityKey struct{}
