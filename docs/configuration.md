@@ -95,11 +95,11 @@ agent:
 server:
   listen: "127.0.0.1:8320"
   token_file: ".saber-token"
-matrix:
-  enabled: false
 platforms:
   terminal:
     enabled: true
+  matrix:
+    enabled: false
   violet:
     enabled: false
 mcp:
@@ -116,11 +116,10 @@ MCP 默认关闭，不加载内置或外部服务器。开启后还必须通过 
 
 ## Matrix 接入示例
 
-以下内容仅在需要 Matrix 时合并到配置中。通用模型和任务设置仍使用上面的 `ai` 与 `agent`。
+需要 Matrix 时，将 `platforms.matrix.enabled` 设为 `true`，并合并以下 Matrix 明细配置。通用模型和任务设置仍使用上面的 `ai` 与 `agent`。
 
 ```yaml
 matrix:
-  enabled: true
   homeserver: "https://matrix.org"
   user_id: "@your-bot:matrix.org"
   device_id: "saber-bot"
@@ -173,6 +172,8 @@ Matrix 任务使用平台专属的展示节流与结果投递器；`stream_edit`
 platforms:
   terminal:
     enabled: true # 默认开启；关掉后 saber chat 与 TUI 不再受理消息
+  matrix:
+    enabled: false # 默认关闭；账号等明细仍在顶层 matrix: 节
   violet:
     enabled: false
     endpoint: "https://blog.example.com"
@@ -193,4 +194,4 @@ platforms:
 - `http_timeout_seconds` 只作用于普通 API 请求，事件流是长连接，靠 30 秒心跳与 90 秒静默看门狗判活。
 - 断线恢复：Violet 的 bot 事件流不支持 `Last-Event-ID` 补发，Saber 在重连后按消息历史接口补齐水位之后的消息，并按消息 ID 去重；首次连接只打水位基线，不会把站内旧消息当新问题回答一遍。
 - 能力边界：Violet 只走 `HandleChat` 这条最小链路。`!ai <内容>` 会被剥掉前缀当提问，其余 `!` 开头命令（`!task`、`!schedule`、上下文命令）在本平台无落点、直接跳过；任务产出的文件不投递（上传通道仍按 Matrix 限定）；主动聊天未接入 Violet（`SendNotice` 没有对等语义）。
-- Matrix 的明细配置仍在顶层 `matrix:` 节。`platforms.matrix` 尚未接管它：直接搬迁会让 `platforms.matrix` 里的部分字段把顶层默认值覆盖掉，得先定清「别名与默认值的合并语义」，属独立批次。新平台的配置一律写进 `platforms.<name>`。
+- Matrix 的启用开关在 `platforms.matrix.enabled`，账号、媒体等明细配置仍在顶层 `matrix:` 节。旧的 `matrix.enabled` 不再接受；迁移已有配置时只需将该开关移到 `platforms.matrix`。

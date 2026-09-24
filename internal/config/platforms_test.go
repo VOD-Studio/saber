@@ -20,12 +20,18 @@ func writeFileConfig(t *testing.T, body string) string {
 // TestLoad_PlatformsSection 验证 platforms: 节按字段覆盖默认值，未出现的字段保持默认。
 func TestLoad_PlatformsSection(t *testing.T) {
 	t.Parallel()
-	cfg, err := Load(writeFileConfig(t, "platforms:\n  terminal:\n    enabled: false\n  violet:\n    enabled: true\n    endpoint: https://blog.example.com\n    bot_token: violet_bot_xxx\n"))
+	cfg, err := Load(writeFileConfig(t, "platforms:\n  terminal:\n    enabled: false\n  matrix:\n    enabled: true\n  violet:\n    enabled: true\n    endpoint: https://blog.example.com\n    bot_token: violet_bot_xxx\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Platforms.Terminal.Enabled {
 		t.Fatal("terminal.enabled 应为 false")
+	}
+	if !cfg.Platforms.Matrix.Enabled || !cfg.PlatformEnabled("matrix") {
+		t.Fatal("matrix.enabled 应为 true")
+	}
+	if cfg.Matrix.Homeserver != DefaultMatrixConfig().Homeserver || cfg.Matrix.DeviceName != DefaultMatrixConfig().DeviceName {
+		t.Fatalf("matrix 明细默认值应保留: %+v", cfg.Matrix)
 	}
 	if !cfg.Platforms.Violet.Enabled {
 		t.Fatal("violet.enabled 应为 true")
@@ -48,7 +54,7 @@ func TestLoad_PlatformsSection(t *testing.T) {
 func TestPlatformEnabled(t *testing.T) {
 	t.Parallel()
 	cfg := DefaultConfig()
-	cfg.Matrix.Enabled = true
+	cfg.Platforms.Matrix.Enabled = true
 	cfg.Platforms.Violet.Enabled = true
 	cfg.Platforms.Terminal.Enabled = false
 

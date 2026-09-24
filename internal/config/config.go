@@ -40,7 +40,6 @@ type MatrixConfig struct {
 	Media                 MediaConfig      `yaml:"media"`                    // 媒体文件处理配置
 	Meme                  MemeConfig       `yaml:"meme"`
 
-	Enabled                bool     `yaml:"enabled"` // 显式启用 Matrix 入口；默认关闭，独立于本机聊天服务。
 	Homeserver             string   `yaml:"homeserver"`
 	UserID                 string   `yaml:"user_id"`                   // 完整的 Matrix ID，如 @user:matrix.org
 	DeviceID               string   `yaml:"device_id"`                 // 设备标识符
@@ -878,11 +877,11 @@ agent:
     fallback_models: []
 
 # 可选接入与执行能力；详细配置见 docs/configuration.md、docs/execution.md。
-matrix:
-  enabled: false
 platforms:
   terminal:
     enabled: true # 本机 HTTP 聊天入口（saber chat / TUI）
+  matrix:
+    enabled: false # Matrix 聊天入口，账号等明细在顶层 matrix: 配置
   violet:
     enabled: false # Violet Bot API 接入，凭据在 Violet 管理端签发
 mcp:

@@ -23,7 +23,7 @@ func violetOnlyConfig() *config.Config {
 	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "http://127.0.0.1:1/v1", APIKey: "test"}}
 	cfg.AI.DefaultModel = "openai.local"
 	cfg.MCP.Enabled = false
-	cfg.Matrix.Enabled = false
+	cfg.Platforms.Matrix.Enabled = false
 	cfg.Platforms.Violet.Enabled = true
 	cfg.Platforms.Violet.Endpoint = "http://127.0.0.1:1"
 	cfg.Platforms.Violet.BotToken = "violet_bot_test"

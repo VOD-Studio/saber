@@ -28,7 +28,7 @@ func TestGeneratedConfiguration(t *testing.T) {
 	if err := cfg.AI.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Matrix.Enabled || cfg.MCP.Enabled || cfg.Execution.Enabled || len(cfg.AI.Providers) != 0 || cfg.AI.DefaultModel != "" {
+	if cfg.Platforms.Matrix.Enabled || cfg.MCP.Enabled || cfg.Execution.Enabled || len(cfg.AI.Providers) != 0 || cfg.AI.DefaultModel != "" {
 		t.Fatal("default configuration enables unconfigured integrations")
 	}
 	if !reflect.DeepEqual(cfg.Agent, DefaultConfig().Agent) || cfg.AI.TimeoutSeconds != DefaultAIConfig().TimeoutSeconds {
@@ -43,6 +43,7 @@ func TestGeneratedConfiguration(t *testing.T) {
 func TestLoadRejectsOldAndUnknownFields(t *testing.T) {
 	for _, input := range []string{
 		"ai: {provider: openai}", "ai: {timeout_seconds: 30}", "ai: {context: {enabled: true}}",
+		"matrix: {enabled: true}",
 		"ai: {tool_calling: {max_iterations: 5}}", "ai: {direct_chat_auto_reply: true}", "meme: {enabled: false}",
 		"ai: {providers: {test: {reasoning_efort: high}}}", "agent: {context: {expiry_minutes: 60}}",
 		"server: {listen: '127.0.0.1:8320'}\n---\nai: {}",
@@ -134,7 +135,7 @@ func TestDocumentedConfiguration(t *testing.T) {
 				if err = cfg.AI.Validate(); err != nil {
 					t.Fatal(err)
 				}
-				if cfg.Matrix.Enabled {
+				if cfg.Platforms.Matrix.Enabled {
 					if err = cfg.Matrix.Validate(); err != nil {
 						t.Fatal(err)
 					}

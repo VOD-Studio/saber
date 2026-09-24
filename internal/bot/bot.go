@@ -106,7 +106,7 @@ func run(parent context.Context, info matrix.BuildInfo) error {
 	defer cancel()
 	state.services = &services{}
 	defer state.shutdown(cancel)
-	if state.cfg.Matrix.Enabled {
+	if state.cfg.Platforms.Matrix.Enabled {
 		svc, err := state.initMatrixClient()
 		if err != nil {
 			return err
@@ -202,7 +202,7 @@ func (s *appState) initConfig(args []string, stdout io.Writer) error {
 
 	slog.Info("Configuration loaded",
 		"path", s.flags.ConfigPath,
-		"matrix_enabled", cfg.Matrix.Enabled)
+		"matrix_enabled", cfg.Platforms.Matrix.Enabled)
 
 	return nil
 }
@@ -328,7 +328,7 @@ func (s *appState) initServices() error {
 	svc.aiService = aiService
 	configDir := filepath.Dir(s.flags.ConfigPath)
 	protected := []string{s.cfg.Server.TokenPath(s.flags.ConfigPath), s.flags.ConfigPath, s.flags.ConfigPath + ".session", filepath.Join(configDir, "tasks.db"), filepath.Join(configDir, "persona.db")}
-	if s.cfg.Matrix.Enabled {
+	if s.cfg.Platforms.Matrix.Enabled {
 		protected = append(protected, s.cfg.Matrix.E2EESessionPath, s.cfg.Matrix.E2EESessionPath+".key", s.cfg.Matrix.PickleKeyPath)
 	}
 	if err := aiService.ConfigureExecution(s.cfg.Execution, protected, secrets); err != nil {

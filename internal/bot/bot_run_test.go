@@ -232,8 +232,10 @@ func TestRun_ConfigLoadFailure(t *testing.T) {
 				configPath := filepath.Join(dir, "incomplete.yaml")
 				incompleteConfig := `server:
   listen: "127.0.0.1:0"
+platforms:
+  matrix:
+    enabled: true
 matrix:
-  enabled: true
   homeserver: "https://matrix.org"
   # 缺少 user_id 和认证信息
 `
@@ -272,8 +274,10 @@ func TestRun_ValidConfigButNoServer(t *testing.T) {
 	// 创建有效的配置文件，但使用虚假的服务器地址
 	validConfig := `server:
   listen: "127.0.0.1:0"
+platforms:
+  matrix:
+    enabled: true
 matrix:
-  enabled: true
   homeserver: "https://nonexistent.matrix.server.invalid"
   user_id: "@bot:matrix.org"
   access_token: "fake-token-for-testing"

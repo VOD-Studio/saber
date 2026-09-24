@@ -61,10 +61,9 @@ make build
 2. 编辑 `config.yaml` 填入你的设置:
 
 ```yaml
-matrix:
-  enabled: false  # 可选聊天入口；接入 Matrix 时设为 true
-
 platforms:
+  matrix:
+    enabled: false  # 可选聊天入口；接入 Matrix 时设为 true
   violet:
     enabled: false  # 可选聊天入口；endpoint 与 bot_token 在 Violet 管理端签发
 
@@ -96,7 +95,7 @@ ai:
 
 直接运行 `./bin/saber` 或 `./bin/saber serve` 启动常驻服务，默认监听 `127.0.0.1:8320`。首次启动在配置目录创建 `.saber-token`（0600）；HTTP 接口使用 Bearer 令牌认证。会话、任务和增量事件保存到 `tasks.db`，订阅断开不取消任务。Matrix 是独立的可选聊天入口。使用 `./bin/saber chat` 进入 TUI，支持流式 Markdown、工具状态、会话切换、模型与思考等级选择。界面预览和快捷键见 [终端聊天](docs/tui.md)。
 
-Matrix 仅在 `matrix.enabled: true` 时校验账号并连接服务器。旧配置需要按[新配置结构](docs/configuration.md)重新整理。AI 未启用时服务继续运行，聊天入口提示完成模型配置。
+Matrix 仅在 `platforms.matrix.enabled: true` 时校验账号并连接服务器。旧配置需要按[新配置结构](docs/configuration.md)重新整理。AI 未启用时服务继续运行，聊天入口提示完成模型配置。
 
 ### CLI 标志
 

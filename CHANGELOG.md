@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Matrix 启用开关从 `matrix.enabled` 移至 `platforms.matrix.enabled`，与 Violet 平行；账号及媒体等明细仍在顶层 `matrix`，旧开关需手动迁移
+
 ### Fixed
 
 - Release 说明写入 runner 临时目录，避免交叉编译时 Go 将干净的标签工作树标记为 dirty

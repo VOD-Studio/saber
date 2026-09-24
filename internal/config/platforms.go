@@ -8,12 +8,16 @@ import (
 
 // PlatformsConfig 集中管理可插拔聊天平台接入端的开关与平台专属参数。
 //
-// Matrix 的明细配置仍在顶层 matrix: 节（见 MatrixConfig），本结构负责的是
-// 「哪些平台该启动」以及新平台的接入参数。把 matrix 明细搬迁到
-// platforms.matrix 需要先解决与默认值的合并语义，属独立批次。
+// Matrix 的明细配置仍在顶层 matrix: 节（见 MatrixConfig），启用开关在此处。
 type PlatformsConfig struct {
 	Terminal TerminalPlatformConfig `yaml:"terminal"` // 本机 HTTP 聊天入口（saber chat / TUI）
+	Matrix   MatrixPlatformConfig   `yaml:"matrix"`   // Matrix 聊天入口开关
 	Violet   VioletConfig           `yaml:"violet"`   // Violet 博客平台 Bot API 接入
+}
+
+// MatrixPlatformConfig 存储 Matrix 聊天入口的开关。
+type MatrixPlatformConfig struct {
+	Enabled bool `yaml:"enabled"` // 默认关闭
 }
 
 // TerminalPlatformConfig 存储本机终端入口的开关。
@@ -42,6 +46,7 @@ type VioletConfig struct {
 func DefaultPlatformsConfig() PlatformsConfig {
 	return PlatformsConfig{
 		Terminal: TerminalPlatformConfig{Enabled: true},
+		Matrix:   MatrixPlatformConfig{Enabled: false},
 		Violet:   DefaultVioletConfig(),
 	}
 }
@@ -106,7 +111,7 @@ func (c *Config) PlatformEnabled(name string) bool {
 	case "terminal":
 		return c.Platforms.Terminal.Enabled
 	case "matrix":
-		return c.Matrix.Enabled
+		return c.Platforms.Matrix.Enabled
 	case "violet":
 		return c.Platforms.Violet.Enabled
 	default:

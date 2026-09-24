@@ -9,7 +9,7 @@ Saber 已有平台无关的消息处理核心（`chat`、`conversation`、`agent
 ```
 bot.go
  ├─ initConfig
- ├─ if matrix.enabled → initMatrixClient (sync, event handlers, e2ee)
+ ├─ if platforms.matrix.enabled → initMatrixClient (sync, event handlers, e2ee)
  ├─ initServices (ai.Service 构造时注入 matrixService + mediaService)
  ├─ setupEventHandlers (mautrix syncer 注册)
  ├─ startSync (Matrix sync goroutine)
@@ -175,31 +175,18 @@ func run(ctx context.Context, info BuildInfo) error {
 platforms:
   terminal:
     enabled: true
-
   matrix:
     enabled: false
-    # 现有 Matrix 配置字段全部移入此节
-    homeserver: ""
-    user_id: ""
-    # ...
-
   violet:
     enabled: false
-    endpoint: "http://127.0.0.1:8080"
-    bot_token: "${VIOLET_BOT_TOKEN}"
-    account: "default"
-    auto_reply_dm: true
-    mention_reply: true
+matrix:
+  homeserver: "https://matrix.org"
+  user_id: "@bot:matrix.org"
 ```
 
-向后兼容：保留顶层 `matrix:` 节作为别名，加载时映射到 `platforms.matrix`。
-
-> 实施注记（S6 现状）：落地时只做到了「新平台的配置一律在 `platforms.<name>`，
-> 注册表与启停完全由 `Config.PlatformEnabled` 决定」。Matrix 的明细配置仍在顶层
-> `matrix:` 节，`platforms.matrix` 尚未接管：直接把整节搬过去，会让只写了
-> `platforms.matrix.enabled` 的配置把其余字段的默认值一起覆盖掉，而用 `yaml.Node`
-> 局部解码又会丢掉现有 `KnownFields(true)` 的未知字段检查。这两条语义要先定清楚，
-> 属独立批次；接入端与配置读取仍按 `cfg.Matrix` 取值。
+Matrix 的启用开关已移到 `platforms.matrix.enabled`；账号、媒体等明细仍在顶层
+`matrix:` 节，接入端仍按 `cfg.Matrix` 读取明细。将整节搬到 `platforms.matrix`
+还需要决定默认值合并与旧配置兼容语义。
 
 ### 7. HTTP API 增强（未实施）
 
@@ -339,7 +326,7 @@ S8 还需要一台真实 Violet 实例（管理端 `/admin/chat-bots` 注册 bot
 | S3 Matrix 平台接入端 | 进行中 | `internal/platform/matrix` 已持有账号、出站/投递 adapter、会话与事件定位、主动聊天房间端口（`Rooms`），并注册任务投递；同步循环与事件处理器注册仍在 `internal/bot` |
 | S4 Terminal 平台 | 未开始 | HTTP server 仍在 `bot.go` 直接 serve |
 | S5 `bot.go` 按配置启动平台 | 已完成 | `run()` 经 `Registry.Enabled()` 启动并统一 `Stop`；注册表按 `platforms.<name>` 决定启停，注册点不再被 Matrix 的提前 return 挡死，已注册 matrix + violet |
-| S6 配置结构迁移 | 部分 | 新增 `platforms:` 节与 `Config.PlatformEnabled`，`platforms.terminal.enabled`、`platforms.violet.*` 已迁入；Matrix 明细仍在顶层 `matrix:` 节（见下文「配置结构」注） |
+| S6 配置结构迁移 | 部分 | 新增 `platforms:` 节与 `Config.PlatformEnabled`，`platforms.terminal.enabled`、`platforms.matrix.enabled`、`platforms.violet.*` 已迁入；Matrix 明细仍在顶层 `matrix:` 节（见上文「配置结构」注） |
 | S7 Violet 适配器 | 已完成 | `internal/platform/violet`：SSE 订阅 + 断线按消息历史补拉 + 提及剥离 + 自回声过滤 + 幂等发送 + 编辑节流；单测覆盖 86.7% |
 | S8 联调验证 | 未开始 | 需要一台开好 Bot 凭据的真实 Violet 实例（`/admin/chat-bots` 注册），验证见文末「验收」 |
 

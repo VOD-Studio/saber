@@ -16,7 +16,7 @@ import (
 
 // TestRun_MatrixOptional 覆盖无 Matrix 的常驻服务启动与正常取消。
 func TestRun_MatrixOptional(t *testing.T) {
-	for _, body := range []string{"server:\n  listen: 127.0.0.1:0\n", "server:\n  listen: 127.0.0.1:0\nmatrix:\n  enabled: false\n  homeserver: invalid\n"} {
+	for _, body := range []string{"server:\n  listen: 127.0.0.1:0\n", "server:\n  listen: 127.0.0.1:0\nplatforms:\n  matrix:\n    enabled: false\nmatrix:\n  homeserver: invalid\n"} {
 		t.Run(body, func(t *testing.T) {
 			args := os.Args
 			t.Cleanup(func() { os.Args = args })
@@ -57,7 +57,7 @@ func TestServer_SharedServicesWithoutMatrix(t *testing.T) {
 func TestInitServices_PlatformRegistryWithoutAI(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.AI.Enabled = false
-	cfg.Matrix.Enabled = false
+	cfg.Platforms.Matrix.Enabled = false
 	state := &appState{cfg: cfg, flags: &cli.Flags{ConfigPath: filepath.Join(t.TempDir(), "config.yaml")}, services: &services{}}
 
 	require.NoError(t, state.initServices())
@@ -70,7 +70,7 @@ func TestExampleConfig_DefaultsToServer(t *testing.T) {
 	path := createTestConfigFile(t, config.ExampleConfig())
 	cfg, err := config.Load(path)
 	require.NoError(t, err)
-	require.False(t, cfg.Matrix.Enabled)
+	require.False(t, cfg.Platforms.Matrix.Enabled)
 	require.Empty(t, cfg.Matrix.UserID)
 	require.Empty(t, cfg.Matrix.AccessToken)
 	require.Equal(t, 8192, cfg.AI.MaxTokens)
@@ -112,7 +112,7 @@ func TestInitServices_ProtectedPathsFollowMatrix(t *testing.T) {
 			cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "http://127.0.0.1:1/v1", APIKey: "test"}}
 			cfg.AI.DefaultModel = "openai.local"
 			cfg.MCP.Enabled = false
-			cfg.Matrix.Enabled = tt.enabled
+			cfg.Platforms.Matrix.Enabled = tt.enabled
 			cfg.Execution = config.ExecutionConfig{
 				Enabled:    true,
 				LogDir:     t.TempDir(),

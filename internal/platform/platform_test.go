@@ -66,7 +66,7 @@ func TestRegistry_Enabled(t *testing.T) {
 
 	t.Run("matrix_disabled", func(t *testing.T) {
 		cfg := *config.DefaultConfig()
-		cfg.Matrix.Enabled = false
+		cfg.Platforms.Matrix.Enabled = false
 		got := r.Enabled(&cfg)
 		if len(got) != 1 {
 			t.Fatalf("len(Enabled) = %d, want 1", len(got))
@@ -78,7 +78,7 @@ func TestRegistry_Enabled(t *testing.T) {
 
 	t.Run("matrix_enabled", func(t *testing.T) {
 		cfg := *config.DefaultConfig()
-		cfg.Matrix.Enabled = true
+		cfg.Platforms.Matrix.Enabled = true
 		got := r.Enabled(&cfg)
 		if len(got) != 2 {
 			t.Fatalf("len(Enabled) = %d, want 2", len(got))
@@ -96,7 +96,7 @@ func TestRegistry_Enabled(t *testing.T) {
 		// 未注册 terminal 时即便 matrix 启用也不返回 terminal
 		r2 := newTestRegistry(&stubPlatform{name: "matrix"})
 		cfg := *config.DefaultConfig()
-		cfg.Matrix.Enabled = true
+		cfg.Platforms.Matrix.Enabled = true
 		got := r2.Enabled(&cfg)
 		if len(got) != 1 || got[0].Name() != "matrix" {
 			t.Fatalf("Enabled = %v, want [matrix]", names(got))
@@ -109,7 +109,7 @@ func TestRegistry_Enabled_MatrixNotRegistered(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(&stubPlatform{name: "terminal"})
 	cfg := *config.DefaultConfig()
-	cfg.Matrix.Enabled = true
+	cfg.Platforms.Matrix.Enabled = true
 	got := r.Enabled(&cfg)
 	if len(got) != 1 || got[0].Name() != "terminal" {
 		t.Fatalf("Enabled = %v, want [terminal]", names(got))
@@ -129,7 +129,7 @@ func TestRegistry_Enabled_ConfigDriven(t *testing.T) {
 
 	t.Run("only_violet", func(t *testing.T) {
 		cfg := config.DefaultConfig()
-		cfg.Matrix.Enabled = false
+		cfg.Platforms.Matrix.Enabled = false
 		cfg.Platforms.Violet.Enabled = true
 		got := r.Enabled(cfg)
 		if len(got) != 2 || got[0].Name() != "terminal" || got[1].Name() != "violet" {
@@ -140,7 +140,7 @@ func TestRegistry_Enabled_ConfigDriven(t *testing.T) {
 	t.Run("terminal_disabled", func(t *testing.T) {
 		cfg := config.DefaultConfig()
 		cfg.Platforms.Terminal.Enabled = false
-		cfg.Matrix.Enabled = true
+		cfg.Platforms.Matrix.Enabled = true
 		got := r.Enabled(cfg)
 		if len(got) != 1 || got[0].Name() != "matrix" {
 			t.Fatalf("Enabled = %v, want [matrix]", names(got))
@@ -150,7 +150,7 @@ func TestRegistry_Enabled_ConfigDriven(t *testing.T) {
 	t.Run("unknown_platform_never_starts", func(t *testing.T) {
 		cfg := config.DefaultConfig()
 		for _, name := range []string{"discord", ""} {
-			cfg.Matrix.Enabled = true
+			cfg.Platforms.Matrix.Enabled = true
 			cfg.Platforms.Violet.Enabled = true
 			for _, p := range r.Enabled(cfg) {
 				if p.Name() == name {

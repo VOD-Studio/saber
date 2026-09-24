@@ -33,8 +33,9 @@ make build
 server:
   listen: "127.0.0.1:8320"
   token_file: ".saber-token"
-matrix:
-  enabled: false
+platforms:
+  matrix:
+    enabled: false
 ```
 
 服务端首次启动在配置文件目录创建 `.saber-token`，权限为 `0600`。TUI 使用该令牌连接；模型密钥和执行权限由服务端管理。当前 HTTP 入口仅允许回环地址；多个配置需要使用独立的数据目录和监听端口。
