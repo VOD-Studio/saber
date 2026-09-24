@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-24
+
 ### Added
 
 - 新增平台无关的聊天命令注册表，统一解析 `!` 与 `/` 前缀、别名、权限、平台能力和目录描述；命令一经识别不会进入模型
@@ -424,7 +426,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 结构化日志
 - 基础命令系统（`!ping`, `!help`）
 
-[Unreleased]: https://github.com/VOD-Studio/saber/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/VOD-Studio/saber/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/VOD-Studio/saber/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/VOD-Studio/saber/compare/v0.0.5...v0.1.0
 [0.0.5]: https://github.com/VOD-Studio/saber/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/VOD-Studio/saber/compare/v0.0.3...v0.0.4
