@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 新增平台无关的聊天命令注册表，统一解析 `!` 与 `/` 前缀、别名、权限、平台能力和目录描述；命令一经识别不会进入模型
+
 ### Changed
 
 - Matrix 启用开关从 `matrix.enabled` 移至 `platforms.matrix.enabled`，与 Violet 平行；账号及媒体等明细仍在顶层 `matrix`，旧开关需手动迁移
