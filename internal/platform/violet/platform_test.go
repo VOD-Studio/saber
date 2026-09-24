@@ -268,6 +268,17 @@ func TestPlatform_GroupCommandNeedsExactLeadingTarget(t *testing.T) {
 	}
 }
 
+func TestPlatform_GroupEscapedSlashStaysOrdinaryText(t *testing.T) {
+	fake := newFakeViolet(t)
+	p := New(newTestConfig(fake.endpoint()))
+	p.setIdentity(fake.profile)
+	item := inbound{conversationID: testGroupRoom, message: messageDTO{ID: "escaped", Sender: userDTO{ID: "user"}, Type: "text", Content: "@(saber:bot-user-1) //task list"}}
+	message, ok := p.normalizeMessage(context.Background(), item)
+	if !ok || message.Text != "//task list" {
+		t.Fatalf("转义消息 = %q,%v", message.Text, ok)
+	}
+}
+
 // TestPlatform_ConfigGates 验证两个自动回复开关各自生效。
 func TestPlatform_ConfigGates(t *testing.T) {
 	t.Parallel()

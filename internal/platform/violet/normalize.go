@@ -25,6 +25,9 @@ func addressedCommand(content, botUserID string) (body string, commandLike, addr
 		return "", false, false
 	}
 	rest = strings.TrimLeftFunc(rest, unicode.IsSpace)
+	if strings.HasPrefix(rest, "//") && content[indices[4]:indices[5]] == botUserID {
+		return rest, false, true
+	}
 	if _, _, _, ok := command.Parse(rest); !ok {
 		return "", false, false
 	}

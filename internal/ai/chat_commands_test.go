@@ -37,6 +37,14 @@ func TestAICommand_ModelAndUsageReceipts(t *testing.T) {
 	}
 }
 
+func TestCommandField_PreservesScheduleGoal(t *testing.T) {
+	when, rest := commandField(" 1h\tAsia/Shanghai  \"quoted goal\"\nnext")
+	zone, goal := commandField(rest)
+	require.Equal(t, "1h", when)
+	require.Equal(t, "Asia/Shanghai", zone)
+	require.Equal(t, " \"quoted goal\"\nnext", goal)
+}
+
 func TestChatCommand_ExplicitQuestionBypassesNaturalTaskControl(t *testing.T) {
 	cfg := createTestMultiProviderAIConfig()
 	svc, err := NewService(cfg)

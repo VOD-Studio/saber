@@ -118,6 +118,7 @@ func TestAddressedCommand(t *testing.T) {
 		{name: "私聊裸命令", in: "/task list", want: "/task list", command: true},
 		{name: "精确寻址", in: "@(saber:bot-id) /task status @(other:other-id)", want: "/task status @(other:other-id)", command: true, addressed: true},
 		{name: "提及后的 NBSP", in: "@(saber:bot-id)\u00a0/task list", want: "/task list", command: true, addressed: true},
+		{name: "提及后的转义斜杠", in: "@(saber:bot-id) //task list", want: "//task list", addressed: true},
 		{name: "其他 bot", in: "@(other:other-id) /task list @(saber:bot-id)", want: "/task list @(saber:bot-id)", command: true},
 		{name: "用户名冒充", in: "@(saber:other-id) !ai hello", want: "!ai hello", command: true},
 		{name: "正文斜杠", in: "看一下 /task list"},

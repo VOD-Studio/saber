@@ -57,7 +57,7 @@ func (s *Service) scheduleOperation(ctx context.Context, msg chat.Message, in sc
 		if strings.TrimSpace(in.Goal) == "" {
 			return "", errors.New("目标不能为空")
 		}
-		msg.Text, msg.Attachments = strings.TrimSpace(in.Goal), nil
+		msg.Text, msg.Attachments = in.Goal, nil
 		req, err := s.taskRequest(msg, s.GetModelRegistry().GetDefault())
 		if err != nil {
 			return "", err

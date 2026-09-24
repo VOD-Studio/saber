@@ -102,4 +102,4 @@ Violet 侧查询端点为 `GET /api/v1/chat/conversations/{conversationId}/bot-c
 
 - 已完成步骤 1–4 的文本命令链路：Saber 共用注册表、完整会话授权和持久化命令回执；Violet 已保存目录、按目标投递并提供聊天框补全。Violet 用户提及后的 NBSP 与普通空格均可作为命令前导分隔。
 - `task logs` 与 `meme` 在 Violet 手输时返回平台不支持，目录不发布；Violet Bot API 仍无文件或图片上传发送通道，步骤 5 及对应真实媒体验收待该接口完成。
-- 本地验证：Saber `make fmt-check lint test-cover-check build test`（覆盖率 77.6%）；Violet `make api-test api-lint api-build`、`make web-lint web-typecheck`、关闭 Node 26 实验性 Web Storage 后的 `make web-test web-build`（1214 通过、1 跳过），以及 Playwright 聊天命令和乐观消息场景（3 通过）。Violet PostgreSQL 集成测试因未配置 `BLOG_TEST_PG_DSN` 跳过；真实平台、模型与多 bot 联调尚未执行。
+- 本地验证：Saber `make fmt-check lint test-cover-check build test`（覆盖率 77.7%）；Violet `make api-test api-lint api-build`、`make web-lint web-typecheck`、关闭 Node 26 实验性 Web Storage 后的 `make web-test web-build`（1214 通过、1 跳过），以及 Playwright 聊天命令和乐观消息场景（3 通过）。Violet PostgreSQL 集成测试因未配置 `BLOG_TEST_PG_DSN` 跳过；真实平台、模型与多 bot 联调尚未执行。

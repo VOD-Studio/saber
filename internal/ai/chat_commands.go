@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/task"
@@ -145,16 +147,17 @@ func (s *Service) ScheduleCommand(ctx context.Context, message chat.Message, ada
 			return commandReply(ctx, message, adapter, "用法：/schedule "+action+" <id>")
 		}
 	case "once", "every", "weekdays":
-		fields := strings.Fields(raw)
-		if len(fields) < 3 {
+		when, rest := commandField(raw)
+		zone, goal := commandField(rest)
+		if when == "" || zone == "" || strings.TrimSpace(goal) == "" {
 			return commandReply(ctx, message, adapter, "用法：/schedule "+action+" <时间或周期> <IANA 时区> <目标>")
 		}
-		in.Action, in.Goal = "create", strings.Join(fields[2:], " ")
-		in.Spec = task.ScheduleSpec{Kind: action, Timezone: fields[1]}
+		in.Action, in.Goal = "create", goal
+		in.Spec = task.ScheduleSpec{Kind: action, Timezone: zone}
 		if action == "every" {
-			in.Spec.Every = fields[0]
+			in.Spec.Every = when
 		} else {
-			in.Spec.At = fields[0]
+			in.Spec.At = when
 		}
 	default:
 		return commandReply(ctx, message, adapter, "用法：/schedule once/every/weekdays/list/status/pause/delete")
@@ -164,4 +167,14 @@ func (s *Service) ScheduleCommand(ctx context.Context, message chat.Message, ada
 		text = "计划操作失败：" + err.Error()
 	}
 	return commandReply(ctx, message, adapter, text)
+}
+
+func commandField(text string) (field, rest string) {
+	text = strings.TrimLeftFunc(text, unicode.IsSpace)
+	end := strings.IndexFunc(text, unicode.IsSpace)
+	if end < 0 {
+		return text, ""
+	}
+	_, width := utf8.DecodeRuneInString(text[end:])
+	return text[:end], text[end+width:]
 }

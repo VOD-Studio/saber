@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- 定时计划命令保留目标正文原有的空格、换行和引号；Violet 群聊开头提及后的 `//` 转义仍作为普通消息发送
 - Release 说明写入 runner 临时目录，避免交叉编译时 Go 将干净的标签工作树标记为 dirty
 
 ## [0.1.0] - 2026-09-23

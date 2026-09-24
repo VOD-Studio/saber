@@ -416,7 +416,8 @@ func (p *Platform) normalizeMessage(ctx context.Context, item inbound) (chat.Mes
 		return chat.Message{}, false
 	}
 	text := stripMentions(message.Content)
-	if body, isCommand, addressed := addressedCommand(message.Content, botUserID); isCommand {
+	body, isCommand, addressed := addressedCommand(message.Content, botUserID)
+	if isCommand {
 		kind, _ := p.conversationKind(ctx, item.conversationID)
 		if kind != kindDirect && !addressed {
 			slog.Debug("violet 群聊命令未在开头寻址本 bot，已跳过", "message", message.ID)
@@ -426,6 +427,9 @@ func (p *Platform) normalizeMessage(ctx context.Context, item inbound) (chat.Mes
 	} else if allowed, reason := p.shouldAnswer(ctx, item.conversationID, mentionsSelf); !allowed {
 		slog.Debug("violet 消息未触发回复", "conversation", item.conversationID, "message", message.ID, "reason", reason)
 		return chat.Message{}, false
+	}
+	if !isCommand && addressed && strings.HasPrefix(body, "//") {
+		text = body
 	}
 	if text == "" {
 		slog.Debug("violet 消息剥离后为空，跳过", "message", message.ID)
