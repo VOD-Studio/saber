@@ -36,8 +36,7 @@ func (s *appState) handleChat(ctx context.Context, message chat.Message, adapter
 func (s *appState) buildCommands() error {
 	r := command.New()
 	add := func(id string, path []string, description, scope string, args []command.Argument, aliases [][]string, capability string, authorize func(chat.Identity) bool, handler command.Handler) error {
-		once := id == "ai.clear" || id == "ai.switch" || id == "task.cancel" || id == "schedule.pause" || id == "schedule.delete" || id == "meme" || strings.HasPrefix(id, "persona.") && id != "persona.list" && id != "persona.status" && id != "persona.help"
-		return r.Register(command.Definition{Descriptor: command.Descriptor{ID: id, Path: path, Description: description, Arguments: args, Scope: scope}, Aliases: aliases, Capability: capability, Authorize: authorize, Once: once, Handle: handler})
+		return r.Register(command.Definition{Descriptor: command.Descriptor{ID: id, Path: path, Description: description, Arguments: args, Scope: scope}, Aliases: aliases, Capability: capability, Authorize: authorize, Once: onceCommand(id), Handle: handler})
 	}
 	reply := func(ctx context.Context, message chat.Message, adapter chat.Adapter, text string) error {
 		_, err := adapter.Send(ctx, chat.Reply{Session: message.Session, ReplyTo: message.ID, Text: text})
@@ -220,6 +219,36 @@ func (s *appState) buildCommands() error {
 				return err
 			}
 		}
+		if s.services.memoryService != nil {
+			for _, sub := range []struct {
+				name, description string
+				args              []command.Argument
+				authorize         func(chat.Identity) bool
+			}{
+				{"list", "查看当前空间记忆条目", nil, nil},
+				{"status", "查看当前空间记忆容量与状态", nil, nil},
+				{"add", "保存当前空间记忆；群内无写权限时形成建议", []command.Argument{{Name: "content", Type: "string", Required: true}}, nil},
+				{"edit", "修改当前空间记忆", []command.Argument{{Name: "id", Type: "integer", Required: true}, {Name: "content", Type: "string", Required: true}}, writer},
+				{"forget", "删除当前空间记忆", []command.Argument{{Name: "id", Type: "integer", Required: true}}, writer},
+				{"pending", "查看当前空间待确认建议", nil, nil},
+				{"approve", "确认当前空间待确认建议", []command.Argument{{Name: "id", Type: "integer", Required: true}}, writer},
+				{"reject", "拒绝当前空间待确认建议", []command.Argument{{Name: "id", Type: "integer", Required: true}}, writer},
+			} {
+				action := sub.name
+				if err := add("memory."+action, []string{"memory", action}, sub.description, "conversation", sub.args, nil, "", sub.authorize,
+					func(ctx context.Context, m chat.Message, a chat.Adapter, raw string) error {
+						return aiSvc.MemoryCommand(ctx, m, a, action, raw)
+					}); err != nil {
+					return err
+				}
+			}
+			if err := add("memory.help", []string{"memory"}, "记忆命令用法", "conversation", nil, nil, "", nil,
+				func(ctx context.Context, m chat.Message, a chat.Adapter, _ string) error {
+					return reply(ctx, m, a, "用法：/memory list/status/add/edit/forget/pending/approve/reject")
+				}); err != nil {
+				return err
+			}
+		}
 	}
 	s.services.commandRegistry = r
 	for _, platform := range s.services.platforms.Enabled(s.cfg) {
@@ -236,4 +265,14 @@ func (s *appState) buildCommands() error {
 		})
 	}
 	return nil
+}
+
+// onceCommand 标记有副作用的命令，重复投递只重试回执，不重做写入。
+func onceCommand(id string) bool {
+	switch id {
+	case "ai.clear", "ai.switch", "task.cancel", "schedule.pause", "schedule.delete", "meme",
+		"memory.add", "memory.edit", "memory.forget", "memory.approve", "memory.reject":
+		return true
+	}
+	return strings.HasPrefix(id, "persona.") && id != "persona.list" && id != "persona.status" && id != "persona.help"
 }

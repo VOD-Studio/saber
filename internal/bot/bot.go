@@ -29,6 +29,7 @@ import (
 	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/mcp"
 	"rua.plus/saber/internal/meme"
+	"rua.plus/saber/internal/memory"
 	"rua.plus/saber/internal/persona"
 	"rua.plus/saber/internal/platform"
 	platformmatrix "rua.plus/saber/internal/platform/matrix"
@@ -49,6 +50,7 @@ type services struct {
 	mediaService     *matrix.MediaService
 	memeService      *meme.Service
 	personaService   *persona.Service
+	memoryService    *memory.Service
 	client           *matrix.MatrixClient
 	// platforms 是已接入的聊天平台，按配置启动并统一停止。
 	platforms *platform.Registry
@@ -287,6 +289,9 @@ func (s *appState) initServices() error {
 	if err := s.cfg.Commands.Validate(); err != nil {
 		return fmt.Errorf("命令授权配置无效: %w", err)
 	}
+	if err := s.cfg.Memory.Validate(); err != nil {
+		return fmt.Errorf("长期记忆配置无效: %w", err)
+	}
 
 	if !s.cfg.AI.Enabled {
 		if svc.client != nil {
@@ -331,13 +336,26 @@ func (s *appState) initServices() error {
 		svc.mediaService = matrix.NewMediaService(mautrixClient, maxSizeBytes)
 	}
 
-	aiService, err := ai.NewService(s.cfg, ai.WithMatrix(svc.commandService, svc.mediaService), ai.WithMCP(svc.mcpManager))
+	configDir := filepath.Dir(s.flags.ConfigPath)
+	// 长期记忆默认关闭；群空间写权限复用命令授权配置，不跟随模型参数。
+	if s.cfg.Memory.Enabled {
+		memorySvc, err := memory.Open(filepath.Join(configDir, "memory.db"), memory.Config{
+			MaxChars:    s.cfg.Memory.MaxChars,
+			InjectBytes: s.cfg.Memory.InjectMaxBytes,
+			GroupWriter: s.cfg.Commands.CanWriteSession,
+		})
+		if err != nil {
+			return fmt.Errorf("长期记忆初始化失败: %w", err)
+		}
+		svc.memoryService = memorySvc
+	}
+
+	aiService, err := ai.NewService(s.cfg, ai.WithMatrix(svc.commandService, svc.mediaService), ai.WithMCP(svc.mcpManager), ai.WithMemory(svc.memoryService))
 	if err != nil {
 		return fmt.Errorf("AI服务初始化失败: %w", err)
 	}
 	svc.aiService = aiService
-	configDir := filepath.Dir(s.flags.ConfigPath)
-	protected := []string{s.cfg.Server.TokenPath(s.flags.ConfigPath), s.flags.ConfigPath, s.flags.ConfigPath + ".session", filepath.Join(configDir, "tasks.db"), filepath.Join(configDir, "persona.db")}
+	protected := []string{s.cfg.Server.TokenPath(s.flags.ConfigPath), s.flags.ConfigPath, s.flags.ConfigPath + ".session", filepath.Join(configDir, "tasks.db"), filepath.Join(configDir, "persona.db"), filepath.Join(configDir, "memory.db")}
 	if s.cfg.Platforms.Matrix.Enabled {
 		protected = append(protected, s.cfg.Matrix.E2EESessionPath, s.cfg.Matrix.E2EESessionPath+".key", s.cfg.Matrix.PickleKeyPath)
 	}
@@ -688,6 +706,15 @@ func (s *appState) shutdown(cancel context.CancelFunc) {
 			slog.Debug("正在停止主动聊天管理器...")
 			svc.proactiveManager.Stop()
 			slog.Debug("主动聊天管理器已停止")
+		})
+	}
+
+	if svc.memoryService != nil {
+		wg.Go(func() {
+			slog.Debug("正在关闭长期记忆服务...")
+			if err := svc.memoryService.Close(); err != nil {
+				slog.Warn("关闭长期记忆服务失败", "error", err)
+			}
 		})
 	}
 

@@ -23,12 +23,23 @@ type Config struct {
 	Platforms PlatformsConfig  `yaml:"platforms"`
 	AI        AIConfig         `yaml:"ai"`
 	MCP       MCPConfig        `yaml:"mcp"`
+	Memory    MemoryConfig     `yaml:"memory"`
 	Shutdown  ShutdownConfig   `yaml:"shutdown"`
 }
 
 // ShutdownConfig 存储关闭配置
 type ShutdownConfig struct {
 	TimeoutSeconds int `yaml:"timeout_seconds"` // 关闭超时时间（秒）
+}
+
+// MemoryConfig 存储长期记忆配置。
+type MemoryConfig struct {
+	// Enabled 控制是否启用长期记忆；默认关闭，升级时不改变现有行为。
+	Enabled bool `yaml:"enabled"`
+	// MaxChars 限制每个空间的存储字符数；零值使用默认值。
+	MaxChars int `yaml:"max_chars"`
+	// InjectMaxBytes 限制单次注入的字节上限；零值使用默认值。
+	InjectMaxBytes int `yaml:"inject_max_bytes"`
 }
 
 // MatrixConfig 存储 Matrix 连接配置
@@ -412,6 +423,15 @@ func DefaultShutdownConfig() ShutdownConfig {
 	}
 }
 
+// DefaultMemoryConfig 返回带有合理默认值的长期记忆配置。
+func DefaultMemoryConfig() MemoryConfig {
+	return MemoryConfig{
+		Enabled:        false,
+		MaxChars:       2200,
+		InjectMaxBytes: 8192,
+	}
+}
+
 // Validate 在创建已启用的 Matrix 客户端时验证连接配置。
 func (m *MatrixConfig) Validate() error {
 	if m.Homeserver == "" {
@@ -560,6 +580,17 @@ func (s *ShutdownConfig) Validate() error {
 	if s.TimeoutSeconds > 300 {
 		slog.Warn("shutdown timeout is very long, this may delay application exit",
 			"timeout_seconds", s.TimeoutSeconds)
+	}
+	return nil
+}
+
+// Validate 验证长期记忆配置是否有效。
+func (m *MemoryConfig) Validate() error {
+	if !m.Enabled {
+		return nil
+	}
+	if m.MaxChars < 0 || m.InjectMaxBytes < 0 {
+		return fmt.Errorf("memory max_chars and inject_max_bytes must be non-negative")
 	}
 	return nil
 }
@@ -829,6 +860,7 @@ func DefaultConfig() *Config {
 		Platforms: DefaultPlatformsConfig(),
 		AI:        DefaultAIConfig(),
 		MCP:       DefaultMCPConfig(),
+		Memory:    DefaultMemoryConfig(),
 		Shutdown:  DefaultShutdownConfig(),
 	}
 }
@@ -893,6 +925,10 @@ commands:
   admins: [] # 全局模型切换、共享人格创建和删除；按 platform/account/users 精确配置
   session_writers: [] # 当前会话上下文和人格修改；按 platform/account/room/users 精确配置
   legacy_persona_account: "" # 确认旧 room_personas 全属此 Matrix bot 时填其完整用户 ID，空值保留待核查
+memory:
+  enabled: false # 长期记忆；启用后按用户与群作用域隔离保存，默认关闭
+  max_chars: 2200 # 每个空间的存储上限（Unicode 字符）
+  inject_max_bytes: 8192 # 单次注入字节上限，同时不超过总输入预算的四分之一
 shutdown:
   timeout_seconds: 30
 `
