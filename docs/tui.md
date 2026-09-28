@@ -56,6 +56,7 @@ TUI 可通过 `--server http://127.0.0.1:8320` 覆盖连接地址，也可使用
 | 设置其他模型支持的思考等级 | `/reasoning <等级>` |
 | 恢复模型默认思考等级 | `/reasoning default` |
 | 展开工具参数和结果 | Ctrl+T / `/tools` |
+| 长期记忆 | `/memory list\|status\|add\|edit\|forget\|pending\|approve\|reject` |
 | 查看历史 | PageUp / PageDown / 鼠标滚轮 |
 | 跳到历史开头 / 最新内容 | Ctrl+Home / Ctrl+End |
 | 刷新连接与会话 | F5 |
@@ -78,6 +79,8 @@ TUI 可通过 `--server http://127.0.0.1:8320` 覆盖连接地址，也可使用
 选择器覆盖在对话上方，输入文字可按名称或完整标识筛选，↑↓ 选择、Enter 确认、Esc 返回；打开和关闭选择器会保留输入草稿和历史阅读位置。工具折叠时显示路径、命令或查询等参数摘要。向上翻阅时新内容不会自动拉回底部，提示出现后可用 Ctrl+End 回到最新回答。
 
 空输入区键入 `/` 会立即弹出命令菜单，无需先按 Enter。可用方向键选择，也可继续输入命令名称筛选；`/reasoning high` 等带参数命令仍可直接输入并按 Enter 执行。Esc 将已输入的命令放回输入区继续编辑；搜索为空时 Backspace 关闭菜单。正文、路径、网址中的 `/` 和粘贴内容不会触发弹窗。
+
+界面自身的快捷命令由 TUI 处理；其余斜杠指令（如 `memory`、`task`、`schedule`）交给常驻服务的共享命令入口执行，身份由服务端令牌与操作系统用户确定，回执作为一条本地轮次展示，不写入服务端任务历史。命令不会阻塞正在运行的模型任务；`memory` 覆盖 `list/status/add/edit/forget/pending/approve/reject`。
 
 ## 任务与投递
 

@@ -451,3 +451,47 @@ func TestModel_CommandsAndRequestFailure(t *testing.T) {
 func TestClean_RemovesTerminalControls(t *testing.T) {
 	require.Equal(t, "hello世界\nnext", clean("hello\x1b[31m世界\x1b[0m\x1b]52;c;ZXZpbA==\a\nnext\x00"))
 }
+
+// TestModel_LocalCommandResults 验证界面内命令之外的斜杠指令转交服务端，并以本地轮次展示回执。
+func TestModel_LocalCommandResults(t *testing.T) {
+	m := previewModel()
+	m.turns = []server.Turn{{ID: 7, Session: m.session, Input: "问题", Content: "回答", Status: "completed"}}
+
+	// 界面内命令仍由本地处理，不转交服务端。
+	m.command("/model")
+	require.Equal(t, "models", m.menu)
+	m.menuKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Empty(t, m.menu)
+
+	// 其他斜杠指令转交服务端，未执行前不应panic。
+	require.NotNil(t, m.command("/memory list"))
+
+	// 服务端回执作为本地轮次展示，编号为负数，避免与真实任务冲突。
+	_, cmd := m.Update(commandMsg{session: m.session, input: "/memory list", text: "记忆条目（1 条）：\n- #1 v1：中文简洁"})
+	require.Nil(t, cmd)
+	require.Len(t, m.turns, 2)
+	local := m.turns[1]
+	require.Equal(t, "/memory list", local.Input)
+	require.Contains(t, local.Content, "中文简洁")
+	require.Negative(t, local.ID)
+
+	// 归属其他会话的回执被丢弃。
+	before := len(m.turns)
+	m.Update(commandMsg{session: "other", input: "/memory list", text: "x"})
+	require.Len(t, m.turns, before)
+
+	// 失败回执显示在提示区，不写入对话。
+	m.Update(commandMsg{session: m.session, input: "/memory list", err: errors.New("连接失败")})
+	require.Contains(t, m.notice, "连接失败")
+	require.Len(t, m.turns, before)
+}
+
+// TestModel_MemoryMenuFillsInput 验证命令菜单中的长期记忆项预填指令。
+func TestModel_MemoryMenuFillsInput(t *testing.T) {
+	m := previewModel()
+	m.openMenu("commands")
+	m.filter.SetValue("/memory")
+	m.menuKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Empty(t, m.menu)
+	require.Equal(t, "/memory list", m.input.Value())
+}

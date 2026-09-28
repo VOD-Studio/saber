@@ -81,6 +81,15 @@ func (c *Client) JSON(ctx context.Context, method, path string, input, output an
 	return json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(output)
 }
 
+// Command 把本机可信指令交给共享命令入口，返回命令回执文本。
+func (c *Client) Command(ctx context.Context, session, id, text string) (string, error) {
+	var out CommandResult
+	if err := c.JSON(ctx, "POST", "/v1/sessions/"+url.PathEscape(session)+"/commands", CommandInput{ID: id, Text: text}, &out); err != nil {
+		return "", err
+	}
+	return out.Text, nil
+}
+
 // Stream 是单个任务的事件订阅；关闭只断开订阅，不取消任务。
 type Stream struct {
 	body    io.ReadCloser

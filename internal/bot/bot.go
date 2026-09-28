@@ -135,7 +135,8 @@ func run(parent context.Context, info matrix.BuildInfo) error {
 		return err
 	}
 	slog.Info("Saber 服务已就绪", "listen", state.cfg.Server.Listen, "chat", "saber chat")
-	return server.Serve(ctx, &http.Server{Addr: state.cfg.Server.Listen, Handler: server.New(state.services.aiService, token), ReadHeaderTimeout: 5 * time.Second}, listener)
+	handler := server.New(state.services.aiService, token, localCommands{registry: state.services.commandRegistry, capabilities: state.commandCapabilities})
+	return server.Serve(ctx, &http.Server{Addr: state.cfg.Server.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second}, listener)
 }
 
 // initConfig 处理配置初始化。

@@ -13,6 +13,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"rua.plus/saber/internal/agent"
@@ -52,21 +53,44 @@ type Message struct {
 	Effort string `json:"effort"`
 }
 
+// CommandInput 是本机可信指令请求；ID 作为有副作用命令的幂等键。
+type CommandInput struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
+}
+
+// CommandResult 返回共享命令的文本回执；空文本表示命令未产生回执。
+type CommandResult struct {
+	Text string `json:"text"`
+}
+
+// CommandDispatcher 把本机终端已认证的指令交给共享命令注册表；
+// 身份由服务端令牌与操作系统用户确定，不接受请求体中的发送者或房间。
+type CommandDispatcher interface {
+	Dispatch(ctx context.Context, session chat.Session, senderID, id, text string) (reply string, handled bool, err error)
+}
+
 type handler struct {
-	service *ai.Service
-	token   string
+	service  *ai.Service
+	token    string
+	commands CommandDispatcher
 }
 
 var identifier = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
 
 // New 创建带本机令牌认证的 HTTP 入口；聊天服务可为空，此时仍可查询健康状态。
-func New(service *ai.Service, token string) http.Handler {
+// commands 非空时启用本机共享命令入口。
+func New(service *ai.Service, token string, commands ...CommandDispatcher) http.Handler {
 	h := &handler{service: service, token: token}
+	if len(commands) > 0 {
+		h.commands = commands[0]
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/info", h.info)
 	mux.HandleFunc("GET /v1/sessions", h.sessions)
 	mux.HandleFunc("GET /v1/sessions/{session}/tasks", h.history)
 	mux.HandleFunc("POST /v1/sessions/{session}/messages", h.submit)
+	mux.HandleFunc("POST /v1/sessions/{session}/commands", h.command)
 	mux.HandleFunc("GET /v1/sessions/{session}/tasks/{task}/events", h.events)
 	mux.HandleFunc("POST /v1/sessions/{session}/tasks/{task}/cancel", h.cancel)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,7 +103,8 @@ func New(service *ai.Service, token string) http.Handler {
 			http.Error(w, "不接受浏览器跨源请求", http.StatusForbidden)
 			return
 		}
-		if r.URL.Path != "/v1/info" && (service == nil || service.Tasks() == nil) {
+		// 本机命令入口由自己的分发器判定是否可用，ping/help 等命令不依赖 AI 与任务。
+		if r.URL.Path != "/v1/info" && !strings.HasSuffix(r.URL.Path, "/commands") && (service == nil || service.Tasks() == nil) {
 			http.Error(w, "请配置 ai.enabled 和模型后重启服务", http.StatusServiceUnavailable)
 			return
 		}
@@ -177,6 +202,37 @@ func (h *handler) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, h.view(t))
+}
+func (h *handler) command(w http.ResponseWriter, r *http.Request) {
+	if !identifier.MatchString(r.PathValue("session")) {
+		http.Error(w, "无效会话编号", http.StatusBadRequest)
+		return
+	}
+	if h.commands == nil {
+		http.Error(w, "本机命令入口未启用", http.StatusServiceUnavailable)
+		return
+	}
+	var input CommandInput
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		http.Error(w, "无效指令: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if decoder.Decode(new(any)) != io.EOF || !identifier.MatchString(input.ID) || strings.TrimSpace(input.Text) == "" {
+		http.Error(w, "需要有效的指令编号和单个 JSON 对象", http.StatusBadRequest)
+		return
+	}
+	reply, handled, err := h.commands.Dispatch(r.Context(), session(r), identity(r).SenderID, input.ID, input.Text)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !handled {
+		http.Error(w, "不是已知命令，请以 / 或 ! 开头", http.StatusBadRequest)
+		return
+	}
+	respond(w, CommandResult{Text: reply})
 }
 func taskID(r *http.Request) (int64, error) { return strconv.ParseInt(r.PathValue("task"), 10, 64) }
 func (h *handler) cancel(w http.ResponseWriter, r *http.Request) {

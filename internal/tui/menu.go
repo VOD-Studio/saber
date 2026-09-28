@@ -32,7 +32,7 @@ func (m *model) choices() (string, []choice) {
 		if m.menu == "commands" {
 			title = "命令"
 		}
-		return title, []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}, {"/sidebar", "sidebar", "收起或展开侧栏 · Ctrl+B"}, {"/tools", "tools", "展开工具详情 · Ctrl+T"}, {"F5", "reconnect", "刷新连接与会话"}, {"/quit", "quit", "离开界面 · 空输入时 Ctrl+C"}}
+		return title, []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}, {"/memory", "memory", "长期记忆 · 查看与管理"}, {"/sidebar", "sidebar", "收起或展开侧栏 · Ctrl+B"}, {"/tools", "tools", "展开工具详情 · Ctrl+T"}, {"F5", "reconnect", "刷新连接与会话"}, {"/quit", "quit", "离开界面 · 空输入时 Ctrl+C"}}
 	}
 }
 func (m *model) openMenu(menu string) tea.Cmd {
@@ -123,6 +123,9 @@ func (m *model) menuKey(msg tea.KeyPressMsg) tea.Cmd {
 				m.stopStream()
 				m.loading = true
 				return m.boot()
+			case "memory":
+				m.input.SetValue("/memory list")
+				return focus
 			default:
 				return m.openMenu(selected.value)
 			}
@@ -142,6 +145,9 @@ func (m *model) menuKey(msg tea.KeyPressMsg) tea.Cmd {
 func (m *model) command(text string) tea.Cmd {
 	args := strings.Fields(text)
 	m.input.Reset()
+	if len(args) == 0 {
+		return nil
+	}
 	switch args[0] {
 	case "/":
 		return m.openMenu("help")
@@ -181,8 +187,8 @@ func (m *model) command(text string) tea.Cmd {
 		m.stopStream()
 		return tea.Quit
 	default:
-		m.notice = "未知命令；输入 /help 查看快捷操作。"
-		m.input.SetValue(text)
+		// 界面内命令之外的斜杠指令交给服务端共享命令入口（记忆、任务、计划等）。
+		return m.runCommand(text)
 	}
 	return nil
 }

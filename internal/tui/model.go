@@ -44,9 +44,11 @@ type model struct {
 	cursor, streamingID                         int64
 	cancelStream                                context.CancelFunc
 	generation                                  int
-	pending                                     *server.Message
-	pendingSession                              string
-	stream                                      *server.Stream
+	// localID 为本地命令回执生成负数编号，避免与真实任务编号冲突。
+	localID        int64
+	pending        *server.Message
+	pendingSession string
+	stream         *server.Stream
 	// 每轮尝试的临时文字与最终任务结果分开维护。
 	live        map[int64]string
 	stage       string
@@ -80,6 +82,12 @@ type cancelledMsg struct {
 	err     error
 }
 type retryMsg struct{ generation int }
+type commandMsg struct {
+	session string
+	input   string
+	text    string
+	err     error
+}
 
 // Run 在独立终端启动聊天界面，退出只取消客户端连接。
 func Run(ctx context.Context, client *server.Client, session string) error {
@@ -224,6 +232,21 @@ func (m *model) submit() tea.Cmd {
 	return func() tea.Msg {
 		result := sentMsg{session: session}
 		result.err = client.JSON(ctx, "POST", "/v1/sessions/"+url.PathEscape(session)+"/messages", input, &result.turn)
+		return result
+	}
+}
+
+// runCommand 把非界面内的指令交给服务端共享命令入口，回执以本地轮次展示。
+func (m *model) runCommand(text string) tea.Cmd {
+	if !m.connected || !m.info.Enabled {
+		m.notice = "需要 saber serve 运行后再执行命令。"
+		m.input.SetValue(text)
+		return nil
+	}
+	client, ctx, session, id := m.client, m.ctx, m.session, uuid.NewString()
+	return func() tea.Msg {
+		result := commandMsg{session: session, input: text}
+		result.text, result.err = client.Command(ctx, session, id, text)
 		return result
 	}
 }
@@ -383,6 +406,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.subscribe(m.streamingID)
+	case commandMsg:
+		if msg.session != m.session {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.notice = msg.err.Error()
+			m.refresh()
+			return m, nil
+		}
+		m.notice = ""
+		m.localID--
+		m.turns = append(m.turns, server.Turn{ID: m.localID, Session: m.session, Input: msg.input, Content: msg.text, Status: "completed", CreatedAt: time.Now()})
+		m.refresh()
+		m.viewport.GotoBottom()
+		return m, nil
 	case cancelledMsg:
 		if msg.session == m.session {
 			if msg.err != nil {

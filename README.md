@@ -663,7 +663,7 @@ saber/
       bot.go                       # 机器人初始化和生命周期
       chat_commands.go             # 通用命令装配与平台能力
       errors.go                    # 错误定义
-    server/                        # 本机会话接口、令牌认证和持久化事件流
+    server/                        # 本机会话接口、令牌认证、持久化事件流与本机命令入口
     tui/                           # Charm 聊天界面、模型选择、断线续读
     cli/
       flags.go                     # 命令行标志解析
