@@ -77,6 +77,30 @@ CREATE TRIGGER IF NOT EXISTS history_projections_au AFTER UPDATE ON history_proj
 	INSERT INTO history_fts(history_fts, rowid, user_text, assistant_text) VALUES('delete', old.id, old.user_text, old.assistant_text);
 	INSERT INTO history_fts(rowid, user_text, assistant_text) VALUES (new.id, new.user_text, new.assistant_text);
 END;
+
+CREATE TABLE IF NOT EXISTS memory_scope_settings (
+	scope_key TEXT PRIMARY KEY,
+	paused INTEGER NOT NULL DEFAULT 0,
+	review_count INTEGER NOT NULL DEFAULT 0,
+	token_count INTEGER NOT NULL DEFAULT 0,
+	last_reviewed_task_id INTEGER NOT NULL DEFAULT 0,
+	updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS memory_excluded_sources (
+	scope_key TEXT NOT NULL,
+	task_id INTEGER NOT NULL,
+	reason TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY(scope_key, task_id)
+);
+
+CREATE TABLE IF NOT EXISTS memory_reviewed_tasks (
+	scope_key TEXT NOT NULL,
+	task_id INTEGER NOT NULL,
+	reviewed_at INTEGER NOT NULL,
+	PRIMARY KEY(scope_key, task_id)
+);
 `
 
 // store 独占 memory.db 的表结构与连接。

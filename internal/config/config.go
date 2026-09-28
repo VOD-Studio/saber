@@ -40,6 +40,20 @@ type MemoryConfig struct {
 	MaxChars int `yaml:"max_chars"`
 	// InjectMaxBytes 限制单次注入的字节上限；零值使用默认值。
 	InjectMaxBytes int `yaml:"inject_max_bytes"`
+	// AutoLearn 控制是否开启后台自动复盘提炼记忆；长期记忆启用时默认开启。
+	AutoLearn bool `yaml:"auto_learn"`
+	// ReviewInterval 限制每隔多少个已完成轮次触发一次复盘；零值使用默认值 5。
+	ReviewInterval int `yaml:"review_interval"`
+	// ReviewModel 指定后台复盘使用的模型；为空时使用 AI 的 default_model。
+	ReviewModel string `yaml:"review_model"`
+	// MaxScopeReviews 限制单个空间最大复盘次数配额；0 为不设限。
+	MaxScopeReviews int `yaml:"max_scope_reviews"`
+	// MaxScopeTokens 限制单个空间累计复盘 token 上限；0 为不设限。
+	MaxScopeTokens int `yaml:"max_scope_tokens"`
+	// MaxGlobalReviews 限制全局最大复盘次数配额；0 为不设限。
+	MaxGlobalReviews int `yaml:"max_global_reviews"`
+	// MaxGlobalTokens 限制全局累计复盘 token 上限；0 为不设限。
+	MaxGlobalTokens int `yaml:"max_global_tokens"`
 }
 
 // MatrixConfig 存储 Matrix 连接配置
@@ -429,6 +443,8 @@ func DefaultMemoryConfig() MemoryConfig {
 		Enabled:        false,
 		MaxChars:       2200,
 		InjectMaxBytes: 8192,
+		AutoLearn:      true,
+		ReviewInterval: 5,
 	}
 }
 
@@ -589,8 +605,10 @@ func (m *MemoryConfig) Validate() error {
 	if !m.Enabled {
 		return nil
 	}
-	if m.MaxChars < 0 || m.InjectMaxBytes < 0 {
-		return fmt.Errorf("memory max_chars and inject_max_bytes must be non-negative")
+	if m.MaxChars < 0 || m.InjectMaxBytes < 0 || m.ReviewInterval < 0 ||
+		m.MaxScopeReviews < 0 || m.MaxScopeTokens < 0 ||
+		m.MaxGlobalReviews < 0 || m.MaxGlobalTokens < 0 {
+		return fmt.Errorf("memory configuration numbers must be non-negative")
 	}
 	return nil
 }

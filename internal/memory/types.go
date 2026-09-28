@@ -65,6 +65,10 @@ var (
 	ErrEmptyContent = errors.New("记忆内容不能为空")
 	// ErrScope 表示当前身份无法证明任何可信记忆空间。
 	ErrScope = errors.New("当前会话无法确定可信记忆空间")
+	// ErrPaused 表示当前记忆空间的自动学习已暂停。
+	ErrPaused = errors.New("当前记忆空间的自动学习已暂停")
+	// ErrQuotaExceeded 表示超出记忆复盘配额。
+	ErrQuotaExceeded = errors.New("超出记忆复盘配额")
 )
 
 // Scope 是记忆的隔离键，由可信身份推导，不能由模型参数指定。
@@ -294,4 +298,48 @@ type ProjectionInput struct {
 	TaskStatus string
 	// CreatedAt 是任务创建时间。
 	CreatedAt time.Time
+}
+
+// ScopeSettings 记录一个记忆空间的设置与复盘统计。
+type ScopeSettings struct {
+	// Scope 是所属空间。
+	Scope Scope
+	// Paused 表示该空间是否暂停自动学习。
+	Paused bool
+	// ReviewCount 是该空间已执行的复盘总次数。
+	ReviewCount int
+	// TokenCount 是该空间复盘累计消耗的 token 数量。
+	TokenCount int
+	// LastReviewedTaskID 是该空间最后复盘的任务编号。
+	LastReviewedTaskID int64
+	// UpdatedAt 是最后更新时间。
+	UpdatedAt time.Time
+}
+
+// ScopeStatus 描述一个空间的综合状态，包含条目容量、学习开关、复盘统计与待确认建议数。
+type ScopeStatus struct {
+	// Usage 是容量占用。
+	Usage Usage
+	// Paused 表示是否暂停自动学习。
+	Paused bool
+	// ReviewCount 是该空间复盘总次数。
+	ReviewCount int
+	// TokenCount 是该空间复盘累计消耗的 token 数。
+	TokenCount int
+	// PendingCount 是当前空间未处理的待确认建议数。
+	PendingCount int
+}
+
+// ProposalInput 是后台复盘或用户提出建议的输入。
+type ProposalInput struct {
+	// Action 是 ActionAdd、ActionReplace 或 ActionRemove。
+	Action string
+	// EntryID 在 replace 与 remove 时指定目标条目。
+	EntryID int64
+	// ExpectedVersion 是目标条目的预期版本，用于防止并发冲突。
+	ExpectedVersion int64
+	// Content 是 add 与 replace 的正文。
+	Content string
+	// Source 是建议的来源审计信息。
+	Source Source
 }

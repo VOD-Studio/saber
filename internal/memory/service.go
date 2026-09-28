@@ -307,6 +307,11 @@ func (s *Service) removeTx(ctx context.Context, tx *sql.Tx, key string, in mutat
 	if affected == 0 {
 		return Entry{}, false, fmt.Errorf("%w：条目 #%d 已被其他任务修改", ErrConflict, current.ID)
 	}
+	if current.SourceTask > 0 {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO memory_excluded_sources(scope_key, task_id, reason, created_at) VALUES(?, ?, 'forgotten', ?)`, key, current.SourceTask, nowMillis()); err != nil {
+			return Entry{}, false, err
+		}
+	}
 	return current, false, nil
 }
 
@@ -447,5 +452,9 @@ func (s *Service) Reject(ctx context.Context, identity chat.Identity, changeID i
 	if affected == 0 {
 		return Change{}, ErrNotFound
 	}
-	return scanChange(s.store.db.QueryRowContext(ctx, `SELECT `+changeColumns+` FROM memory_changes WHERE id=?`, changeID))
+	change, err := scanChange(s.store.db.QueryRowContext(ctx, `SELECT `+changeColumns+` FROM memory_changes WHERE id=?`, changeID))
+	if err == nil && change.SourceTask > 0 {
+		_, _ = s.store.db.ExecContext(ctx, `INSERT OR IGNORE INTO memory_excluded_sources(scope_key, task_id, reason, created_at) VALUES(?, ?, 'rejected', ?)`, scope.Key(), change.SourceTask, nowMillis())
+	}
+	return change, err
 }
