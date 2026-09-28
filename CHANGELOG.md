@@ -34,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 空间与全局配额控制：支持配置 `max_scope_reviews`、`max_scope_tokens`、`max_global_reviews` 与 `max_global_tokens`，超出配额自动跳过复盘并记录日志
 - 新增 `memory pause` 与 `memory resume` 共享文本命令，支持按空间随时暂停/恢复自动记忆提炼（群聊需管理员权限）；`/memory status` 实时展示容量、自动学习状态、复盘次数与 token 消耗
 
+- 程序性经验与技能库（P4）：在 `internal/memory` 中扩展 `skill_entries` 与 `skill_changes` 数据表，将复杂工作流与排错经验沉淀为结构化程序性技能（Skill），支持按需渐进加载、版本乐观锁与审批建议流
+- 渐进式发现与加载（Progressive Disclosure）：系统提示词仅在可用时注入轻量技能目录（`name`、`description` 与版本 `v`），完整正文不进入初始提示词；模型根据任务意图按需调用 `saber_skill(action="read")` 读取完整操作步骤与排错说明，大幅节省 Token 预算并避免注意力稀释
+- 严格作用域隔离与权限管理：个人技能（User Scope）仅在私聊与终端生效，群共享技能（Group Scope）全群共享且与个人隔离；群内普通成员创建、修改或删除技能自动转为待确认建议，由群管理员审批生效
+- CAS 乐观锁版本并发控制：技能更新与删除强制比对当前版本号，防止并发修改覆盖他人成果；审批待确认建议时进行二次版本比对，避免过时提议破坏最新技能
+- 新增 `saber_skill` 模型工具（`catalog/read/add/replace/remove`）与 `/skill` 系列共享文本命令（`list/show/add/edit/delete/pending/approve/reject`），有副作用的操作受持久化幂等回执保护，TUI 菜单增加 `/skill` 快捷指令
+- 后台复盘提炼流水线升级：在受限沙箱中引入 `saber_skill`，支持在已持久化的成功任务中自动识别复杂工作流与排错恢复经验，提炼脱敏为可复用规范技能
+
 ## [0.2.0] - 2026-09-24
 
 ### Added

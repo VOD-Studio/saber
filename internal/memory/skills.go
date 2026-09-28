@@ -88,15 +88,6 @@ func (s *Service) getSkill(ctx context.Context, scope Scope, name string) (Skill
 	return entry, err
 }
 
-func (s *Service) getSkillByID(ctx context.Context, scope Scope, id int64) (SkillEntry, error) {
-	row := s.store.db.QueryRowContext(ctx, `SELECT `+skillColumns+` FROM skill_entries WHERE scope_key=? AND id=?`, scope.Key(), id)
-	entry, err := scanSkill(row, scope)
-	if errors.Is(err, sql.ErrNoRows) {
-		return SkillEntry{}, ErrSkillNotFound
-	}
-	return entry, err
-}
-
 // AddSkill 在当前空间新增技能；群聊无写权限时形成待确认建议。
 func (s *Service) AddSkill(ctx context.Context, identity chat.Identity, name, description, content string, source Source) (SkillMutation, error) {
 	scope, err := space(identity)

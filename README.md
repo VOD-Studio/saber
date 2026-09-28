@@ -718,6 +718,8 @@ saber/
       tools.go                     # 工具管理
       memory.go                    # 记忆快照注入与 saber_memory 工具
       memory_commands.go           # memory 通用命令处理
+      skills.go                    # 技能管理 saber_skill 工具定义与执行
+      skill_commands.go            # skill 通用命令处理
       history.go                   # 历史回忆 saber_history 工具与投影同步
       memory_review.go             # 受限沙箱后台复盘与配额控制流水线
     mcp/
@@ -747,12 +749,13 @@ saber/
       chat_commands.go             # 通用人格命令处理
       commands.go                  # !persona 命令处理
     memory/
-      types.go                     # 作用域、条目、建议与容量定义
+      types.go                     # 作用域、条目、建议、技能与容量定义
       service.go                   # 按用户与群作用域隔离的记忆读写与授权
       store.go                     # memory.db 表结构与扫描
       snapshot.go                  # 受预算限制的注入快照
       history.go                   # 历史投影记录、FTS5 全文召回与上下文读取
       review.go                    # 复盘设置、配额、排除来源与复盘结果存储
+      skills.go                    # 程序性技能存储、CAS版本控制、建议流与目录生成
 ```
 
 ## 开发
