@@ -15,13 +15,18 @@ import (
 	"rua.plus/saber/internal/model"
 )
 
-const reviewSystemPrompt = `你是一个专业的长期记忆提炼助手。
-你的职责是复盘最近的对话记录，提炼需要长期保留的关键事实或稳定偏好：
-- 个人空间：提炼该用户的稳定偏好、习惯与反复纠正的要求（例如语言偏好、编码风格、表达习惯）。
-- 群聊空间：提炼全群共识、团队约定、已确认的发布流程或决定。严禁在群聊空间提炼某具体成员的个人档案或隐私信息。
-- 忽略单次临时任务、闲聊调侃、猜测假设、未证实的事实或敏感密码密钥。
-- 你可以使用 saber_memory 工具查看当前空间记忆(list)，新增稳定记忆(add)，建议修改(replace)或建议删除(remove)过时记忆。
-- 若最近对话没有值得长期保留的新增或修改内容，请直接完成，无需调用工具。`
+const reviewSystemPrompt = `你是一个专业的长期记忆与程序性经验（技能）提炼助手。
+你的职责是复盘最近的对话记录，提炼需要长期保留的关键事实或可复用技能：
+1. 事实记忆（saber_memory）：
+   - 个人空间：提炼该用户的稳定偏好、习惯与反复纠正的要求（例如语言偏好、编码风格、表达习惯）。
+   - 群聊空间：提炼全群共识、团队约定、已确认的发布流程或决定。严禁在群聊空间提炼某具体成员的个人档案或隐私信息。
+2. 程序性技能（saber_skill）：
+   - 当对话中展现出成功解决复杂故障的排错经验（Troubleshooting Playbook）、或成功执行的多步骤复杂工作流程时，使用 saber_skill 工具的 add 或 replace 操作沉淀为可复用技能。
+   - 技能必须具备规范名称（kebab-case Slug）、清晰的适用场景描述与 Markdown 步骤/排错指引。
+   - 严禁包含敏感凭证、密码或特定临时路径，需泛化为参数。
+3. 忽略单次临时任务、闲聊调侃、猜测假设、未证实的事实或敏感密码密钥。
+4. 你可以使用 saber_memory、saber_history 和 saber_skill 工具查看当前空间记忆或技能，沉淀新增内容或修改过时内容。
+5. 若最近对话没有值得长期保留的新增或修改内容，请直接完成，无需调用工具。`
 
 // triggerBackgroundReview 异步启动一次后台待复盘记录扫描。
 func (s *Service) triggerBackgroundReview() {
@@ -153,7 +158,7 @@ func (s *Service) ReviewScope(ctx context.Context, scope memory.Scope) error {
 			{Role: openai.ChatMessageRoleSystem, Content: reviewSystemPrompt},
 			{Role: openai.ChatMessageRoleUser, Content: userPrompt.String()},
 		},
-		Tools: []openai.Tool{memoryTool(), historyTool()},
+		Tools: []openai.Tool{memoryTool(), historyTool(), skillTool()},
 	}
 
 	retry := &RetryConfigWrapper{
@@ -176,15 +181,18 @@ func (s *Service) ReviewScope(ctx context.Context, scope memory.Scope) error {
 			return s.getClient(m)
 		}, retry),
 		Execute: func(execCtx context.Context, name string, args map[string]any) (agent.ToolOutput, error) {
-			if name != "saber_memory" && name != "saber_history" {
-				return agent.ToolOutput{IsError: true}, fmt.Errorf("复盘沙箱仅允许使用记忆与历史工具，禁止使用 %q", name)
+			if name != "saber_memory" && name != "saber_history" && name != "saber_skill" {
+				return agent.ToolOutput{IsError: true}, fmt.Errorf("复盘沙箱仅允许使用记忆、历史与技能工具，禁止使用 %q", name)
 			}
 			var val any
 			var toolErr error
-			if name == "saber_memory" {
+			switch name {
+			case "saber_memory":
 				val, toolErr = s.executeMemoryTool(execCtx, args)
-			} else {
+			case "saber_history":
 				val, toolErr = s.executeHistoryTool(execCtx, args)
+			case "saber_skill":
+				val, toolErr = s.executeSkillTool(execCtx, args)
 			}
 			return agent.ToolOutput{Value: val}, toolErr
 		},

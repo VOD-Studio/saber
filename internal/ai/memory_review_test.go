@@ -451,3 +451,130 @@ func TestMemoryReview_ToolSandboxRestrictions(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, bashCalled)
 }
+
+func TestMemoryReview_SkillAutoAddPersonalAndGroup(t *testing.T) {
+	var toolCallsCount int
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		toolCallsCount++
+		if toolCallsCount%2 == 1 {
+			// 第一轮调用 saber_skill add
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":      "chatcmpl-test-skill-1",
+				"object":  "chat.completion",
+				"created": time.Now().Unix(),
+				"model":   "openai.local",
+				"choices": []map[string]any{
+					{
+						"index": 0,
+						"message": map[string]any{
+							"role": "assistant",
+							"tool_calls": []map[string]any{
+								{
+									"id":   "call_skill_add",
+									"type": "function",
+									"function": map[string]any{
+										"name":      "saber_skill",
+										"arguments": `{"action":"add","name":"git-rebase-conflict","description":"解决变基冲突步骤","content":"## 排错步骤\n1. git status\n2. git add"}`,
+									},
+								},
+							},
+						},
+						"finish_reason": "tool_calls",
+					},
+				},
+				"usage": map[string]any{"total_tokens": 120},
+			})
+			return
+		}
+		// 第二轮正常结束
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":      "chatcmpl-test-skill-2",
+			"object":  "chat.completion",
+			"created": time.Now().Unix(),
+			"model":   "openai.local",
+			"choices": []map[string]any{
+				{
+					"index": 0,
+					"message": map[string]any{
+						"role":    "assistant",
+						"content": "已成功提炼技能流程。",
+					},
+					"finish_reason": "stop",
+				},
+			},
+			"usage": map[string]any{"total_tokens": 60},
+		})
+	}))
+	defer modelServer.Close()
+
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: modelServer.URL, APIKey: "test"}}
+	cfg.AI.DefaultModel = "openai.local"
+	cfg.Memory.Enabled = true
+	cfg.Memory.AutoLearn = true
+
+	mem := newTestMemory(t, memory.Config{})
+	svc, err := NewService(&cfg, WithMemory(mem))
+	require.NoError(t, err)
+	defer svc.Stop()
+
+	// 1. 个人空间：直接自动生效
+	userMsg := personalIdentity("@alice:example.com")
+	ctx := chat.WithIdentity(context.Background(), userMsg)
+	userScope, _ := memory.Space(userMsg)
+
+	_, err = mem.RecordProjection(ctx, memory.ProjectionInput{
+		TaskID:        801,
+		Scope:         userScope,
+		Conversation:  "dm",
+		SenderID:      "@alice:example.com",
+		UserMessageID: "msg_801",
+		UserText:      "变基冲突怎么解决？",
+		AssistantText: "先查看 git status，解决后执行 git add，最后 git rebase --continue",
+		TaskStatus:    "completed",
+		CreatedAt:     time.Now(),
+	})
+	require.NoError(t, err)
+
+	err = svc.ReviewScope(ctx, userScope)
+	require.NoError(t, err)
+
+	skill, err := mem.GetSkill(ctx, userMsg, "git-rebase-conflict")
+	require.NoError(t, err)
+	require.Equal(t, "git-rebase-conflict", skill.Name)
+	require.Equal(t, int64(1), skill.Version)
+
+	// 2. 群共享空间：自动转为待确认建议
+	groupMsg := groupIdentity("!dev-room:example.com", "@alice:example.com")
+	groupCtx := chat.WithIdentity(context.Background(), groupMsg)
+	groupScope, _ := memory.Space(groupMsg)
+
+	_, err = mem.RecordProjection(groupCtx, memory.ProjectionInput{
+		TaskID:        802,
+		Scope:         groupScope,
+		Conversation:  "!dev-room:example.com",
+		SenderID:      "@alice:example.com",
+		UserMessageID: "msg_802",
+		UserText:      "变基冲突怎么解决？",
+		AssistantText: "先查看 git status，解决后执行 git add，最后 git rebase --continue",
+		TaskStatus:    "completed",
+		CreatedAt:     time.Now(),
+	})
+	require.NoError(t, err)
+
+	err = svc.ReviewScope(groupCtx, groupScope)
+	require.NoError(t, err)
+
+	// 群空间中技能尚未直接生效
+	_, err = mem.GetSkill(groupCtx, groupMsg, "git-rebase-conflict")
+	require.ErrorIs(t, err, memory.ErrSkillNotFound)
+
+	// 但已生成待确认建议
+	pending, err := mem.PendingSkillChanges(groupCtx, groupMsg)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, "git-rebase-conflict", pending[0].Name)
+	require.Equal(t, memory.StatusPending, pending[0].Status)
+}
