@@ -173,6 +173,18 @@ func (s *Service) memoryBudget() int {
 	return budget
 }
 
+// skillBudget 计算单次技能目录注入的字节上限：不超过 4096 字节，且不超过总输入预算的八分之一。
+func (s *Service) skillBudget() int {
+	if s.memory == nil {
+		return 0
+	}
+	budget := 4096
+	if limit := s.config.Agent.Context.MaxTokens; limit > 0 && limit/8 < budget {
+		budget = limit / 8
+	}
+	return budget
+}
+
 // augmentMemory 在任务续接恢复之后、Agent 运行之前，把当前作用域的快照追加为运行时上下文。
 //
 // 快照只附加在本次运行的请求上，不写回持久化请求，因此下一次顶层任务会重新读取新版本。
@@ -190,12 +202,20 @@ func (s *Service) augmentMemory(ctx context.Context, req agent.Request) agent.Re
 		if !errors.Is(err, memory.ErrScope) {
 			slog.Warn("读取记忆快照失败", "error", err)
 		}
-		return req
+	} else if snapshot.Text != "" {
+		req = appendRuntimeContext(req, snapshot.Text)
 	}
-	if snapshot.Text == "" {
-		return req
+
+	catalogSnap, err := s.memory.SkillCatalogSnapshot(ctx, identity, s.skillBudget())
+	if err != nil {
+		if !errors.Is(err, memory.ErrScope) {
+			slog.Warn("读取技能目录快照失败", "error", err)
+		}
+	} else if catalogSnap != "" {
+		req = appendRuntimeContext(req, catalogSnap)
 	}
-	return appendRuntimeContext(req, snapshot.Text)
+
+	return req
 }
 
 // appendRuntimeContext 在系统提示之后追加一条带来源的资料消息；TrimContext 会保留它。
