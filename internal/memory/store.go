@@ -40,6 +40,43 @@ CREATE TABLE IF NOT EXISTS memory_changes (
 	decided_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS memory_changes_pending ON memory_changes(scope_key, status, id);
+CREATE TABLE IF NOT EXISTS history_projections (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	task_id INTEGER UNIQUE NOT NULL,
+	scope_key TEXT NOT NULL,
+	scope_kind TEXT NOT NULL,
+	platform TEXT NOT NULL,
+	account TEXT NOT NULL,
+	conversation TEXT NOT NULL,
+	thread TEXT NOT NULL DEFAULT '',
+	sender_id TEXT NOT NULL,
+	user_message_id TEXT NOT NULL,
+	user_text TEXT NOT NULL,
+	assistant_text TEXT NOT NULL,
+	task_status TEXT NOT NULL,
+	created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS history_projections_scope ON history_projections(scope_key, id DESC);
+CREATE INDEX IF NOT EXISTS history_projections_task ON history_projections(task_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS history_fts USING fts5(
+	user_text,
+	assistant_text,
+	content='history_projections',
+	content_rowid='id',
+	tokenize="trigram"
+);
+
+CREATE TRIGGER IF NOT EXISTS history_projections_ai AFTER INSERT ON history_projections BEGIN
+	INSERT INTO history_fts(rowid, user_text, assistant_text) VALUES (new.id, new.user_text, new.assistant_text);
+END;
+CREATE TRIGGER IF NOT EXISTS history_projections_ad AFTER DELETE ON history_projections BEGIN
+	INSERT INTO history_fts(history_fts, rowid, user_text, assistant_text) VALUES('delete', old.id, old.user_text, old.assistant_text);
+END;
+CREATE TRIGGER IF NOT EXISTS history_projections_au AFTER UPDATE ON history_projections BEGIN
+	INSERT INTO history_fts(history_fts, rowid, user_text, assistant_text) VALUES('delete', old.id, old.user_text, old.assistant_text);
+	INSERT INTO history_fts(rowid, user_text, assistant_text) VALUES (new.id, new.user_text, new.assistant_text);
+END;
 `
 
 // store 独占 memory.db 的表结构与连接。
@@ -102,4 +139,26 @@ func scanChange(row scanner) (Change, error) {
 		c.DecidedAt = time.UnixMilli(decided)
 	}
 	return c, nil
+}
+
+const historyColumns = `id,task_id,scope_kind,platform,account,conversation,thread,sender_id,user_message_id,user_text,assistant_text,task_status,created_at`
+const qualifiedHistoryColumns = `p.id,p.task_id,p.scope_kind,p.platform,p.account,p.conversation,p.thread,p.sender_id,p.user_message_id,p.user_text,p.assistant_text,p.task_status,p.created_at`
+
+func scanHistory(row scanner) (HistoryRecord, error) {
+	var h HistoryRecord
+	var created int64
+	var kind, platform, account, conversation string
+	if err := row.Scan(&h.ID, &h.TaskID, &kind, &platform, &account, &conversation, &h.Thread, &h.SenderID, &h.UserMessageID, &h.UserText, &h.AssistantText, &h.TaskStatus, &created); err != nil {
+		return HistoryRecord{}, err
+	}
+	id := conversation
+	if kind == ScopeUser {
+		id = h.SenderID
+	}
+	h.Scope = Scope{Kind: kind, Platform: platform, Account: account, ID: id}
+	h.Platform = platform
+	h.Account = account
+	h.Conversation = conversation
+	h.CreatedAt = time.UnixMilli(created)
+	return h, nil
 }

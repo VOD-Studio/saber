@@ -195,3 +195,103 @@ type Usage struct {
 	// MaxChars 是空间存储上限。
 	MaxChars int
 }
+
+// HistoryRecord 是可检索的历史对话投影记录。
+type HistoryRecord struct {
+	// ID 是在 memory.db 中的稳定唯一自增标识。
+	ID int64
+	// TaskID 是来源任务编号。
+	TaskID int64
+	// Scope 是所属的隔离空间。
+	Scope Scope
+	// Platform 是接入端平台。
+	Platform string
+	// Account 是接入账号标识。
+	Account string
+	// Conversation 是平台原生会话或房间。
+	Conversation string
+	// Thread 是话题或线程标识。
+	Thread string
+	// SenderID 是消息发送人标识。
+	SenderID string
+	// UserMessageID 是来源消息标识。
+	UserMessageID string
+	// UserText 是本轮用户输入正文。
+	UserText string
+	// AssistantText 是公开回答正文。
+	AssistantText string
+	// TaskStatus 是任务终态状态（如 completed, failed, cancelled, interrupted）。
+	TaskStatus string
+	// CreatedAt 是记录创建时间。
+	CreatedAt time.Time
+}
+
+// HistorySearchOptions 是历史检索的参数。
+type HistorySearchOptions struct {
+	// Query 是搜索关键词。
+	Query string
+	// Limit 限制返回记录数量；零值或负值使用默认值 5，上限 20。
+	Limit int
+	// Cursor 是分页游标（上一页最后一条记录的 ID，返回 ID 小于该值的更早记录）。
+	Cursor int64
+}
+
+// HistorySearchResult 是历史检索的结果。
+type HistorySearchResult struct {
+	// Scope 是检索的作用域空间。
+	Scope Scope
+	// Query 是实际执行的检索词。
+	Query string
+	// Records 是匹配的历史记录列表（按时间倒序）。
+	Records []HistoryRecord
+	// NextCursor 是下一页游标，没有更多数据时为 0。
+	NextCursor int64
+	// HasMore 表示是否还有更早的历史记录。
+	HasMore bool
+}
+
+// HistoryContextOptions 是读取指定记录及其前后文的参数。
+type HistoryContextOptions struct {
+	// ID 是目标记录编号。
+	ID int64
+	// Before 是向前读取的条数（较早的记录），上限 10。
+	Before int
+	// After 是向后读取的条数（较新的记录），上限 10。
+	After int
+}
+
+// HistoryContextResult 是上下文读取结果。
+type HistoryContextResult struct {
+	// Scope 是所属空间。
+	Scope Scope
+	// Target 是目标记录。
+	Target HistoryRecord
+	// Before 是目标之前的记录（按时间升序排列）。
+	Before []HistoryRecord
+	// After 是目标之后的记录（按时间升序排列）。
+	After []HistoryRecord
+}
+
+// ProjectionInput 是写入历史投影的输入。
+type ProjectionInput struct {
+	// TaskID 是来源任务编号。
+	TaskID int64
+	// Scope 是目标空间，必须由可信身份推导。
+	Scope Scope
+	// Conversation 是平台会话/房间。
+	Conversation string
+	// Thread 是话题或线程标识。
+	Thread string
+	// SenderID 是发言人标识。
+	SenderID string
+	// UserMessageID 是用户消息标识。
+	UserMessageID string
+	// UserText 是用户正文。
+	UserText string
+	// AssistantText 是公开回答正文。
+	AssistantText string
+	// TaskStatus 是任务终态状态。
+	TaskStatus string
+	// CreatedAt 是任务创建时间。
+	CreatedAt time.Time
+}
