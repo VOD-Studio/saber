@@ -112,8 +112,26 @@ func (m *Manager) Cancel(ctx context.Context, identity chat.Identity, taskID int
 	if !m.CanManage(identity, t.Message.SenderID) {
 		return Task{}, errors.New("只有发起人或本群任务管理员可以取消任务")
 	}
-	_, err = m.store.db.ExecContext(ctx, `UPDATE tasks SET cancel_requested=1,status=CASE WHEN status='queued' THEN 'cancelled' ELSE status END WHERE id=? AND status IN ('queued','running')`, taskID)
+	tx, err := m.store.db.BeginTx(ctx, nil)
 	if err != nil {
+		return Task{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `UPDATE tasks SET cancel_requested=1,status=CASE WHEN status='queued' THEN 'cancelled' ELSE status END WHERE id=? AND status IN ('queued','running')`, taskID)
+	if err != nil {
+		return Task{}, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return Task{}, err
+	}
+	if affected > 0 {
+		var finalStatus string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM tasks WHERE id=?`, taskID).Scan(&finalStatus); err == nil && finalStatus == "cancelled" {
+			_, _ = tx.ExecContext(ctx, `INSERT INTO task_pending_projections(task_id,created_at) VALUES(?,?) ON CONFLICT(task_id) DO NOTHING`, taskID, time.Now().UnixMilli())
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return Task{}, err
 	}
 	if cancel := m.active[taskID]; cancel != nil {
@@ -274,4 +292,19 @@ func Report(t Task) string {
 // CanManage 检查发起人或受信配置中的管理员，不授予工作区执行权限。
 func (m *Manager) CanManage(identity chat.Identity, owner string) bool {
 	return identity.SenderID != "" && (identity.SenderID == owner || (m.manage != nil && m.manage(identity)))
+}
+
+// PendingProjections 返回待处理历史投影的任务列表。
+func (m *Manager) PendingProjections(ctx context.Context, limit int) ([]Task, error) {
+	return m.store.pendingProjections(ctx, limit)
+}
+
+// AcknowledgeProjection 确认指定任务的历史投影已完成同步。
+func (m *Manager) AcknowledgeProjection(ctx context.Context, taskID int64) error {
+	return m.store.acknowledgeProjection(ctx, taskID)
+}
+
+// BackfillTasks 分批读取已达终态的历史任务用于回填索引。
+func (m *Manager) BackfillTasks(ctx context.Context, limit int, afterID int64) ([]Task, error) {
+	return m.store.backfillTasks(ctx, limit, afterID)
 }

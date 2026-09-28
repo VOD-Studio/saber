@@ -283,3 +283,75 @@ func TestScheduledMarker(t *testing.T) {
 		t.Fatal("显式标记后应为定时任务")
 	}
 }
+
+// TestManager_PendingProjections 验证终态任务记录待处理投影、确认与回填。
+func TestManager_PendingProjections(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "tasks.db")
+	m, err := Open(dbPath, func(ctx context.Context, req agent.Request, emit func(agent.Event)) (agent.Result, error) {
+		return agent.Result{Status: agent.Completed, Content: "完成回答"}, nil
+	}, func(context.Context, Task) (string, error) { return "id", nil })
+	require.NoError(t, err)
+
+	// 1. 正常完成任务应写入待处理投影
+	t1, err := m.Submit(context.Background(), message("ev1", "alice"), dir, request("你好"))
+	require.NoError(t, err)
+	t1 = waitTask(t, m, t1, func(tk Task) bool { return tk.Status == "completed" })
+
+	pending, err := m.PendingProjections(context.Background(), 10)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, t1.ID, pending[0].ID)
+
+	// 确认后不再出现在待处理列表
+	err = m.AcknowledgeProjection(context.Background(), t1.ID)
+	require.NoError(t, err)
+	pending, err = m.PendingProjections(context.Background(), 10)
+	require.NoError(t, err)
+	require.Empty(t, pending)
+
+	// 2. 取消排队任务也应记入待处理投影
+	// 阻止执行
+	closeManager(t, m)
+
+	m2, err := Open(dbPath, func(ctx context.Context, req agent.Request, emit func(agent.Event)) (agent.Result, error) {
+		time.Sleep(10 * time.Second)
+		return agent.Result{Status: agent.Completed}, nil
+	}, func(context.Context, Task) (string, error) { return "id", nil })
+	require.NoError(t, err)
+	defer closeManager(t, m2)
+
+	// 3. 回填测试
+	backfilled, err := m2.BackfillTasks(context.Background(), 10, 0)
+	require.NoError(t, err)
+	require.NotEmpty(t, backfilled)
+	require.Equal(t, t1.ID, backfilled[0].ID)
+}
+
+// TestManager_RecoverPendingProjections 验证崩溃恢复的中断任务记入待处理投影。
+func TestManager_RecoverPendingProjections(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "tasks.db")
+	st, err := openStore(dbPath)
+	require.NoError(t, err)
+
+	// 手动插入一个 running 状态的任务模拟未正常退出的任务
+	taskRow, err := st.submit(context.Background(), message("ev_run", "bob"), dir, request("崩溃前"))
+	require.NoError(t, err)
+	_, err = st.db.Exec(`UPDATE tasks SET status='running' WHERE id=?`, taskRow.ID)
+	require.NoError(t, err)
+	require.NoError(t, st.db.Close())
+
+	// 重新 Open 触发 recover
+	m, err := Open(dbPath, func(ctx context.Context, req agent.Request, emit func(agent.Event)) (agent.Result, error) {
+		return agent.Result{Status: agent.Completed}, nil
+	}, func(context.Context, Task) (string, error) { return "id", nil })
+	require.NoError(t, err)
+	defer closeManager(t, m)
+
+	pending, err := m.PendingProjections(context.Background(), 10)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, taskRow.ID, pending[0].ID)
+	require.Equal(t, "interrupted", pending[0].Status)
+}

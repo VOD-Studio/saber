@@ -111,6 +111,10 @@ func openStore(path string) (*store, error) {
   event TEXT NOT NULL, command_id TEXT NOT NULL, state TEXT NOT NULL,
   reply TEXT NOT NULL DEFAULT '',
   PRIMARY KEY(platform,account,room,event,command_id)
+ );
+ CREATE TABLE IF NOT EXISTS task_pending_projections (
+  task_id INTEGER PRIMARY KEY REFERENCES tasks(id),
+  created_at INTEGER NOT NULL
  );` + scheduleSchema)
 	if err != nil {
 		return nil, errors.Join(err, db.Close())
@@ -226,8 +230,22 @@ func (s *store) query(ctx context.Context, where string, args ...any) (tasks []T
 }
 
 func (s *store) recover(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE tasks SET status='interrupted',error='进程停止，执行结果可能包含外部副作用；请核查执行记录，不自动重放' WHERE status='running'`)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(ctx, `UPDATE tasks SET status='interrupted',error='进程停止，执行结果可能包含外部副作用；请核查执行记录，不自动重放' WHERE status='running'`)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO task_pending_projections(task_id,created_at)
+		SELECT id, ? FROM tasks WHERE status='interrupted'
+		ON CONFLICT(task_id) DO NOTHING`, time.Now().UnixMilli())
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *store) claim(ctx context.Context) (Task, error) {
@@ -272,8 +290,73 @@ func (s *store) finish(ctx context.Context, t Task, result agent.Result, runErr 
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE tasks SET status=CASE WHEN cancel_requested=1 THEN 'cancelled' ELSE ? END,result=?,error=? WHERE id=? AND status='running'`, status, data, message, t.ID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `UPDATE tasks SET status=CASE WHEN cancel_requested=1 THEN 'cancelled' ELSE ? END,result=?,error=? WHERE id=? AND status='running'`, status, data, message, t.ID)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected > 0 {
+		_, err = tx.ExecContext(ctx, `INSERT INTO task_pending_projections(task_id,created_at) VALUES(?,?) ON CONFLICT(task_id) DO NOTHING`, t.ID, time.Now().UnixMilli())
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+const qualifiedTaskColumns = `tasks.id,tasks.message,tasks.work_dir,tasks.request,tasks.status,tasks.result,tasks.error,tasks.cancel_requested,tasks.delivery,tasks.delivery_attempts,tasks.delivery_error,tasks.delivery_id,tasks.created_at,tasks.event`
+
+func (s *store) pendingProjections(ctx context.Context, limit int) ([]Task, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+qualifiedTaskColumns+` FROM tasks JOIN task_pending_projections p ON p.task_id=tasks.id ORDER BY p.task_id ASC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, rows.Close()) }()
+	var tasks []Task
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
+func (s *store) acknowledgeProjection(ctx context.Context, taskID int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM task_pending_projections WHERE task_id=?`, taskID)
 	return err
+}
+
+func (s *store) backfillTasks(ctx context.Context, limit int, afterID int64) ([]Task, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+taskColumns+` FROM tasks WHERE id > ? AND status IN ('completed','failed','cancelled','interrupted') ORDER BY id ASC LIMIT ?`, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, rows.Close()) }()
+	var tasks []Task
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
 }
 
 func (s *store) delivered(ctx context.Context, taskID int64, messageID string, sendErr error, attempts int) error {
