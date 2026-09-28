@@ -150,7 +150,7 @@ func (s *Service) executeSkillTool(ctx context.Context, args map[string]any) (an
 // skillMutationText 只描述真实结果：直接生效为已保存，否则说明仍是待确认建议。
 func skillMutationText(mutation memory.SkillMutation) string {
 	if mutation.Suggested {
-		return fmt.Sprintf("已提交技能变更建议 #%d；需本群管理员审批确认后才会生效，当前尚未应用。", mutation.Change.ID)
+		return fmt.Sprintf("已提交待确认技能建议 #%d；需本群管理员审批确认后才会生效，当前尚未应用。", mutation.Change.ID)
 	}
 	if mutation.Duplicate {
 		return fmt.Sprintf("技能 %s 已存在且内容完全一致，未做重复更新。", mutation.Skill.Name)

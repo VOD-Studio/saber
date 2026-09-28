@@ -32,7 +32,7 @@ func (m *model) choices() (string, []choice) {
 		if m.menu == "commands" {
 			title = "命令"
 		}
-		return title, []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}, {"/memory", "memory", "长期记忆 · 查看与管理"}, {"/sidebar", "sidebar", "收起或展开侧栏 · Ctrl+B"}, {"/tools", "tools", "展开工具详情 · Ctrl+T"}, {"F5", "reconnect", "刷新连接与会话"}, {"/quit", "quit", "离开界面 · 空输入时 Ctrl+C"}}
+		return title, []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}, {"/memory", "memory", "长期记忆 · 查看与管理"}, {"/skill", "skill", "技能经验 · 查看与管理"}, {"/sidebar", "sidebar", "收起或展开侧栏 · Ctrl+B"}, {"/tools", "tools", "展开工具详情 · Ctrl+T"}, {"F5", "reconnect", "刷新连接与会话"}, {"/quit", "quit", "离开界面 · 空输入时 Ctrl+C"}}
 	}
 }
 func (m *model) openMenu(menu string) tea.Cmd {
@@ -125,6 +125,9 @@ func (m *model) menuKey(msg tea.KeyPressMsg) tea.Cmd {
 				return m.boot()
 			case "memory":
 				m.input.SetValue("/memory list")
+				return focus
+			case "skill":
+				m.input.SetValue("/skill list")
 				return focus
 			default:
 				return m.openMenu(selected.value)

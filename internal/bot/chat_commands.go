@@ -250,6 +250,34 @@ func (s *appState) buildCommands() error {
 				}); err != nil {
 				return err
 			}
+			for _, sub := range []struct {
+				name, description string
+				args              []command.Argument
+				authorize         func(chat.Identity) bool
+			}{
+				{"list", "查看当前空间可用技能列表", nil, nil},
+				{"show", "查看指定技能完整正文", []command.Argument{{Name: "name", Type: "string", Required: true}}, nil},
+				{"add", "新增技能；群内无写权限时形成建议", []command.Argument{{Name: "name", Type: "string", Required: true}, {Name: "description", Type: "string", Required: true}, {Name: "content", Type: "string", Required: true}}, nil},
+				{"edit", "修改当前空间技能正文", []command.Argument{{Name: "name", Type: "string", Required: true}, {Name: "content", Type: "string", Required: true}}, writer},
+				{"delete", "删除当前空间技能", []command.Argument{{Name: "name", Type: "string", Required: true}}, writer},
+				{"pending", "查看当前空间待确认技能建议", nil, nil},
+				{"approve", "确认当前空间待确认技能建议", []command.Argument{{Name: "id", Type: "integer", Required: true}}, writer},
+				{"reject", "拒绝当前空间待确认技能建议", []command.Argument{{Name: "id", Type: "integer", Required: true}}, writer},
+			} {
+				action := sub.name
+				if err := add("skill."+action, []string{"skill", action}, sub.description, "conversation", sub.args, nil, "", sub.authorize,
+					func(ctx context.Context, m chat.Message, a chat.Adapter, raw string) error {
+						return aiSvc.SkillCommand(ctx, m, a, action, raw)
+					}); err != nil {
+					return err
+				}
+			}
+			if err := add("skill.help", []string{"skill"}, "技能命令用法", "conversation", nil, nil, "", nil,
+				func(ctx context.Context, m chat.Message, a chat.Adapter, _ string) error {
+					return reply(ctx, m, a, "用法：/skill list/show/add/edit/delete/pending/approve/reject")
+				}); err != nil {
+				return err
+			}
 		}
 	}
 	s.services.commandRegistry = r
@@ -273,7 +301,8 @@ func (s *appState) buildCommands() error {
 func onceCommand(id string) bool {
 	switch id {
 	case "ai.clear", "ai.switch", "task.cancel", "schedule.pause", "schedule.delete", "meme",
-		"memory.add", "memory.edit", "memory.forget", "memory.approve", "memory.reject", "memory.pause", "memory.resume":
+		"memory.add", "memory.edit", "memory.forget", "memory.approve", "memory.reject", "memory.pause", "memory.resume",
+		"skill.add", "skill.edit", "skill.delete", "skill.approve", "skill.reject":
 		return true
 	}
 	return strings.HasPrefix(id, "persona.") && id != "persona.list" && id != "persona.status" && id != "persona.help"
