@@ -198,14 +198,18 @@ func (m *Manager) execute(ctx context.Context, cancel context.CancelFunc, t Task
 	defer m.workers.Done()
 	defer cancel()
 	defer func() { m.mu.Lock(); delete(m.active, t.ID); m.mu.Unlock(); m.notify() }()
-	ctx = chat.WithIdentity(ctx, chat.Identity{Session: t.Message.Session, SenderID: t.Message.SenderID})
+	ctx = chat.WithIdentity(ctx, chat.Identity{Session: t.Message.Session, SenderID: t.Message.SenderID, Direct: t.Message.Direct})
 	ctx = context.WithValue(ctx, workDirKey{}, t.WorkDir)
 	ctx = context.WithValue(ctx, taskIDKey{}, t.ID)
-	if err := m.checkScheduledTask(ctx, t); err != nil {
+	scheduled, err := m.checkScheduledTask(ctx, t)
+	if err != nil {
 		if finishErr := m.store.finish(context.Background(), t, agent.Result{}, err, m.ctx.Err() != nil); finishErr != nil {
 			slog.Error("保存计划任务拒绝状态失败", "error", finishErr)
 		}
 		return
+	}
+	if scheduled {
+		ctx = withScheduled(ctx)
 	}
 	var journalErr error
 	req, resumeErr := m.continuationRequest(ctx, t)
@@ -239,6 +243,18 @@ func (m *Manager) Close() error {
 
 type workDirKey struct{}
 type taskIDKey struct{}
+type scheduledKey struct{}
+
+// withScheduled 标记本次运行由定时计划触发，读取个人记忆前必须重新验证接收场景。
+func withScheduled(ctx context.Context) context.Context {
+	return context.WithValue(ctx, scheduledKey{}, true)
+}
+
+// Scheduled 表示当前任务由定时计划触发，而不是当前的实时聊天轮次。
+func Scheduled(ctx context.Context) bool {
+	ok, _ := ctx.Value(scheduledKey{}).(bool)
+	return ok
+}
 
 // ID 返回当前持久化任务编号，供执行器关联日志和文件归档。
 func ID(ctx context.Context) int64 { id, _ := ctx.Value(taskIDKey{}).(int64); return id }

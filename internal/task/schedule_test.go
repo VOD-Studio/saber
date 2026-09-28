@@ -113,7 +113,8 @@ func TestSchedule_AtomicCatchupOverlapRestartAndPermissions(t *testing.T) {
 	require.Len(t, items, 1)
 	// 即使触发时授权通过，排队后撤权也不能进入 runner。
 	revoked.Store(true)
-	require.Error(t, m.checkScheduledTask(ctx, first))
+	_, err = m.checkScheduledTask(ctx, first)
+	require.Error(t, err)
 	plan, err = m.GetSchedule(ctx, msg.Session, plan.ID)
 	require.NoError(t, err)
 	require.Equal(t, "paused", plan.Status)
@@ -199,5 +200,6 @@ func TestSchedule_RevokedAtDueAndPausedBeforeExecution(t *testing.T) {
 	require.NoError(t, err)
 	queued, err := m.Get(ctx, msg.Session, plan.LastTask)
 	require.NoError(t, err)
-	require.Error(t, m.checkScheduledTask(ctx, queued))
+	_, err = m.checkScheduledTask(ctx, queued)
+	require.Error(t, err)
 }

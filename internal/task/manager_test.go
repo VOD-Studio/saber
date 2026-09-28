@@ -272,3 +272,14 @@ func TestManager_JournalFailureStopsBeforeTool(t *testing.T) {
 	require.Zero(t, effects.Load())
 	require.True(t, strings.Contains(a.Error, "disk failure"))
 }
+
+// TestScheduledMarker 验证定时任务标记只影响是否注入个人记忆，不改变其他上下文。
+func TestScheduledMarker(t *testing.T) {
+	if Scheduled(context.Background()) {
+		t.Fatal("默认上下文不应标记为定时任务")
+	}
+	ctx := withScheduled(context.Background())
+	if !Scheduled(ctx) {
+		t.Fatal("显式标记后应为定时任务")
+	}
+}

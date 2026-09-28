@@ -18,6 +18,7 @@ import (
 	"rua.plus/saber/internal/execution"
 	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/mcp"
+	"rua.plus/saber/internal/memory"
 	"rua.plus/saber/internal/model"
 	"rua.plus/saber/internal/task"
 )
@@ -60,6 +61,8 @@ type Service struct {
 	taskStreams sync.Map
 	// executor 同时管理本地容器工具和 MCP 工具权限。
 	executor *execution.Executor
+	// memory 是长期记忆服务；未启用时工具与快照注入都不生效。
+	memory *memory.Service
 }
 
 // ServiceOption 配置 AI 服务的可选依赖。平台专属服务由接入端注入，
@@ -71,6 +74,7 @@ type serviceOptions struct {
 	matrixService *matrix.CommandService
 	mediaService  *matrix.MediaService
 	mcpManager    *mcp.Manager
+	memory        *memory.Service
 }
 
 // WithMatrix 注入 Matrix 命令与媒体服务，是 Matrix 专属的兼容入口，
@@ -86,6 +90,11 @@ func WithMatrix(matrixService *matrix.CommandService, mediaService *matrix.Media
 // WithMCP 注入 MCP 管理器。
 func WithMCP(mcpManager *mcp.Manager) ServiceOption {
 	return func(o *serviceOptions) { o.mcpManager = mcpManager }
+}
+
+// WithMemory 注入长期记忆服务；未注入时不注册记忆工具，也不注入记忆快照。
+func WithMemory(service *memory.Service) ServiceOption {
+	return func(o *serviceOptions) { o.memory = service }
 }
 
 // NewService 创建一个新的 AI 服务实例。
@@ -133,6 +142,7 @@ func NewService(appConfig *config.Config, opts ...ServiceOption) (*Service, erro
 		contextManager: contextManager,
 		mcpManager:     o.mcpManager,
 		mediaService:   o.mediaService,
+		memory:         o.memory,
 		toolExecutor:   NewToolExecutor(nil), // 将在下面重新初始化
 	}
 	if c := appConfig.Agent.CircuitBreaker; c.Enabled {
@@ -440,7 +450,7 @@ func (s *Service) handleChat(ctx context.Context, message chat.Message, reply ch
 	if err != nil {
 		return agent.Result{}, err
 	}
-	identity := chat.Identity{Session: message.Session, SenderID: message.SenderID}
+	identity := chat.Identity{Session: message.Session, SenderID: message.SenderID, Direct: message.Direct}
 	toolCtx := chat.WithIdentity(ctx, identity)
 	if s.executor != nil {
 		if dir, err := s.executor.Workspace(identity); err == nil {
@@ -451,7 +461,8 @@ func (s *Service) handleChat(ctx context.Context, message chat.Message, reply ch
 	if s.tasks != nil {
 		return agent.Result{}, s.submitTask(ctx, message, req, reply)
 	}
-	return s.chatProcessor.Handle(ctx, message, req, reply)
+	// 无持久化任务时在此装配快照；有任务时改在续接恢复之后装配，避免旧快照被续接继承。
+	return s.chatProcessor.Handle(ctx, message, s.augmentMemory(toolCtx, req), reply)
 }
 
 func (s *Service) taskRequest(message chat.Message, modelName string) (agent.Request, error) {

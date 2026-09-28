@@ -10,6 +10,7 @@ import (
 	"github.com/sashabaranov/go-openai"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/execution"
+	"rua.plus/saber/internal/memory"
 )
 
 // ToolExecutor 负责执行 AI 工具调用。
@@ -70,6 +71,9 @@ func (te *ToolExecutor) ExecuteToolCall(ctx context.Context, toolName string, ar
 	}
 	if toolName == "saber_schedule" {
 		return te.service.executeScheduleTool(ctx, args)
+	}
+	if toolName == "saber_memory" {
+		return te.service.executeMemoryTool(ctx, args)
 	}
 	if toolName == "saber_task" && te.service.tasks != nil {
 		identity, ok := chat.IdentityFromContext(ctx)
@@ -132,6 +136,13 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 			}
 		}
 	}
+	if te.service.memory != nil {
+		if identity, ok := chat.IdentityFromContext(ctx); ok {
+			if _, ok := memory.Space(identity); ok {
+				tools = append(tools, memoryTool())
+			}
+		}
+	}
 	if te.service.mcpManager == nil || !te.service.mcpManager.IsEnabled() {
 		return tools, len(tools) > 0
 	}
@@ -142,7 +153,7 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 	}
 
 	for _, mcpTool := range mcpTools {
-		if execution.LocalTool(mcpTool.Name) || mcpTool.Name == "saber_task" || mcpTool.Name == "saber_schedule" {
+		if execution.LocalTool(mcpTool.Name) || mcpTool.Name == "saber_task" || mcpTool.Name == "saber_schedule" || mcpTool.Name == "saber_memory" {
 			continue
 		}
 		server := te.service.mcpManager.GetServerForTool(mcpTool.Name)

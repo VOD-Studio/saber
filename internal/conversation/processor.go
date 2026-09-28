@@ -93,7 +93,7 @@ func (p *Processor) Handle(ctx context.Context, message chat.Message, req agent.
 	if err := ctx.Err(); err != nil {
 		return agent.Result{Status: contextStatus(err)}, err
 	}
-	ctx = chat.WithIdentity(ctx, chat.Identity{Session: message.Session, SenderID: message.SenderID})
+	ctx = chat.WithIdentity(ctx, chat.Identity{Session: message.Session, SenderID: message.SenderID, Direct: message.Direct})
 	messages := append([]openai.ChatCompletionMessage(nil), req.Messages...)
 	if p.History != nil {
 		messages = append(messages, p.History.GetContext(message.Session.Key())...)

@@ -369,22 +369,22 @@ func (m *Manager) fireSchedule(ctx context.Context, s Schedule, now time.Time) (
 	return tx.Commit()
 }
 
-func (m *Manager) checkScheduledTask(ctx context.Context, t Task) error {
+func (m *Manager) checkScheduledTask(ctx context.Context, t Task) (bool, error) {
 	m.scheduleMu.Lock()
 	defer m.scheduleMu.Unlock()
 	s, err := scanSchedule(m.store.db.QueryRowContext(ctx, `SELECT `+scheduleColumns+` FROM schedules WHERE id=(SELECT schedule_id FROM schedule_runs WHERE task_id=?)`, t.ID))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	if s.Status == "paused" || s.Status == "deleted" {
-		return fmt.Errorf("计划 #%d 已%s，停止排队执行", s.ID, s.Status)
+		return true, fmt.Errorf("计划 #%d 已%s，停止排队执行", s.ID, s.Status)
 	}
 	if err = m.authorizeSchedule(s); err != nil {
 		_, saveErr := m.store.db.ExecContext(ctx, `UPDATE schedules SET status='paused',reason=? WHERE id=?`, err.Error(), s.ID)
-		return errors.Join(err, saveErr)
+		return true, errors.Join(err, saveErr)
 	}
-	return nil
+	return true, nil
 }

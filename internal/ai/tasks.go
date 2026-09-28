@@ -73,6 +73,10 @@ func (s *Service) EnableTasks(path string) error {
 			return agent.Result{}, fmt.Errorf("任务工作目录 %q 与当前授权目录 %q 不同，停止执行", task.WorkDir(ctx), expectedDir)
 		}
 		ctx = execution.WithTask(ctx, task.ID(ctx), expectedDir)
+		// 续接恢复之后、运行之前装配当前记忆快照；定时任务先重新验证接收场景。
+		if !task.Scheduled(ctx) {
+			req = s.augmentMemory(ctx, req)
+		}
 		// 重启恢复时按当前权限重新筛选，旧请求快照不能保留已撤销能力。
 		req.Tools, _ = s.toolExecutor.PrepareTools(ctx)
 		if err := s.core.WaitForRateLimit(ctx); err != nil {
