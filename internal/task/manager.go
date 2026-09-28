@@ -21,9 +21,10 @@ type SendFunc func(context.Context, Task) (string, error)
 
 // Options 在启动工作线程前提供权限和上下文预算。
 type Options struct {
-	Schedule ScheduleAuthorize
-	Manage   func(chat.Identity) bool
-	Context  agent.ContextPolicy
+	Schedule     ScheduleAuthorize
+	Manage       func(chat.Identity) bool
+	Context      agent.ContextPolicy
+	OnProjection func()
 }
 
 // Manager 管理单个机器人进程的队列；同一数据库只允许一个 Manager 实例。
@@ -44,6 +45,7 @@ type Manager struct {
 	authorize     ScheduleAuthorize
 	manage        func(chat.Identity) bool
 	contextPolicy agent.ContextPolicy
+	onProjection  func()
 }
 
 // Open 打开数据库，标记中断任务，并启动队列和结果投递。
@@ -65,9 +67,13 @@ func Open(path string, run RunFunc, send SendFunc, options ...Options) (*Manager
 		m.authorize = options[0].Schedule
 		m.manage = options[0].Manage
 		m.contextPolicy = options[0].Context
+		m.onProjection = options[0].OnProjection
 	}
 	if send != nil {
 		m.deliveries["*"] = send
+	}
+	if m.onProjection != nil {
+		go m.onProjection()
 	}
 	go m.loop()
 	return m, nil
@@ -138,6 +144,9 @@ func (m *Manager) Cancel(ctx context.Context, identity chat.Identity, taskID int
 		cancel()
 	}
 	m.notify()
+	if m.onProjection != nil {
+		go m.onProjection()
+	}
 	return m.Get(ctx, identity.Session, taskID)
 }
 
@@ -250,6 +259,8 @@ func (m *Manager) execute(ctx context.Context, cancel context.CancelFunc, t Task
 	if err := m.store.finish(context.Background(), t, result, runErr, m.ctx.Err() != nil); err != nil {
 		// 保持 running 以锁住目录；重启后转 interrupted，绝不重跑。
 		slog.Error("保存任务终态失败，需要人工核查", "error", taskError(t.ID, err))
+	} else if m.onProjection != nil {
+		go m.onProjection()
 	}
 }
 

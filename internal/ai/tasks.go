@@ -92,12 +92,24 @@ func (s *Service) EnableTasks(path string) error {
 				progress.event(event)
 			}
 		})
-	}, nil, task.Options{Context: s.contextPolicy(), Schedule: s.authorizeSchedule, Manage: func(identity chat.Identity) bool { return s.executor != nil && s.executor.IsTaskAdmin(identity) }})
+	}, nil, task.Options{
+		Context:  s.contextPolicy(),
+		Schedule: s.authorizeSchedule,
+		Manage:   func(identity chat.Identity) bool { return s.executor != nil && s.executor.IsTaskAdmin(identity) },
+		OnProjection: func() {
+			if s.memory != nil {
+				_ = s.syncHistoryProjections(context.Background())
+			}
+		},
+	})
 	if err != nil {
 		return err
 	}
 	s.tasks, s.taskDir = manager, dir
 	close(ready)
+	if s.memory != nil {
+		_ = s.syncHistoryProjections(context.Background())
+	}
 	return nil
 }
 

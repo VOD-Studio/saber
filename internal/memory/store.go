@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	_ "rua.plus/saber/internal/db" // 注册 sqlite3-fk-wal 驱动
+	"rua.plus/saber/internal/db" // 注册 saber-sqlite 驱动
 )
 
 // storeSchema 建立记忆条目、待确认建议两类表；一个空间内的内容保持唯一。
@@ -95,7 +95,7 @@ func openStore(path string) (*store, error) {
 	if err = f.Close(); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite3-fk-wal", path)
+	db, err := sql.Open(db.DriverName, path)
 	if err != nil {
 		return nil, err
 	}

@@ -19,24 +19,21 @@ var (
 	driverErr     error
 )
 
+// DriverName 是纯 Go modernc SQLite 驱动名称，预置了 WAL 与外键 PRAGMA 设置。
+const DriverName = "saber-sqlite"
+
 func init() {
-	// 注册 modernc sqlite 驱动为 sqlite3-fk-wal
-	// 这兼容 mautrix 的 dbutil 包
-	// 检查驱动是否已注册，避免测试环境中重复注册导致 panic
+	registerDriverOnce(DriverName, &pragmaDriver{})
 	registerDriverOnce("sqlite3-fk-wal", &pragmaDriver{})
 }
 
 // registerDriverOnce 安全地注册 SQL 驱动，避免重复注册导致 panic。
 func registerDriverOnce(name string, driver driver.Driver) {
-	// 尝试打开一个空 DSN 来检查驱动是否已注册
-	// 如果驱动已存在，sql.Open 会成功（不会真正连接）
-	db, err := sql.Open(name, ":memory:")
-	if err == nil {
-		_ = db.Close() // 忽略关闭错误，驱动已注册
-		return         // 驱动已注册
+	for _, existing := range sql.Drivers() {
+		if existing == name {
+			return
+		}
 	}
-
-	// 如果错误是"驱动不存在"，则注册驱动
 	sql.Register(name, driver)
 }
 

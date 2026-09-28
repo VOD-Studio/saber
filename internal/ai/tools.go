@@ -75,6 +75,9 @@ func (te *ToolExecutor) ExecuteToolCall(ctx context.Context, toolName string, ar
 	if toolName == "saber_memory" {
 		return te.service.executeMemoryTool(ctx, args)
 	}
+	if toolName == "saber_history" {
+		return te.service.executeHistoryTool(ctx, args)
+	}
 	if toolName == "saber_task" && te.service.tasks != nil {
 		identity, ok := chat.IdentityFromContext(ctx)
 		if !ok {
@@ -140,6 +143,7 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 		if identity, ok := chat.IdentityFromContext(ctx); ok {
 			if _, ok := memory.Space(identity); ok {
 				tools = append(tools, memoryTool())
+				tools = append(tools, historyTool())
 			}
 		}
 	}
@@ -153,7 +157,7 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 	}
 
 	for _, mcpTool := range mcpTools {
-		if execution.LocalTool(mcpTool.Name) || mcpTool.Name == "saber_task" || mcpTool.Name == "saber_schedule" || mcpTool.Name == "saber_memory" {
+		if execution.LocalTool(mcpTool.Name) || mcpTool.Name == "saber_task" || mcpTool.Name == "saber_schedule" || mcpTool.Name == "saber_memory" || mcpTool.Name == "saber_history" {
 			continue
 		}
 		server := te.service.mcpManager.GetServerForTool(mcpTool.Name)

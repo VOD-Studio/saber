@@ -13,7 +13,7 @@ import (
 
 	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
-	_ "rua.plus/saber/internal/db"
+	"rua.plus/saber/internal/db"
 )
 
 // Task 保存来源、独立请求快照、执行终态和投递进度。
@@ -62,7 +62,7 @@ func openStore(path string) (*store, error) {
 	if err = f.Close(); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite3-fk-wal", path)
+	db, err := sql.Open(db.DriverName, path)
 	if err != nil {
 		return nil, err
 	}
