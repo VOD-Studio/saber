@@ -874,6 +874,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Server:    HTTPServerConfig{Listen: "127.0.0.1:8320", TokenFile: ".saber-token"},
 		Agent:     DefaultAgentConfig(),
+		Execution: DefaultExecutionConfig(),
 		Matrix:    DefaultMatrixConfig(),
 		Platforms: DefaultPlatformsConfig(),
 		AI:        DefaultAIConfig(),
@@ -939,6 +940,7 @@ mcp:
   enabled: false # 开启后仍须 execution 中的身份及工具授权
 execution:
   enabled: false
+  # network: true # 沙箱联网权限；默认开启，设为 false 时断网隔离
 commands:
   admins: [] # 全局模型切换、共享人格创建和删除；按 platform/account/users 精确配置
   session_writers: [] # 当前会话上下文和人格修改；按 platform/account/room/users 精确配置

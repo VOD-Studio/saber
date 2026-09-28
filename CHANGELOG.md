@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 沙箱网络访问权限：命令执行容器默认开启网络权限（`bridge` 模式），支持外网请求与 DNS 解析；支持在 `execution` 配置中通过 `network: false`（或 `network_enabled: false`）显式关闭网络进行断网隔离（`none` 模式）
+
 - 本机 TUI/终端新增共享命令入口：`POST /v1/sessions/{session}/commands` 把界面内命令之外的斜杠指令交给同一命令注册表执行，身份由服务端令牌与操作系统用户确定，回执以本地轮次展示且不写入任务历史；`/memory` 及 `task`、`schedule` 等命令无需再依赖 Matrix/Violet 入口
 
 - 长期记忆首个版本（P1）：新增平台无关的 `internal/memory` 模块，以独立 `memory.db` 按“用户 + 平台 + 机器人账号 + 发送者”与“群 + 平台 + 机器人账号 + 房间”两类作用域隔离保存条目，线程不改变群空间边界；作用域只从可信身份推导，模型工具与文本命令不接受用户、账号或房间参数

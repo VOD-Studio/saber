@@ -4,6 +4,10 @@ package config
 type ExecutionConfig struct {
 	// Enabled 启用已授权工作区的工具，默认关闭。
 	Enabled bool `yaml:"enabled"`
+	// Network 控制沙箱容器是否允许联网；默认开启，设为 false 可显式关闭断网。
+	Network *bool `yaml:"network,omitempty"`
+	// NetworkEnabled 是 Network 的别名，便于配置命名风格保持一致。
+	NetworkEnabled *bool `yaml:"network_enabled,omitempty"`
 	// Image 是预先安装且可信的 Python 3 容器镜像。
 	Image string `yaml:"image"`
 	// LogDir 在工作区外保存命令日志与交付文件。
@@ -57,4 +61,29 @@ type TaskAdmin struct {
 	Room string `yaml:"room"`
 	// Users 是完整成员 ID，不接受通配符。
 	Users []string `yaml:"users"`
+}
+
+// DefaultExecutionConfig 返回带有合理默认值的执行器配置。
+//
+// 沙箱容器默认开启网络权限，单次超时默认 60 秒。
+func DefaultExecutionConfig() ExecutionConfig {
+	defaultNetwork := true
+	return ExecutionConfig{
+		Enabled:        false,
+		Network:        &defaultNetwork,
+		TimeoutSeconds: 60,
+	}
+}
+
+// IsNetworkEnabled 返回沙箱容器是否开启网络权限。
+//
+// 默认开启（true）；只有在配置中显式将 network 或 network_enabled 设置为 false 时才关闭断网。
+func (c ExecutionConfig) IsNetworkEnabled() bool {
+	if c.Network != nil && !*c.Network {
+		return false
+	}
+	if c.NetworkEnabled != nil && !*c.NetworkEnabled {
+		return false
+	}
+	return true
 }

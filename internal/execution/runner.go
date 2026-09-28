@@ -95,8 +95,12 @@ func (e *Executor) containerArgs(name, dir string, taskID int64) []string {
 	if gid < 1 {
 		gid = 65534
 	}
+	networkMode := "bridge"
+	if !e.cfg.IsNetworkEnabled() {
+		networkMode = "none"
+	}
 	return []string{"create", "--pull=never", "--interactive", "--name", name, "--label", "saber.executor=" + e.owner, "--label", "saber.task=" + strconv.FormatInt(taskID, 10),
-		"--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "128", "--memory", "512m", "--cpus", "1",
+		"--network", networkMode, "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "128", "--memory", "512m", "--cpus", "1",
 		"--user", fmt.Sprintf("%d:%d", uid, gid), "--mount", "type=bind,src=" + dir + ",dst=/workspace,bind-recursive=disabled",
 		"--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m", "--workdir", "/workspace", "--entrypoint", "/usr/bin/env", e.cfg.Image, "-i", "PATH=/usr/local/bin:/usr/bin:/bin", "python3", "-I", "-c", helper}
 }

@@ -181,6 +181,19 @@ func TestDockerExecution(t *testing.T) {
 	r := run("exec", map[string]any{"command": "test -z \"$MATRIX_ACCESS_TOKEN$OPENAI_API_KEY\" && test ! -S /var/run/docker.sock && test \"$PROJECT_FLAG\" = configured && printf isolated"})
 	require.Zero(t, r.ExitCode, r.Summary)
 	require.Equal(t, "isolated", r.Summary)
+	// 默认配置下沙箱容器开启网络，存在 eth0 网卡。
+	r = run("exec", map[string]any{"command": "grep -q 'eth0' /proc/net/dev && printf has_net"})
+	require.Zero(t, r.ExitCode, r.Summary)
+	require.Contains(t, r.Summary, "has_net")
+	// 显式关闭网络时沙箱容器内无 eth0 网卡。
+	cfgDisabled := cfg
+	disabled := false
+	cfgDisabled.Network = &disabled
+	eDisabled, err := New(cfgDisabled, nil, nil)
+	require.NoError(t, err)
+	rDisabled, err := eDisabled.Run(ctx, "exec", map[string]any{"command": "grep -q 'eth0' /proc/net/dev"})
+	require.NoError(t, err)
+	require.NotZero(t, rDisabled.ExitCode)
 	r = run("exec", map[string]any{"command": "printf failure; exit 7"})
 	require.Equal(t, 7, r.ExitCode)
 	require.Equal(t, "failure", r.Summary)
@@ -277,4 +290,53 @@ func TestExecutor_TaskAdminsAreScopedAndDoNotGrantExecution(t *testing.T) {
 	cfg.TaskAdmins[0].Room = "*"
 	_, err = New(cfg, nil, nil)
 	require.Error(t, err)
+}
+
+func TestExecutor_ContainerArgs_Network(t *testing.T) {
+	extractNetwork := func(args []string) string {
+		for i, arg := range args {
+			if arg == "--network" && i+1 < len(args) {
+				return args[i+1]
+			}
+		}
+		return ""
+	}
+
+	t.Run("默认配置使用 bridge 网络", func(t *testing.T) {
+		cfg, _ := fixture(t)
+		e, err := New(cfg, nil, nil)
+		require.NoError(t, err)
+		args := e.containerArgs("test-box", "/tmp", 1)
+		require.Equal(t, "bridge", extractNetwork(args))
+	})
+
+	t.Run("显式 network: false 使用 none 网络", func(t *testing.T) {
+		cfg, _ := fixture(t)
+		disabled := false
+		cfg.Network = &disabled
+		e, err := New(cfg, nil, nil)
+		require.NoError(t, err)
+		args := e.containerArgs("test-box", "/tmp", 1)
+		require.Equal(t, "none", extractNetwork(args))
+	})
+
+	t.Run("显式 network_enabled: false 使用 none 网络", func(t *testing.T) {
+		cfg, _ := fixture(t)
+		disabled := false
+		cfg.NetworkEnabled = &disabled
+		e, err := New(cfg, nil, nil)
+		require.NoError(t, err)
+		args := e.containerArgs("test-box", "/tmp", 1)
+		require.Equal(t, "none", extractNetwork(args))
+	})
+
+	t.Run("显式 network: true 使用 bridge 网络", func(t *testing.T) {
+		cfg, _ := fixture(t)
+		enabled := true
+		cfg.Network = &enabled
+		e, err := New(cfg, nil, nil)
+		require.NoError(t, err)
+		args := e.containerArgs("test-box", "/tmp", 1)
+		require.Equal(t, "bridge", extractNetwork(args))
+	})
 }

@@ -62,6 +62,7 @@ Docker daemon 必须可用。管理员预先安装包含 `/usr/bin/env`、Python
 ```yaml
 execution:
   enabled: true
+  # network: true # 沙箱联网权限；默认开启，设为 false 时断网隔离
   image: "python:3.13-slim"
   log_dir: "/srv/saber-private/execution"
   timeout_seconds: 60
@@ -98,8 +99,8 @@ execution:
 
 ## 隔离与权限边界
 
-- 每次工具调用创建独立容器；只将指定工作目录挂载到 `/workspace`，禁用递归挂载，不挂载 Docker socket、Saber 配置或日志目录。挂载前检查工作区，不允许夹带 Unix socket、FIFO 或设备节点，避免绕过断网限制连接宿主服务。
-- 固定断网、只读根文件系统、非 root 用户、移除全部 capabilities、禁止提权；限制 128 个进程、512 MiB 内存和 1 CPU，并提供 64 MiB 的临时 `/tmp`。进程环境从空环境开始构造。
+- 每次工具调用创建独立容器；只将指定工作目录挂载到 `/workspace`，禁用递归挂载，不挂载 Docker socket、Saber 配置或日志目录。挂载前检查工作区，不允许夹带 Unix socket、FIFO 或设备节点，避免绕过网络限制连接宿主服务。
+- 沙箱默认开启网络（bridge 模式），允许网络请求与 DNS 解析；可在配置中设置 `network: false`（或 `network_enabled: false`）开启固定断网（none 模式）。只读根文件系统、非 root 用户、移除全部 capabilities、禁止提权；限制 128 个进程、512 MiB 内存和 1 CPU，并提供 64 MiB 的临时 `/tmp`。进程环境从空环境开始构造。
 - 工作区文件在各次调用之间保留；容器进程、临时文件和 shell 环境不跨调用保留。`exec` 拥有整个工作区内的读写能力，不能通过只隐藏 `write_file` 把 shell 变成只读。
 - 文件工具只接受相对路径，拒绝 `..`、绝对路径、符号链接和非普通文件；`list_files` 可列举目录和链接名称，但不跟随链接。容器中的命令可以读镜像自身文件，不能据此访问未挂载的宿主目录。
 - 取消或超时会强制删除本次容器，结束全部子进程。清理失败会封锁该工作区的后续工具调用，需检查 Docker 并重启；启动时先按执行器专属标签清理残留容器，再恢复排队任务。一个任务数据库和日志目录只能由一个 Saber 进程使用。
@@ -130,7 +131,7 @@ execution:
       capabilities: ["external", "publish"]
 ```
 
-这个授权允许指定发布工具，但不允许部署或访问其他目录。具备通用远程命令、网络请求或代理执行能力的 MCP 服务应按全部可实现的外部副作用授权，不能把它声明成受限的只读工具。本地 `exec` 始终断网，授予 `publish` 不会为它打开网络；第一版的外部发布/部署通过单独配置和授权的 MCP 工具完成。stdio MCP 仍要求原有命令白名单，其子进程只得到 `PATH` 和显式 `env`，不再继承机器人环境。
+这个授权允许指定发布工具，但不允许部署或访问其他目录。具备通用远程命令、网络请求或代理执行能力的 MCP 服务应按全部可实现的外部副作用授权，不能把它声明成受限的只读工具。本地 `exec` 默认具备网络访问（可通过配置 `execution.network: false` 显式开启断网隔离）；外部发布/部署仍建议通过单独配置和授权的 MCP 工具完成。stdio MCP 仍要求原有命令白名单，其子进程只得到 `PATH` 和显式 `env`，不再继承机器人环境。
 
 ## 输出与交付
 

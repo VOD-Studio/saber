@@ -246,6 +246,19 @@ func TestDefaultConfigs(t *testing.T) {
 		}
 	})
 
+	t.Run("DefaultExecutionConfig", func(t *testing.T) {
+		cfg := DefaultExecutionConfig()
+		if cfg.Enabled {
+			t.Error("Default Execution should be disabled")
+		}
+		if !cfg.IsNetworkEnabled() {
+			t.Error("Default Execution network should be enabled")
+		}
+		if cfg.TimeoutSeconds != 60 {
+			t.Errorf("Default TimeoutSeconds = %d, want 60", cfg.TimeoutSeconds)
+		}
+	})
+
 	t.Run("DefaultConfig", func(t *testing.T) {
 		cfg := DefaultConfig()
 		if cfg.Matrix.Homeserver != "https://matrix.org" {
@@ -256,6 +269,96 @@ func TestDefaultConfigs(t *testing.T) {
 		}
 		if cfg.AI.Enabled {
 			t.Error("Default AI should be disabled")
+		}
+		if !cfg.Execution.IsNetworkEnabled() {
+			t.Error("Default Execution network should be enabled in DefaultConfig")
+		}
+	})
+}
+
+// TestExecutionConfig_Network 测试沙箱容器网络配置与默认行为。
+func TestExecutionConfig_Network(t *testing.T) {
+	t.Run("默认空结构体开启网络", func(t *testing.T) {
+		var cfg ExecutionConfig
+		if !cfg.IsNetworkEnabled() {
+			t.Error("零值 ExecutionConfig 默认网络应开启")
+		}
+	})
+
+	t.Run("显式开启网络", func(t *testing.T) {
+		tr := true
+		cfg := ExecutionConfig{Network: &tr}
+		if !cfg.IsNetworkEnabled() {
+			t.Error("显式 Network: true 时网络应开启")
+		}
+		cfg2 := ExecutionConfig{NetworkEnabled: &tr}
+		if !cfg2.IsNetworkEnabled() {
+			t.Error("显式 NetworkEnabled: true 时网络应开启")
+		}
+	})
+
+	t.Run("显式关闭网络", func(t *testing.T) {
+		fa := false
+		cfg := ExecutionConfig{Network: &fa}
+		if cfg.IsNetworkEnabled() {
+			t.Error("显式 Network: false 时网络应关闭")
+		}
+		cfg2 := ExecutionConfig{NetworkEnabled: &fa}
+		if cfg2.IsNetworkEnabled() {
+			t.Error("显式 NetworkEnabled: false 时网络应关闭")
+		}
+	})
+
+	t.Run("YAML 解析 network: false", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		err := os.WriteFile(path, []byte(`execution:
+  enabled: true
+  network: false
+`), 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Execution.IsNetworkEnabled() {
+			t.Error("YAML 配置 network: false 时沙箱应断网")
+		}
+	})
+
+	t.Run("YAML 解析 network_enabled: false", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		err := os.WriteFile(path, []byte(`execution:
+  enabled: true
+  network_enabled: false
+`), 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Execution.IsNetworkEnabled() {
+			t.Error("YAML 配置 network_enabled: false 时沙箱应断网")
+		}
+	})
+
+	t.Run("YAML 省略网络字段时默认开启", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		err := os.WriteFile(path, []byte(`execution:
+  enabled: true
+`), 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !cfg.Execution.IsNetworkEnabled() {
+			t.Error("YAML 省略 network 配置时沙箱默认应联网")
 		}
 	})
 }

@@ -106,6 +106,7 @@ mcp:
   enabled: false
 execution:
   enabled: false
+  # network: true # 沙箱联网权限；默认开启，设为 false 时断网隔离
 commands:
   admins: []
   session_writers: []
