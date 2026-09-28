@@ -718,6 +718,7 @@ saber/
       tools.go                     # 工具管理
       memory.go                    # 记忆快照注入与 saber_memory 工具
       memory_commands.go           # memory 通用命令处理
+      history.go                   # 历史回忆 saber_history 工具与投影同步
     mcp/
       manager.go                   # MCP 管理器
       factory.go                   # MCP 服务器工厂模式
@@ -749,6 +750,7 @@ saber/
       service.go                   # 按用户与群作用域隔离的记忆读写与授权
       store.go                     # memory.db 表结构与扫描
       snapshot.go                  # 受预算限制的注入快照
+      history.go                   # 历史投影记录、FTS5 全文召回与上下文读取
 ```
 
 ## 开发

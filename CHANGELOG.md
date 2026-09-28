@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 定时计划任务在读取个人记忆前重新验证接收场景，无法证明为当前本人私聊时不注入个人资料
 - 新增默认关闭的 `memory` 配置段（`enabled`/`max_chars`/`inject_max_bytes`），启用后 `memory.db` 加入执行器受保护路径
 
+- 可追溯的历史回忆（P2）：任务达到终态（completed、failed、cancelled、interrupted）时在同一事务中记录待处理投影，由后台流水线异步消费并提取本轮用户正文、公开回答及来源信息，投影至 `memory.db`
+- 历史全文索引基于纯 Go modernc SQLite FTS5，采用 trigram 分词器支持中文、英文及混合语料子串检索；少于三个 Unicode 字符的关键词自动回退至限定作用域与时间上限的字面模糊匹配，覆盖两字及单字中文召回
+- 新增 `saber_history` 模型工具，支持关键词检索（`action: "search"`）与围绕指定记录前后翻阅（`action: "context"`）；返回记录 ID、时间、发言人、来源任务与原文片段，达到预算时提供游标与截断提示
+- 历史检索与详情读取强制在查询前绑定当前可信身份推导的作用域（私聊仅查本人私聊历史，群聊仅查本群历史），拒绝跨用户、跨群及无效 ID 查询，不泄露其他会话内容
+- 支持历史索引保守回填（`BackfillHistory`），系统重启或崩溃恢复时自动排空未处理终态任务投影并确认出队，保证幂等去重且不丢记录
+
 ## [0.2.0] - 2026-09-24
 
 ### Added
