@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-28
+
 ### Added
 
 - 沙箱网络访问权限：命令执行容器默认开启网络权限（`bridge` 模式），支持外网请求与 DNS 解析；支持在 `execution` 配置中通过 `network: false`（或 `network_enabled: false`）显式关闭网络进行断网隔离（`none` 模式）
@@ -460,7 +462,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 结构化日志
 - 基础命令系统（`!ping`, `!help`）
 
-[Unreleased]: https://github.com/VOD-Studio/saber/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/VOD-Studio/saber/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/VOD-Studio/saber/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/VOD-Studio/saber/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/VOD-Studio/saber/compare/v0.0.5...v0.1.0
 [0.0.5]: https://github.com/VOD-Studio/saber/compare/v0.0.4...v0.0.5
