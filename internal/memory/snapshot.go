@@ -41,13 +41,19 @@ func (s *Service) Snapshot(ctx context.Context, identity chat.Identity, budget i
 	if len(entries) == 0 {
 		return Snapshot{Scope: scope}, nil
 	}
+	// 预算连页眉页脚都放不下时宁可不注入，避免超过四分之一输入预算。
+	available := budget - len(header) - len(footer)
+	if available <= 0 {
+		return Snapshot{Scope: scope, Omitted: len(entries)}, nil
+	}
 	var b strings.Builder
 	b.WriteString(header)
 	injected := make([]Entry, 0, len(entries))
 	for i, entry := range entries {
 		line := fmt.Sprintf("- (ID %d) %s\n", entry.ID, entry.Content)
-		if b.Len()+len(line)+len(footer) > budget {
-			return Snapshot{Scope: scope, Entries: injected, Text: b.String() + footer, Omitted: len(entries) - i}, nil
+		if b.Len()+len(line)-len(header) > available {
+			b.WriteString(footer)
+			return Snapshot{Scope: scope, Entries: injected, Text: b.String(), Omitted: len(entries) - i}, nil
 		}
 		b.WriteString(line)
 		injected = append(injected, entry)

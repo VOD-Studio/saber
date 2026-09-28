@@ -367,12 +367,12 @@ func TestSnapshot_OmitsOverBudget(t *testing.T) {
 	if _, err := svc.Add(ctx, alice, "十一十二十三", Source{}, false); err != nil {
 		t.Fatalf("Add() error = %v", err)
 	}
-	// 预算小于页眉页脚都放不下任何条目时，全部计为未注入，但仍标出边界。
+	// 预算小于页眉页脚都放不下任何条目时不注入，避免突破输入预算。
 	tiny, err := svc.Snapshot(ctx, alice, 10)
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
-	if len(tiny.Entries) != 0 || tiny.Omitted != 2 || !strings.Contains(tiny.Text, "【记忆结束】") {
+	if len(tiny.Entries) != 0 || tiny.Omitted != 2 || tiny.Text != "" {
 		t.Fatalf("小预算 Snapshot() = %+v", tiny)
 	}
 	// 默认预算足以注入全部条目。
@@ -382,6 +382,14 @@ func TestSnapshot_OmitsOverBudget(t *testing.T) {
 	}
 	if len(full.Entries) != 2 || full.Omitted != 0 {
 		t.Fatalf("默认预算 Snapshot() = %+v", full)
+	}
+	// 预算比完整文本少一字节时，最后一条必须被计为未注入。
+	partial, err := svc.Snapshot(ctx, alice, len(full.Text)-1)
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if len(partial.Entries) != 1 || partial.Omitted != 1 || !strings.Contains(partial.Text, "【记忆结束】") {
+		t.Fatalf("临界预算 Snapshot() = %+v", partial)
 	}
 }
 
