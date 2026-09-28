@@ -69,6 +69,16 @@ var (
 	ErrPaused = errors.New("当前记忆空间的自动学习已暂停")
 	// ErrQuotaExceeded 表示超出记忆复盘配额。
 	ErrQuotaExceeded = errors.New("超出记忆复盘配额")
+	// ErrSkillNotFound 表示技能不存在。
+	ErrSkillNotFound = errors.New("技能不存在")
+	// ErrSkillConflict 表示技能版本冲突。
+	ErrSkillConflict = errors.New("技能版本冲突")
+	// ErrSkillDuplicate 表示已存在同名技能。
+	ErrSkillDuplicate = errors.New("已存在同名技能")
+	// ErrInvalidSkillName 表示技能标识名不合法。
+	ErrInvalidSkillName = errors.New("技能标识必须由 1-64 位小写字母、数字、连字符、下划线或点组成")
+	// ErrEmptySkillDescription 表示技能描述为空。
+	ErrEmptySkillDescription = errors.New("技能描述不能为空")
 )
 
 // Scope 是记忆的隔离键，由可信身份推导，不能由模型参数指定。
@@ -342,4 +352,70 @@ type ProposalInput struct {
 	Content string
 	// Source 是建议的来源审计信息。
 	Source Source
+}
+
+// SkillEntry 表示一条已持久化的程序性经验（技能）。
+type SkillEntry struct {
+	// ID 是技能的内部稳定编号。
+	ID int64
+	// Scope 是所属隔离空间。
+	Scope Scope
+	// Name 是技能唯一标识（Slug，如 deploy-service、k8s-pod-troubleshoot）。
+	Name string
+	// Description 是技能的触发场景与用途描述，用于轻量目录展示与模型路由。
+	Description string
+	// Content 是技能的完整 Markdown 正文，包含标准步骤、排错清单与注意事项。
+	Content string
+	// Version 是乐观锁版本号，更新或删除时用于并发冲突检测。
+	Version int64
+	// Creator 是创建者标识。
+	Creator string
+	// SourceTask 是产生该技能的任务编号。
+	SourceTask int64
+	// CreatedAt 是技能创建时间。
+	CreatedAt time.Time
+	// UpdatedAt 是技能最后更新时间。
+	UpdatedAt time.Time
+}
+
+// SkillChange 表示群共享空间或后台复盘提出的技能变更建议。
+type SkillChange struct {
+	// ID 是建议编号。
+	ID int64
+	// Scope 是建议所属空间。
+	Scope Scope
+	// Action 是 ActionAdd、ActionReplace 或 ActionRemove。
+	Action string
+	// SkillID 在 replace 与 remove 时记录目标技能编号。
+	SkillID int64
+	// ExpectedVersion 是目标技能的预期版本，用于审批时防止并发覆盖。
+	ExpectedVersion int64
+	// Name 是技能标识名。
+	Name string
+	// Description 是技能描述。
+	Description string
+	// Content 是技能正文。
+	Content string
+	// Proposer 是建议提出者。
+	Proposer string
+	// SourceTask 是产生该建议的任务编号。
+	SourceTask int64
+	// Status 是建议状态（StatusPending、StatusApplied、StatusRejected）。
+	Status string
+	// CreatedAt 是建议提出时间。
+	CreatedAt time.Time
+	// DecidedAt 是建议审批时间。
+	DecidedAt time.Time
+}
+
+// SkillMutation 汇总技能变更的执行结果。
+type SkillMutation struct {
+	// Skill 是直接生效的技能条目。
+	Skill SkillEntry
+	// Change 是处于待确认状态的变更建议。
+	Change SkillChange
+	// Suggested 为 true 时表示操作已转为待确认建议，尚未真正生效。
+	Suggested bool
+	// Duplicate 为 true 时表示内容已完全相同，未做重复写入。
+	Duplicate bool
 }

@@ -101,6 +101,36 @@ CREATE TABLE IF NOT EXISTS memory_reviewed_tasks (
 	reviewed_at INTEGER NOT NULL,
 	PRIMARY KEY(scope_key, task_id)
 );
+CREATE TABLE IF NOT EXISTS skill_entries (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	scope_key TEXT NOT NULL,
+	name TEXT NOT NULL,
+	description TEXT NOT NULL,
+	content TEXT NOT NULL,
+	version INTEGER NOT NULL DEFAULT 1,
+	creator TEXT NOT NULL DEFAULT '',
+	source_task INTEGER NOT NULL DEFAULT 0,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL,
+	UNIQUE(scope_key, name)
+);
+CREATE INDEX IF NOT EXISTS skill_entries_scope ON skill_entries(scope_key, updated_at DESC, id DESC);
+CREATE TABLE IF NOT EXISTS skill_changes (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	scope_key TEXT NOT NULL,
+	action TEXT NOT NULL,
+	skill_id INTEGER NOT NULL DEFAULT 0,
+	expected_version INTEGER NOT NULL DEFAULT 0,
+	name TEXT NOT NULL,
+	description TEXT NOT NULL DEFAULT '',
+	content TEXT NOT NULL DEFAULT '',
+	proposer TEXT NOT NULL DEFAULT '',
+	source_task INTEGER NOT NULL DEFAULT 0,
+	status TEXT NOT NULL DEFAULT 'pending',
+	created_at INTEGER NOT NULL,
+	decided_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS skill_changes_pending ON skill_changes(scope_key, status, id);
 `
 
 // store 独占 memory.db 的表结构与连接。
@@ -185,4 +215,34 @@ func scanHistory(row scanner) (HistoryRecord, error) {
 	h.Conversation = conversation
 	h.CreatedAt = time.UnixMilli(created)
 	return h, nil
+}
+
+const skillColumns = `id,name,description,content,version,creator,source_task,created_at,updated_at`
+
+func scanSkill(row scanner, scope Scope) (SkillEntry, error) {
+	var s SkillEntry
+	var created, updated int64
+	if err := row.Scan(&s.ID, &s.Name, &s.Description, &s.Content, &s.Version, &s.Creator, &s.SourceTask, &created, &updated); err != nil {
+		return SkillEntry{}, err
+	}
+	s.Scope = scope
+	s.CreatedAt = time.UnixMilli(created)
+	s.UpdatedAt = time.UnixMilli(updated)
+	return s, nil
+}
+
+const skillChangeColumns = `id,action,skill_id,expected_version,name,description,content,proposer,source_task,status,created_at,decided_at`
+
+func scanSkillChange(row scanner, scope Scope) (SkillChange, error) {
+	var c SkillChange
+	var created, decided int64
+	if err := row.Scan(&c.ID, &c.Action, &c.SkillID, &c.ExpectedVersion, &c.Name, &c.Description, &c.Content, &c.Proposer, &c.SourceTask, &c.Status, &created, &decided); err != nil {
+		return SkillChange{}, err
+	}
+	c.Scope = scope
+	c.CreatedAt = time.UnixMilli(created)
+	if decided != 0 {
+		c.DecidedAt = time.UnixMilli(decided)
+	}
+	return c, nil
 }
