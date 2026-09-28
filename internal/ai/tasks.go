@@ -99,6 +99,7 @@ func (s *Service) EnableTasks(path string) error {
 		OnProjection: func() {
 			if s.memory != nil {
 				_ = s.syncHistoryProjections(context.Background())
+				s.triggerBackgroundReview()
 			}
 		},
 	})
@@ -109,6 +110,7 @@ func (s *Service) EnableTasks(path string) error {
 	close(ready)
 	if s.memory != nil {
 		_ = s.syncHistoryProjections(context.Background())
+		s.triggerBackgroundReview()
 	}
 	return nil
 }

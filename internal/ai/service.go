@@ -63,6 +63,8 @@ type Service struct {
 	executor *execution.Executor
 	// memory 是长期记忆服务；未启用时工具与快照注入都不生效。
 	memory *memory.Service
+	// runningReviews 记录正在执行复盘的空间键，防止同一空间并发复盘。
+	runningReviews sync.Map
 }
 
 // ServiceOption 配置 AI 服务的可选依赖。平台专属服务由接入端注入，

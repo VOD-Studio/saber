@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"rua.plus/saber/internal/chat"
+	"rua.plus/saber/internal/memory"
 	"rua.plus/saber/internal/task"
 )
 
@@ -45,6 +47,16 @@ func (s *Service) AICommand(ctx context.Context, message chat.Message, adapter c
 		if s.chatProcessor != nil {
 			if err := s.chatProcessor.Clear(ctx, message.Session); err != nil {
 				return err
+			}
+		}
+		if s.memory != nil && s.config != nil && s.config.Memory.Enabled && s.config.Memory.AutoLearn {
+			identity := chat.Identity{Session: message.Session, SenderID: message.SenderID, Direct: message.Direct}
+			if scope, ok := memory.Space(identity); ok {
+				go func() {
+					revCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+					defer cancel()
+					_ = s.ReviewScope(revCtx, scope)
+				}()
 			}
 		}
 		if s.tasks != nil {

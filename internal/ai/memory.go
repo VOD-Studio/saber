@@ -31,6 +31,17 @@ func memoryTool() openai.Tool {
 	}}
 }
 
+type reviewContextKey struct{}
+
+func withReviewContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, reviewContextKey{}, true)
+}
+
+func isReviewContext(ctx context.Context) bool {
+	val, _ := ctx.Value(reviewContextKey{}).(bool)
+	return val
+}
+
 // executeMemoryTool 执行模型发起的记忆操作，授权只取运行时可信身份。
 func (s *Service) executeMemoryTool(ctx context.Context, args map[string]any) (any, error) {
 	if s.memory == nil {
@@ -43,11 +54,18 @@ func (s *Service) executeMemoryTool(ctx context.Context, args map[string]any) (a
 	action, _ := args["action"].(string)
 	content, _ := args["content"].(string)
 	source := memory.Source{Task: task.ID(ctx)}
+	isReview := isReviewContext(ctx)
 	switch action {
 	case "list":
 		return s.memoryListText(ctx, identity)
 	case "add":
-		mutation, err := s.memory.Add(ctx, identity, content, source, false)
+		var mutation memory.Mutation
+		var err error
+		if isReview {
+			mutation, err = s.memory.AutoAdd(ctx, identity, content, source)
+		} else {
+			mutation, err = s.memory.Add(ctx, identity, content, source, false)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -57,15 +75,23 @@ func (s *Service) executeMemoryTool(ctx context.Context, args map[string]any) (a
 		if err != nil {
 			return nil, err
 		}
-		version, err := memoryIntArg(args, "expected_version", true)
+		version, err := memoryIntArg(args, "expected_version", !isReview)
 		if err != nil {
 			return nil, err
 		}
 		var mutation memory.Mutation
-		if action == "replace" {
-			mutation, err = s.memory.Replace(ctx, identity, id, version, content, source)
+		if isReview {
+			if action == "replace" {
+				mutation, err = s.memory.AutoReplace(ctx, identity, id, version, content, source)
+			} else {
+				mutation, err = s.memory.AutoRemove(ctx, identity, id, version, source)
+			}
 		} else {
-			mutation, err = s.memory.Remove(ctx, identity, id, version, source)
+			if action == "replace" {
+				mutation, err = s.memory.Replace(ctx, identity, id, version, content, source)
+			} else {
+				mutation, err = s.memory.Remove(ctx, identity, id, version, source)
+			}
 		}
 		if err != nil {
 			return nil, err
