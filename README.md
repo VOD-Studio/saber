@@ -716,6 +716,8 @@ saber/
       proactive_state.go           # 房间状态跟踪
       proactive_decision.go        # AI 决策引擎
       tools.go                     # 工具管理
+      memory.go                    # 记忆快照注入与 saber_memory 工具
+      memory_commands.go           # memory 通用命令处理
     mcp/
       manager.go                   # MCP 管理器
       factory.go                   # MCP 服务器工厂模式
@@ -742,6 +744,11 @@ saber/
       service.go                   # 人格服务（CRUD、完整会话键映射）
       chat_commands.go             # 通用人格命令处理
       commands.go                  # !persona 命令处理
+    memory/
+      types.go                     # 作用域、条目、建议与容量定义
+      service.go                   # 按用户与群作用域隔离的记忆读写与授权
+      store.go                     # memory.db 表结构与扫描
+      snapshot.go                  # 受预算限制的注入快照
 ```
 
 ## 开发
