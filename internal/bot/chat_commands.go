@@ -233,6 +233,8 @@ func (s *appState) buildCommands() error {
 				{"pending", "查看当前空间待确认建议", nil, nil},
 				{"approve", "确认当前空间待确认建议", []command.Argument{{Name: "id", Type: "integer", Required: true}}, writer},
 				{"reject", "拒绝当前空间待确认建议", []command.Argument{{Name: "id", Type: "integer", Required: true}}, writer},
+				{"pause", "暂停当前空间记忆自动学习", nil, writer},
+				{"resume", "恢复当前空间记忆自动学习", nil, writer},
 			} {
 				action := sub.name
 				if err := add("memory."+action, []string{"memory", action}, sub.description, "conversation", sub.args, nil, "", sub.authorize,
@@ -244,7 +246,7 @@ func (s *appState) buildCommands() error {
 			}
 			if err := add("memory.help", []string{"memory"}, "记忆命令用法", "conversation", nil, nil, "", nil,
 				func(ctx context.Context, m chat.Message, a chat.Adapter, _ string) error {
-					return reply(ctx, m, a, "用法：/memory list/status/add/edit/forget/pending/approve/reject")
+					return reply(ctx, m, a, "用法：/memory list/status/add/edit/forget/pending/approve/reject/pause/resume")
 				}); err != nil {
 				return err
 			}
@@ -271,7 +273,7 @@ func (s *appState) buildCommands() error {
 func onceCommand(id string) bool {
 	switch id {
 	case "ai.clear", "ai.switch", "task.cancel", "schedule.pause", "schedule.delete", "meme",
-		"memory.add", "memory.edit", "memory.forget", "memory.approve", "memory.reject":
+		"memory.add", "memory.edit", "memory.forget", "memory.approve", "memory.reject", "memory.pause", "memory.resume":
 		return true
 	}
 	return strings.HasPrefix(id, "persona.") && id != "persona.list" && id != "persona.status" && id != "persona.help"

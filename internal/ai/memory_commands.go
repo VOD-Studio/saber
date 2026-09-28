@@ -95,12 +95,28 @@ func (s *Service) MemoryCommand(ctx context.Context, message chat.Message, adapt
 			return commandReply(ctx, message, adapter, "拒绝失败："+err.Error())
 		}
 		return commandReply(ctx, message, adapter, fmt.Sprintf("已拒绝建议 #%d。", change.ID))
+	case "pause":
+		if strings.TrimSpace(raw) != "" {
+			return commandReply(ctx, message, adapter, "用法：/memory pause")
+		}
+		if err := s.memory.Pause(ctx, identity); err != nil {
+			return commandReply(ctx, message, adapter, "暂停失败："+err.Error())
+		}
+		return commandReply(ctx, message, adapter, "已暂停当前空间的自动记忆学习，现有记忆仍可正常读取。")
+	case "resume":
+		if strings.TrimSpace(raw) != "" {
+			return commandReply(ctx, message, adapter, "用法：/memory resume")
+		}
+		if err := s.memory.Resume(ctx, identity); err != nil {
+			return commandReply(ctx, message, adapter, "恢复失败："+err.Error())
+		}
+		return commandReply(ctx, message, adapter, "已恢复当前空间的自动记忆学习。")
 	default:
-		return commandReply(ctx, message, adapter, "用法：/memory list/status/add/edit/forget/pending/approve/reject")
+		return commandReply(ctx, message, adapter, "用法：/memory list/status/add/edit/forget/pending/approve/reject/pause/resume")
 	}
 }
 
-// memoryStatusText 汇总当前空间的条目与容量；detailed 为 true 时附带空间名称。
+// memoryStatusText 汇总当前空间的条目与容量；detailed 为 true 时附带空间名称、学习状态与复盘统计。
 func (s *Service) memoryStatusText(ctx context.Context, identity chat.Identity, detailed bool) (string, error) {
 	entries, err := s.memory.List(ctx, identity)
 	if err != nil {
@@ -110,12 +126,25 @@ func (s *Service) memoryStatusText(ctx context.Context, identity chat.Identity, 
 	if err != nil {
 		return "", err
 	}
+	status, _ := s.memory.Status(ctx, identity)
+	learnLabel := "开启"
+	if status.Paused {
+		learnLabel = "已暂停"
+	}
 	if len(entries) == 0 {
+		if detailed {
+			return fmt.Sprintf("%s暂无记忆条目（0/%d 字符）\n自动学习：%s\n复盘统计：%d 次，消耗 %d tokens",
+				usage.Scope, usage.MaxChars, learnLabel, status.ReviewCount, status.TokenCount), nil
+		}
 		return fmt.Sprintf("%s暂无记忆条目（0/%d 字符）", usage.Scope, usage.MaxChars), nil
 	}
 	var b strings.Builder
 	if detailed {
-		fmt.Fprintf(&b, "%s：%d/%d 字符，%d 条", usage.Scope, usage.Chars, usage.MaxChars, usage.Count)
+		fmt.Fprintf(&b, "%s：%d/%d 字符，%d 条\n自动学习：%s\n复盘统计：%d 次，消耗 %d tokens",
+			usage.Scope, usage.Chars, usage.MaxChars, usage.Count, learnLabel, status.ReviewCount, status.TokenCount)
+		if status.PendingCount > 0 {
+			fmt.Fprintf(&b, "\n待确认建议：%d 条（可用 /memory pending 查看）", status.PendingCount)
+		}
 	} else {
 		fmt.Fprintf(&b, "记忆条目（%d 条）：", usage.Count)
 	}

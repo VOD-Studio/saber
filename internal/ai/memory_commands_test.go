@@ -121,3 +121,37 @@ func TestMemoryCommand_DoesNotLeakOtherScope(t *testing.T) {
 	require.NoError(t, svc.MemoryCommand(ctx, memoryCommandMessage("@alice:test", "!room", false), adapter, "list", ""))
 	require.False(t, strings.Contains(lastReply(t, adapter), "私聊秘密"))
 }
+
+func TestMemoryCommand_PauseResumeAndStatus(t *testing.T) {
+	mem := newTestMemory(t, memory.Config{GroupWriter: func(i chat.Identity) bool { return i.SenderID == "@admin:test" }})
+	svc := newMemoryAIService(t, mem, 0)
+	adapter := chatmemory.New("bot", chat.Capabilities{}, nil)
+	ctx := context.Background()
+
+	// 1. 个人空间 pause 与 resume
+	userMsg := memoryCommandMessage("@alice:test", "dm", true)
+	require.NoError(t, svc.MemoryCommand(ctx, userMsg, adapter, "status", ""))
+	require.Contains(t, lastReply(t, adapter), "自动学习：开启")
+
+	require.NoError(t, svc.MemoryCommand(ctx, userMsg, adapter, "pause", ""))
+	require.Contains(t, lastReply(t, adapter), "已暂停当前空间的自动记忆学习")
+
+	require.NoError(t, svc.MemoryCommand(ctx, userMsg, adapter, "status", ""))
+	require.Contains(t, lastReply(t, adapter), "自动学习：已暂停")
+
+	require.NoError(t, svc.MemoryCommand(ctx, userMsg, adapter, "resume", ""))
+	require.Contains(t, lastReply(t, adapter), "已恢复当前空间的自动记忆学习")
+
+	// 2. 群空间权限测试
+	memberMsg := memoryCommandMessage("@member:test", "!room", false)
+	adminMsg := memoryCommandMessage("@admin:test", "!room", false)
+
+	require.NoError(t, svc.MemoryCommand(ctx, memberMsg, adapter, "pause", ""))
+	require.Contains(t, lastReply(t, adapter), "只有本群记忆管理员")
+
+	require.NoError(t, svc.MemoryCommand(ctx, adminMsg, adapter, "pause", ""))
+	require.Contains(t, lastReply(t, adapter), "已暂停当前空间的自动记忆学习")
+
+	require.NoError(t, svc.MemoryCommand(ctx, adminMsg, adapter, "resume", ""))
+	require.Contains(t, lastReply(t, adapter), "已恢复当前空间的自动记忆学习")
+}
