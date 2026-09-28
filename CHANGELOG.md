@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 历史检索与详情读取强制在查询前绑定当前可信身份推导的作用域（私聊仅查本人私聊历史，群聊仅查本群历史），拒绝跨用户、跨群及无效 ID 查询，不泄露其他会话内容
 - 支持历史索引保守回填（`BackfillHistory`），系统重启或崩溃恢复时自动排空未处理终态任务投影并确认出队，保证幂等去重且不丢记录
 
+- 自动形成长期记忆（P3）：新增后台轻量复盘流水线（`internal/ai/memory_review.go` 与 `internal/memory/review.go`），在已持久化的对话轮次上异步提炼稳定偏好与群共识，失败不影响主聊链路响应，复盘任务不递归触发
+- 复盘运行于受限工具沙箱：仅允许 `saber_memory` 与 `saber_history` 工具，禁止 bash、文件写入与 MCP 工具，并受 30 秒超时、最多 2 轮模型请求、单次输入上限与独立模型（`review_model`）约束
+- 自动新增、修改与删除遵循安全规则：个人空间自动新增直接生效（标为非显式保存），替换与删除必须形成待确认建议；群共享空间所有自动提炼（新增、修改、删除）均先形成待确认建议，由管理员确认
+- 防重复学习与来源排除机制：删除条目与拒绝建议时自动将来源任务记录至 `memory_excluded_sources`，阻止旧复盘重新恢复已删除或已拒绝的事实；已复盘任务通过 SQLite 独立记录保证崩溃恢复幂等性与去重
+- 空间与全局配额控制：支持配置 `max_scope_reviews`、`max_scope_tokens`、`max_global_reviews` 与 `max_global_tokens`，超出配额自动跳过复盘并记录日志
+- 新增 `memory pause` 与 `memory resume` 共享文本命令，支持按空间随时暂停/恢复自动记忆提炼（群聊需管理员权限）；`/memory status` 实时展示容量、自动学习状态、复盘次数与 token 消耗
+
 ## [0.2.0] - 2026-09-24
 
 ### Added
