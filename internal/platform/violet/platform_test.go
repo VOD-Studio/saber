@@ -533,6 +533,9 @@ func texts(messages []chat.Message) []string {
 
 // TestPlatform_InboundImage 验证私聊图片消息被解析为 chat.Attachment（data URL），
 // caption 作为 Text 一并投递给模型。
+//
+// Violet 把图片正文存成 ![img:uuid] 占位符 + caption，占位符必须剥离——
+// 否则会被命令分发器当成命令路径拦截，回「未知命令」而不是走 AI 图片解析。
 func TestPlatform_InboundImage(t *testing.T) {
 	t.Parallel()
 	fake := newFakeViolet(t)
@@ -541,7 +544,8 @@ func TestPlatform_InboundImage(t *testing.T) {
 	startTestPlatform(t, fake, handler)
 	now := time.Now()
 	media := []messageMediaDTO{{ID: "pic-1", URL: "/uploads/pic-1", MIMEType: "image/png", Width: ptrInt(2), Height: ptrInt(2)}}
-	msg := fake.pushImageMessage(testDirectRoom, "user-1", "alice", "看看这张图", media, now)
+	// 正文含占位符 + caption，模拟 violet 实际消息形态。
+	msg := fake.pushImageMessage(testDirectRoom, "user-1", "alice", "![img:pic-1]看看这张图", media, now)
 	fake.pushEvent(msg)
 	got := handler.waitForMessage(t, 0)
 	if got.SenderID != "user-1" {
@@ -557,8 +561,30 @@ func TestPlatform_InboundImage(t *testing.T) {
 	if !strings.HasPrefix(att.URL, "data:image/png;base64,") {
 		t.Fatalf("附件不是 data URL: %q", att.URL[:min(40, len(att.URL))])
 	}
+	// 占位符必须被剥离，只留 caption。
 	if got.Text != "看看这张图" {
-		t.Fatalf("caption 未透传: %q", got.Text)
+		t.Fatalf("caption 未剥离占位符: %q", got.Text)
+	}
+}
+
+// TestPlatform_InboundImagePurePlaceholder 验证只含占位符无 caption 的图片消息
+// 不被命令分发器拦截：剥离后 text 为空，但附件非空即视为有内容，照常投递。
+func TestPlatform_InboundImagePurePlaceholder(t *testing.T) {
+	t.Parallel()
+	fake := newFakeViolet(t)
+	fake.addUploadedImage("pic-3", "image/png", []byte("png-bytes"))
+	handler := newRecordingHandler()
+	startTestPlatform(t, fake, handler)
+	now := time.Now()
+	media := []messageMediaDTO{{ID: "pic-3", URL: "/uploads/pic-3", MIMEType: "image/png"}}
+	msg := fake.pushImageMessage(testDirectRoom, "user-1", "alice", "![img:pic-3]", media, now)
+	fake.pushEvent(msg)
+	got := handler.waitForMessage(t, 0)
+	if got.Text != "" {
+		t.Fatalf("纯占位符剥离后应为空，got %q", got.Text)
+	}
+	if len(got.Attachments) != 1 {
+		t.Fatalf("附件数 = %d, want 1", len(got.Attachments))
 	}
 }
 

@@ -472,6 +472,9 @@ func (p *Platform) normalizeImageMessage(ctx context.Context, item inbound, botU
 		slog.Warn("violet 图片消息缺少发送者标识，跳过", "message", message.ID)
 		return chat.Message{}, false
 	}
+	// Violet 把图片消息正文存成 ![img:uuid] 占位符 + caption。占位符对模型与命令
+	// 分发器都是噪声，剥离后只留 caption；@提及判定也基于剥离后的正文。
+	caption := strings.TrimSpace(stripImagePlaceholders(message.Content))
 	mentionsSelf := p.mentionsSelf(message.Content)
 	if allowed, reason := p.shouldAnswer(ctx, item.conversationID, mentionsSelf); !allowed {
 		slog.Debug("violet 图片消息未触发回复", "conversation", item.conversationID, "message", message.ID, "reason", reason)
@@ -496,7 +499,7 @@ func (p *Platform) normalizeImageMessage(ctx context.Context, item inbound, botU
 			URL:      encodeImageAsDataURL(data, media.MIMEType),
 		})
 	}
-	if len(attachments) == 0 && strings.TrimSpace(message.Content) == "" {
+	if len(attachments) == 0 && caption == "" {
 		slog.Debug("violet 图片消息全部下载失败且无 caption，跳过", "message", message.ID)
 		return chat.Message{}, false
 	}
@@ -513,7 +516,7 @@ func (p *Platform) normalizeImageMessage(ctx context.Context, item inbound, botU
 		ID:          message.ID,
 		SenderID:    message.Sender.ID,
 		Direct:      p.states.get(item.conversationID).storedKind() == kindDirect,
-		Text:        stripMentions(message.Content),
+		Text:        stripMentions(caption),
 		Attachments: attachments,
 		ReplyTo:     replyTo,
 	}, true

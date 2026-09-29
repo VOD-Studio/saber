@@ -40,6 +40,18 @@ func addressedCommand(content, botUserID string) (body string, commandLike, addr
 // 不会把正文里恰好相邻的括号一起吃掉。
 var mentionTokenPattern = regexp.MustCompile(`@\(([^():]*):([^():]*)\)`)
 
+// inlineImagePlaceholderPattern 匹配 Violet 富文本内联图片占位符 ![img:<id>]。
+//
+// Violet 把图片消息的正文存成占位符 + caption，如 "![img:uuid]看看这张图"。
+// 占位符对模型与命令分发器都是噪声——前者有 chat.Attachment 提供图片，
+// 后者会把 "![img:uuid]" 当成命令路径拦截掉整条消息。剥离后只留 caption。
+var inlineImagePlaceholderPattern = regexp.MustCompile(`!\[img:[^\]]+\]`)
+
+// stripImagePlaceholders 剥离正文中的内联图片占位符 ![img:<id>]。
+func stripImagePlaceholders(content string) string {
+	return inlineImagePlaceholderPattern.ReplaceAllString(content, "")
+}
+
 // stripMentions 剥离提及 token 里的 ID 部分。
 //
 // Violet 把 @(name:uuid) 原样留在正文里，uuid 对模型是纯噪声，
