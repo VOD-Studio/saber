@@ -6,12 +6,16 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"maunium.net/go/mautrix/id"
 
+	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
+	"rua.plus/saber/internal/chat/memory"
 	"rua.plus/saber/internal/config"
 	ruacontext "rua.plus/saber/internal/context"
+	"rua.plus/saber/internal/conversation"
 	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/mcp"
 )
@@ -542,4 +546,102 @@ func TestOllamaIntegration(t *testing.T) {
 		t.Skipf("GenerateSimpleResponse skipped due to network/service error: %v", err)
 	}
 	t.Logf("Ollama Response: %s", resp)
+}
+
+// TestHandleChat_MediaModelSwitchesOnAttachments 验证带图片消息时模型切换到
+// AIConfig.MediaModel。这是图片模型从 matrix.media.model 提升到 ai.media_model
+// 后的核心行为：所有平台（含 violet）的带图消息都走多模态模型。
+func TestHandleChat_MediaModelSwitchesOnAttachments(t *testing.T) {
+	cfg := createTestMultiProviderAIConfig()
+	cfg.AI.MediaModel = "openai.gpt-4o"
+	service, err := NewService(cfg)
+	if err != nil {
+		t.Fatalf("NewService failed: %v", err)
+	}
+	var gotModel string
+	service.chatProcessor = &conversation.Processor{
+		Run: func(_ context.Context, req agent.Request, _ func(agent.Event)) (agent.Result, error) {
+			gotModel = req.Model
+			return agent.Result{Status: agent.Completed, Content: "ok"}, nil
+		},
+		Timeout: time.Minute,
+	}
+	message := chat.Message{
+		Session:     chat.Session{Platform: "memory", Account: "bot", Conversation: "room"},
+		SenderID:    "user",
+		Text:        "看看这张图",
+		Attachments: []chat.Attachment{{Kind: "image", URL: "data:image/png;base64,AA=="}},
+	}
+	adapter := memory.New("bot", chat.Capabilities{}, nil)
+	if _, err := service.HandleChat(context.Background(), message, adapter); err != nil {
+		t.Fatalf("HandleChat failed: %v", err)
+	}
+	if gotModel != "openai.gpt-4o" {
+		t.Fatalf("带图消息模型 = %q, want openai.gpt-4o", gotModel)
+	}
+}
+
+// TestHandleChat_MediaModelEmptyFallsBack 验证 MediaModel 留空时带图消息仍走
+// default_model，不强行切换。
+func TestHandleChat_MediaModelEmptyFallsBack(t *testing.T) {
+	cfg := createTestMultiProviderAIConfig()
+	// MediaModel 留空
+	service, err := NewService(cfg)
+	if err != nil {
+		t.Fatalf("NewService failed: %v", err)
+	}
+	var gotModel string
+	service.chatProcessor = &conversation.Processor{
+		Run: func(_ context.Context, req agent.Request, _ func(agent.Event)) (agent.Result, error) {
+			gotModel = req.Model
+			return agent.Result{Status: agent.Completed, Content: "ok"}, nil
+		},
+		Timeout: time.Minute,
+	}
+	message := chat.Message{
+		Session:     chat.Session{Platform: "memory", Account: "bot", Conversation: "room"},
+		SenderID:    "user",
+		Text:        "看看这张图",
+		Attachments: []chat.Attachment{{Kind: "image", URL: "data:image/png;base64,AA=="}},
+	}
+	adapter := memory.New("bot", chat.Capabilities{}, nil)
+	if _, err := service.HandleChat(context.Background(), message, adapter); err != nil {
+		t.Fatalf("HandleChat failed: %v", err)
+	}
+	if gotModel != cfg.AI.DefaultModel {
+		t.Fatalf("MediaModel 留空时模型 = %q, want default %q", gotModel, cfg.AI.DefaultModel)
+	}
+}
+
+// TestHandleChat_MediaModelOverridesExplicitModel 验证带图消息强制覆盖调用方
+// 显式指定的文本模型：图片无多模态模型会丢，覆盖语义保留现状。
+func TestHandleChat_MediaModelOverridesExplicitModel(t *testing.T) {
+	cfg := createTestMultiProviderAIConfig()
+	cfg.AI.MediaModel = "openai.gpt-4o"
+	service, err := NewService(cfg)
+	if err != nil {
+		t.Fatalf("NewService failed: %v", err)
+	}
+	var gotModel string
+	service.chatProcessor = &conversation.Processor{
+		Run: func(_ context.Context, req agent.Request, _ func(agent.Event)) (agent.Result, error) {
+			gotModel = req.Model
+			return agent.Result{Status: agent.Completed, Content: "ok"}, nil
+		},
+		Timeout: time.Minute,
+	}
+	message := chat.Message{
+		Session:     chat.Session{Platform: "memory", Account: "bot", Conversation: "room"},
+		SenderID:    "user",
+		Text:        "看看这张图",
+		Attachments: []chat.Attachment{{Kind: "image", URL: "data:image/png;base64,AA=="}},
+	}
+	adapter := memory.New("bot", chat.Capabilities{}, nil)
+	// 调用方显式指定文本模型 openai.gpt-4，但带图应覆盖到 gpt-4o。
+	if _, err := service.HandleChatModel(context.Background(), message, adapter, "openai.gpt-4"); err != nil {
+		t.Fatalf("HandleChatModel failed: %v", err)
+	}
+	if gotModel != "openai.gpt-4o" {
+		t.Fatalf("显式文本模型被带图覆盖 = %q, want openai.gpt-4o", gotModel)
+	}
 }
