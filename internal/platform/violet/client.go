@@ -185,6 +185,9 @@ func (c *client) setTyping(ctx context.Context, conversationID string, active bo
 // 走独立路径而非复用 request：后者只接受 JSON body，而媒体上传必须用 multipart。
 // 鉴权头与 request 一致（Bearer token），响应仍是 Violet 的统一信封。
 func (c *client) uploadMedia(ctx context.Context, data []byte, mimeType, filename string) (*mediaUploadDTO, error) {
+	if int64(len(data)) > maxMediaBytes {
+		return nil, fmt.Errorf("violet 图片 %d 字节超过 %d 上限", len(data), maxMediaBytes)
+	}
 	body, contentType, err := multipartImageBody(data, mimeType, filename)
 	if err != nil {
 		return nil, err
@@ -249,12 +252,12 @@ func (c *client) downloadMedia(ctx context.Context, mediaURL string) ([]byte, er
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("violet 媒体下载返回 %d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxInboundImageBytes+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxMediaBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("读取 violet 媒体字节失败: %w", err)
 	}
-	if int64(len(data)) > maxInboundImageBytes {
-		return nil, fmt.Errorf("violet 媒体超过 %d 字节上限", maxInboundImageBytes)
+	if int64(len(data)) > maxMediaBytes {
+		return nil, fmt.Errorf("violet 媒体超过 %d 字节上限", maxMediaBytes)
 	}
 	return data, nil
 }

@@ -1,9 +1,11 @@
 package violetplatform
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -567,11 +569,19 @@ func (f *fakeViolet) serveMediaUpload(w http.ResponseWriter, r *http.Request) {
 		Bytes:    data,
 		Size:     int64(len(data)),
 	}
+	// 尝试解析宽高，与 violet 服务端 image.DecodeConfig 行为对齐；解析失败留 0。
+	if config, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
+		record.Width = config.Width
+		record.Height = config.Height
+	}
 	f.uploadedMedia[id] = record
+	width, height := record.Width, record.Height
 	writeAPIData(w, http.StatusCreated, mediaUploadDTO{
 		ID:       record.ID,
 		URL:      record.URL,
 		MIMEType: record.MIMEType,
+		Width:    width,
+		Height:   height,
 		Size:     record.Size,
 	})
 }

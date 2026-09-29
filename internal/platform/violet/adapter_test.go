@@ -307,6 +307,7 @@ func TestAdapter_SendImageRejectsInvalid(t *testing.T) {
 		{"空 MIME", valid, []byte("x"), ""},
 		{"陌生平台", chat.Reply{Session: chat.Session{Platform: "matrix", Account: adapter.account, Conversation: testDirectRoom}, Text: "cap"}, []byte("x"), "image/png"},
 		{"陌生账号", chat.Reply{Session: chat.Session{Platform: platformName, Account: "other.host", Conversation: testDirectRoom}, Text: "cap"}, []byte("x"), "image/png"},
+		{"超大字节", valid, make([]byte, maxMediaBytes+1), "image/png"},
 	} {
 		if _, err := adapter.SendImage(ctx, tc.reply, tc.data, tc.mimeType, "f.png", 1, 1); err == nil {
 			t.Fatalf("%s 应被拒", tc.name)

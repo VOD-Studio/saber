@@ -7,11 +7,12 @@ import (
 	"strings"
 )
 
-// maxInboundImageBytes 是入站图片下载的字节上限。
+// maxMediaBytes 是入站下载与出站上传共用的图片字节上限。
 //
 // violet 的 /uploads/* 公开读取，但 SSE 里的 media.url 仍不可全信：
 // 上限既防误传大文件撑爆内存，也兜一道异常响应。
-const maxInboundImageBytes = 10 << 20
+// 出站侧同样预检，避免把超大字节打到服务端才被 413 拒掉。
+const maxMediaBytes = 10 << 20
 
 // encodeImageAsDataURL 把图片字节编码为 data URL，供 chat.Attachment.URL 使用。
 //
@@ -28,7 +29,8 @@ func encodeImageAsDataURL(data []byte, mimeType string) string {
 // resolveMediaURL 把消息内的 media.url 解析为可下载的绝对 URL。
 //
 // violet 的 /uploads/* 是站内相对路径（相对站点根），需要拼 endpoint；
-// 若已是绝对 URL，必须校验 host 与 endpoint 一致，防止 SSE 伪造外部地址引发 SSRF。
+// 若已是绝对 URL，必须校验 scheme 限 http/https 且 host 与 endpoint 一致，
+// 防止 SSE 伪造 file:///、gopher:// 或外部 http 地址引发 SSRF。
 func resolveMediaURL(endpoint, mediaURL string) (string, error) {
 	mediaURL = strings.TrimSpace(mediaURL)
 	if mediaURL == "" {
@@ -39,6 +41,9 @@ func resolveMediaURL(endpoint, mediaURL string) (string, error) {
 		return "", fmt.Errorf("解析 violet media.url 失败: %w", err)
 	}
 	if parsed.IsAbs() {
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return "", fmt.Errorf("violet media.url scheme %q 非允许的 http/https，拒绝下载", parsed.Scheme)
+		}
 		endpointHost := endpointHost(endpoint)
 		if parsed.Host != endpointHost {
 			return "", fmt.Errorf("violet media.url host %q 与 endpoint %q 不一致，拒绝下载", parsed.Host, endpointHost)

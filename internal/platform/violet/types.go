@@ -76,7 +76,7 @@ type outgoingMessage struct {
 }
 
 // mediaUploadDTO 是 POST /chat/bot/media 的响应：上传后的文件定位信息。
-// id 供后续 SendMessage 的 media_ids 引用，url 供 saber 侧入站下载使用。
+// id 供后续 SendMessage 的 media_ids 引用；其余字段 violet 服务端返回，saber 暂未消费。
 type mediaUploadDTO struct {
 	ID       string `json:"id"`
 	URL      string `json:"url"`
