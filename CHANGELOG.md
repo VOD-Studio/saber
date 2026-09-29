@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-29
+
 ### Changed
 
 - 图片模型配置从 `matrix.media.model` 提升到全局 `ai.media_model`：带图片消息的多模态模型选择不再绑定 Matrix 平台，violet 等非 matrix 平台的带图消息也能切换到多模态模型。`matrix.media` 的 `enabled`/`max_size_mb`/`timeout_sec` 保留，仍是 Matrix 入站图片解析的开关与限额。
@@ -470,7 +472,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 结构化日志
 - 基础命令系统（`!ping`, `!help`）
 
-[Unreleased]: https://github.com/VOD-Studio/saber/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/VOD-Studio/saber/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/VOD-Studio/saber/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/VOD-Studio/saber/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/VOD-Studio/saber/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/VOD-Studio/saber/compare/v0.0.5...v0.1.0
