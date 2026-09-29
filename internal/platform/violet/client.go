@@ -228,6 +228,37 @@ func (c *client) uploadMedia(ctx context.Context, data []byte, mimeType, filenam
 	return &out, nil
 }
 
+// downloadMedia 下载一张入站图片的字节。
+//
+// 不带 Bearer token：violet 的 /uploads/* 是公开读取路径，媒体 URL 已由
+// resolveMediaURL 校验为站内地址。大小按 maxInboundImageBytes 截断，防异常响应撑爆内存。
+func (c *client) downloadMedia(ctx context.Context, mediaURL string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mediaURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("构造 violet 媒体下载请求失败: %w", err)
+	}
+	resp, err := c.api.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("下载 violet 媒体失败: %w", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			slog.Warn("关闭 violet 媒体下载响应失败", "error", closeErr)
+		}
+	}()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("violet 媒体下载返回 %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxInboundImageBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("读取 violet 媒体字节失败: %w", err)
+	}
+	if int64(len(data)) > maxInboundImageBytes {
+		return nil, fmt.Errorf("violet 媒体超过 %d 字节上限", maxInboundImageBytes)
+	}
+	return data, nil
+}
+
 // multipartImageBody 构造 multipart/form-data 请求体与对应的 Content-Type。
 // filename 为空时用一个通用名，避免 violet 侧把空名当作缺字段拒绝。
 func multipartImageBody(data []byte, mimeType, filename string) (io.Reader, string, error) {

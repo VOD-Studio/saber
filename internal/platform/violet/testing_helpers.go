@@ -136,6 +136,39 @@ func (f *fakeViolet) pushMessage(conversation, sender, senderName, content strin
 	return message
 }
 
+// pushImageMessage 把一条带 media 的图片消息加入历史并返回快照。
+//
+// 它只构造消息快照，不登记可下载字节：media.url 指向 /uploads/{id}，是否可下载
+// 取决于调用方是否已通过 addUploadedImage 登记。这样测试能精确构造「某张图缺失」的场景。
+func (f *fakeViolet) pushImageMessage(conversation, sender, senderName, caption string, media []messageMediaDTO, createdAt time.Time) messageDTO {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	message := messageDTO{
+		ID:             fmt.Sprintf("msg-%s-%d", conversation, len(f.history[conversation])+1),
+		ConversationID: conversation,
+		Sender:         userDTO{ID: sender, Username: senderName},
+		Type:           "image",
+		Content:        caption,
+		Media:          media,
+		CreatedAt:      createdAt.Format(time.RFC3339Nano),
+	}
+	f.history[conversation] = append([]messageDTO{message}, f.history[conversation]...)
+	return message
+}
+
+// addUploadedImage 登记一张可经 /uploads/{id} 下载的图片字节。
+func (f *fakeViolet) addUploadedImage(id, mimeType string, bytes []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.uploadedMedia[id] = uploadedMedia{
+		ID:       id,
+		URL:      "/uploads/" + id,
+		MIMEType: mimeType,
+		Bytes:    bytes,
+		Size:     int64(len(bytes)),
+	}
+}
+
 // pushEvent 向 SSE 通道写一帧 message.created。
 func (f *fakeViolet) pushEvent(message messageDTO) {
 	payload, err := json.Marshal(eventFrame{
@@ -233,6 +266,11 @@ func (f *fakeViolet) uploadedMediaRecords() []uploadedMedia {
 // setAuthFailure 让所有请求在未携带正确 token 时返回 401。
 func (f *fakeViolet) serve(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, apiPrefix)
+	// /uploads/* 是公开读取路径，不经 BotAuth，须在鉴权前放行。
+	if strings.HasPrefix(path, "/uploads/") && r.Method == http.MethodGet {
+		f.serveUpload(w, r, path)
+		return
+	}
 	if r.Header.Get("Authorization") != "Bearer "+testToken {
 		writeAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "缺少或无效的 Bot Token")
 		return
@@ -536,6 +574,24 @@ func (f *fakeViolet) serveMediaUpload(w http.ResponseWriter, r *http.Request) {
 		MIMEType: record.MIMEType,
 		Size:     record.Size,
 	})
+}
+
+// serveUpload 按 /uploads/{id} 回放已登记媒体的字节，公开读取无需鉴权。
+func (f *fakeViolet) serveUpload(w http.ResponseWriter, r *http.Request, path string) {
+	id := strings.TrimPrefix(path, "/uploads/")
+	f.mu.Lock()
+	media, ok := f.uploadedMedia[id]
+	f.mu.Unlock()
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", media.MIMEType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(media.Bytes)))
+	if _, err := w.Write(media.Bytes); err != nil {
+		// 连接中断在测试里不视为失败，仅记录。
+		return
+	}
 }
 
 func (f *fakeViolet) serveEvents(w http.ResponseWriter, r *http.Request) {

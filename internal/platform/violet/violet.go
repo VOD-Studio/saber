@@ -40,6 +40,8 @@ const (
 	backfillPageSize   = 50
 	maxBackfillPages   = 2
 	inboundMessageType = "text"
+	// inboundMessageTypeImage 是入站图片消息的 Type 值，与 Violet domain 的 MessageImage 一致。
+	inboundMessageTypeImage = "image"
 )
 
 // inbound 是一条待处理的入站消息与其所属会话。
@@ -396,9 +398,11 @@ func (p *Platform) normalizeMessage(ctx context.Context, item inbound) (chat.Mes
 	case message.IsDeleted:
 		slog.Debug("violet 消息已被删除，跳过", "message", message.ID)
 		return chat.Message{}, false
+	case message.Type == inboundMessageTypeImage:
+		return p.normalizeImageMessage(ctx, item, botUserID)
 	case message.Type != "" && message.Type != inboundMessageType:
-		// Bot API 只开放文本：图片消息既没有上传通道也不该被当成问题回答。
-		slog.Debug("跳过非文本 violet 消息", "message", message.ID, "type", message.Type)
+		// 未识别的消息类型（如 tweet_share/system）暂不支持，跳过但不报错。
+		slog.Debug("跳过不支持的 violet 消息类型", "message", message.ID, "type", message.Type)
 		return chat.Message{}, false
 	case message.Sender.ID == botUserID:
 		// 服务端已不向 bot 投递 bot 的消息，这里再挡一道，防的是协议放宽或自身回声。
@@ -451,6 +455,67 @@ func (p *Platform) normalizeMessage(ctx context.Context, item inbound) (chat.Mes
 		Direct:   p.states.get(item.conversationID).storedKind() == kindDirect,
 		Text:     text,
 		ReplyTo:  replyTo,
+	}, true
+}
+
+// normalizeImageMessage 把图片消息解析为带 chat.Attachment 的 chat.Message。
+//
+// 与文本路径的差别：图片消息以附件为主体，caption 可空；下载失败的单张图片跳过，
+// 只要还有任一附件或非空 caption 即视为有内容。是否回答仍按会话形态与 @ 判定。
+func (p *Platform) normalizeImageMessage(ctx context.Context, item inbound, botUserID string) (chat.Message, bool) {
+	message := item.message
+	if message.Sender.ID == botUserID {
+		slog.Debug("跳过 violet 自回声图片", "message", message.ID)
+		return chat.Message{}, false
+	}
+	if message.Sender.ID == "" {
+		slog.Warn("violet 图片消息缺少发送者标识，跳过", "message", message.ID)
+		return chat.Message{}, false
+	}
+	mentionsSelf := p.mentionsSelf(message.Content)
+	if allowed, reason := p.shouldAnswer(ctx, item.conversationID, mentionsSelf); !allowed {
+		slog.Debug("violet 图片消息未触发回复", "conversation", item.conversationID, "message", message.ID, "reason", reason)
+		return chat.Message{}, false
+	}
+	attachments := make([]chat.Attachment, 0, len(message.Media))
+	for _, media := range message.Media {
+		resolved, err := resolveMediaURL(p.violet.Endpoint, media.URL)
+		if err != nil {
+			slog.Warn("violet 图片地址不可用，跳过该图", "message", message.ID, "media_id", media.ID, "error", err)
+			continue
+		}
+		data, err := p.api.downloadMedia(ctx, resolved)
+		if err != nil {
+			slog.Warn("下载 violet 图片失败，跳过该图", "message", message.ID, "media_id", media.ID, "error", err)
+			continue
+		}
+		attachments = append(attachments, chat.Attachment{
+			Kind:     "image",
+			Name:     media.ID,
+			MIMEType: media.MIMEType,
+			URL:      encodeImageAsDataURL(data, media.MIMEType),
+		})
+	}
+	if len(attachments) == 0 && strings.TrimSpace(message.Content) == "" {
+		slog.Debug("violet 图片消息全部下载失败且无 caption，跳过", "message", message.ID)
+		return chat.Message{}, false
+	}
+	replyTo := ""
+	if message.ReplyTo != nil {
+		replyTo = message.ReplyTo.ID
+	}
+	return chat.Message{
+		Session: chat.Session{
+			Platform:     platformName,
+			Account:      p.adapter.account,
+			Conversation: item.conversationID,
+		},
+		ID:          message.ID,
+		SenderID:    message.Sender.ID,
+		Direct:      p.states.get(item.conversationID).storedKind() == kindDirect,
+		Text:        stripMentions(message.Content),
+		Attachments: attachments,
+		ReplyTo:     replyTo,
 	}, true
 }
 

@@ -197,8 +197,9 @@ func TestPlatform_DirectMessageAnswers(t *testing.T) {
 	handler.waitForText(t, "!ai 今天天气如何") // 共享命令入口负责解析，平台保留原文。
 }
 
-// TestPlatform_IgnoredInbound 验证自回声、非文本、缺发送者、被删消息与
-// 剥离后为空的消息都不会惊动模型。
+// TestPlatform_IgnoredInbound 验证自回声、缺发送者、被删消息与
+// 剥离后为空的消息都不会惊动模型。无附件的 image 消息也在此列——
+// 既无可下载媒体又无 caption，normalizeImageMessage 会放弃它。
 func TestPlatform_IgnoredInbound(t *testing.T) {
 	t.Parallel()
 	fake := newFakeViolet(t)
@@ -529,3 +530,80 @@ func texts(messages []chat.Message) []string {
 	}
 	return out
 }
+
+// TestPlatform_InboundImage 验证私聊图片消息被解析为 chat.Attachment（data URL），
+// caption 作为 Text 一并投递给模型。
+func TestPlatform_InboundImage(t *testing.T) {
+	t.Parallel()
+	fake := newFakeViolet(t)
+	fake.addUploadedImage("pic-1", "image/png", []byte("\x89PNG\r\n\x1a\nfake-png"))
+	handler := newRecordingHandler()
+	startTestPlatform(t, fake, handler)
+	now := time.Now()
+	media := []messageMediaDTO{{ID: "pic-1", URL: "/uploads/pic-1", MIMEType: "image/png", Width: ptrInt(2), Height: ptrInt(2)}}
+	msg := fake.pushImageMessage(testDirectRoom, "user-1", "alice", "看看这张图", media, now)
+	fake.pushEvent(msg)
+	got := handler.waitForMessage(t, 0)
+	if got.SenderID != "user-1" {
+		t.Fatalf("入站图片发送者不符: %q", got.SenderID)
+	}
+	if len(got.Attachments) != 1 {
+		t.Fatalf("附件数 = %d, want 1", len(got.Attachments))
+	}
+	att := got.Attachments[0]
+	if att.Kind != "image" || att.MIMEType != "image/png" {
+		t.Fatalf("附件形态不符: %+v", att)
+	}
+	if !strings.HasPrefix(att.URL, "data:image/png;base64,") {
+		t.Fatalf("附件不是 data URL: %q", att.URL[:min(40, len(att.URL))])
+	}
+	if got.Text != "看看这张图" {
+		t.Fatalf("caption 未透传: %q", got.Text)
+	}
+}
+
+// TestPlatform_InboundImageGroupNotMentioned 验证群聊里未 @ 本 bot 的图片消息不被回答，
+// 与文本消息的群聊门控一致。
+func TestPlatform_InboundImageGroupNotMentioned(t *testing.T) {
+	t.Parallel()
+	fake := newFakeViolet(t)
+	fake.addUploadedImage("pic-2", "image/png", []byte("png-bytes"))
+	handler := newRecordingHandler()
+	startTestPlatform(t, fake, handler)
+	now := time.Now()
+	media := []messageMediaDTO{{ID: "pic-2", URL: "/uploads/pic-2", MIMEType: "image/png"}}
+	msg := fake.pushImageMessage(testGroupRoom, "user-2", "bob", "群里随便发的图", media, now)
+	fake.pushEvent(msg)
+	waitForIdle(t, 400*time.Millisecond)
+	if got := len(handler.messages()); got != 0 {
+		t.Fatalf("群聊未 @ 的图片不该回答: %d 条", got)
+	}
+}
+
+// TestPlatform_InboundImageDownloadFailure 验证某张图下载失败不影响整条消息：
+// caption 仍投递，成功的附件保留，失败的附件被跳过。
+func TestPlatform_InboundImageDownloadFailure(t *testing.T) {
+	t.Parallel()
+	fake := newFakeViolet(t)
+	fake.addUploadedImage("ok-1", "image/png", []byte("ok-bytes"))
+	handler := newRecordingHandler()
+	startTestPlatform(t, fake, handler)
+	now := time.Now()
+	// 第二张图指向未登记的 id，/uploads/missing 返回 404。
+	media := []messageMediaDTO{
+		{ID: "ok-1", URL: "/uploads/ok-1", MIMEType: "image/png"},
+		{ID: "missing", URL: "/uploads/missing", MIMEType: "image/png"},
+	}
+	msg := fake.pushImageMessage(testDirectRoom, "user-1", "alice", "有一张可能挂了", media, now)
+	fake.pushEvent(msg)
+	got := handler.waitForMessage(t, 0)
+	if len(got.Attachments) != 1 || got.Attachments[0].MIMEType != "image/png" {
+		t.Fatalf("应只保留成功的附件: %+v", got.Attachments)
+	}
+	if got.Text != "有一张可能挂了" {
+		t.Fatalf("caption 未透传: %q", got.Text)
+	}
+}
+
+// ptrInt 返回 int 的指针，用于 messageMediaDTO 的可选宽高字段。
+func ptrInt(v int) *int { return &v }
