@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -66,10 +67,24 @@ type fakeViolet struct {
 	edits   []editedMessage
 	typings []typingRecord
 	events  chan string
+	// uploadedMedia 记录 bot 上传的图片，key 为内部生成的 file_id。
+	uploadedMedia map[string]uploadedMedia
 	// conversationCalls 记录会话详情接口被调次数，用于验证形态缓存真的生效。
 	conversationCalls int
 	// kindFailure 让会话详情接口报错，用来验证形态未知时的从严判定。
 	kindFailure bool
+}
+
+// uploadedMedia 是一次图片上传的观测记录。
+type uploadedMedia struct {
+	ID       string
+	URL      string
+	MIMEType string
+	Filename string
+	Bytes    []byte
+	Width    int
+	Height   int
+	Size     int64
 }
 
 // typingRecord 是一次输入状态上报。
@@ -86,6 +101,7 @@ func newFakeViolet(t *testing.T) *fakeViolet {
 		conversations: map[string]conversationDTO{},
 		history:       map[string][]messageDTO{},
 		byIdempotency: map[string]string{},
+		uploadedMedia: map[string]uploadedMedia{},
 		events:        make(chan string, 16),
 	}
 	fake.addConversation(testDirectRoom, kindDirect)
@@ -203,6 +219,17 @@ func (f *fakeViolet) setKindFailure(fail bool) {
 	f.kindFailure = fail
 }
 
+// uploadedMediaRecords 返回图片上传记录快照（按上传顺序）。
+func (f *fakeViolet) uploadedMediaRecords() []uploadedMedia {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]uploadedMedia, 0, len(f.uploadedMedia))
+	for _, m := range f.uploadedMedia {
+		out = append(out, m)
+	}
+	return out
+}
+
 // setAuthFailure 让所有请求在未携带正确 token 时返回 401。
 func (f *fakeViolet) serve(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, apiPrefix)
@@ -234,6 +261,8 @@ func (f *fakeViolet) serve(w http.ResponseWriter, r *http.Request) {
 		f.serveEdit(w, r, path)
 	case strings.HasSuffix(path, "/typing") && r.Method == http.MethodPost:
 		f.serveTyping(w, r, path)
+	case path == "/media" && r.Method == http.MethodPost:
+		f.serveMediaUpload(w, r)
 	case path == "/events" && r.Method == http.MethodGet:
 		f.serveEvents(w, r)
 	default:
@@ -304,24 +333,50 @@ func (f *fakeViolet) serveSendMessage(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 	var body struct {
-		Content   string `json:"content"`
-		ReplyToID string `json:"reply_to_id"`
-		Status    string `json:"status"`
+		Content   string   `json:"content"`
+		ReplyToID string   `json:"reply_to_id"`
+		Status    string   `json:"status"`
+		Type      string   `json:"type"`
+		MediaIDs  []string `json:"media_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
 		return
 	}
-	if strings.TrimSpace(body.Content) == "" && body.Status != "pending" {
-		writeAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "文本消息无效")
-		return
+	messageType := body.Type
+	if messageType == "" {
+		messageType = "text"
 	}
-	if body.Status != "" && body.Status != "pending" {
-		writeAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "创建时只能设置 pending 状态")
-		return
-	}
-	if len([]rune(body.Content)) > maxContentRunes {
-		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "内容超过 10000 字符")
+	switch messageType {
+	case "text":
+		if strings.TrimSpace(body.Content) == "" && body.Status != "pending" {
+			writeAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "文本消息无效")
+			return
+		}
+		if body.Status != "" && body.Status != "pending" {
+			writeAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "创建时只能设置 pending 状态")
+			return
+		}
+		if len([]rune(body.Content)) > maxContentRunes {
+			writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "内容超过 10000 字符")
+			return
+		}
+	case "image":
+		if len(body.MediaIDs) == 0 {
+			writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "图片消息必须提供 media_ids")
+			return
+		}
+		f.mu.Lock()
+		for _, mid := range body.MediaIDs {
+			if _, ok := f.uploadedMedia[mid]; !ok {
+				f.mu.Unlock()
+				writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "media_id 不存在: "+mid)
+				return
+			}
+		}
+		f.mu.Unlock()
+	default:
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "不支持的消息类型: "+messageType)
 		return
 	}
 	f.mu.Lock()
@@ -339,10 +394,21 @@ func (f *fakeViolet) serveSendMessage(w http.ResponseWriter, r *http.Request, pa
 		ID:             fmt.Sprintf("sent-%d", len(f.sent)+1),
 		ConversationID: id,
 		Sender:         userDTO{ID: testBotUserID, Username: testBotUsername},
-		Type:           "text",
+		Type:           messageType,
 		Content:        body.Content,
 		SenderKind:     "bot",
 		CreatedAt:      time.Now().Format(time.RFC3339Nano),
+	}
+	if messageType == "image" {
+		created.Media = make([]messageMediaDTO, 0, len(body.MediaIDs))
+		for _, mid := range body.MediaIDs {
+			media := f.uploadedMedia[mid]
+			created.Media = append(created.Media, messageMediaDTO{
+				ID:       media.ID,
+				URL:      media.URL,
+				MIMEType: media.MIMEType,
+			})
+		}
 	}
 	if body.Status == "pending" {
 		state := botReplyDTO{Status: body.Status}
@@ -422,6 +488,54 @@ func (f *fakeViolet) serveTyping(w http.ResponseWriter, r *http.Request, path st
 	f.typings = append(f.typings, typingRecord{Conversation: id, IsTyping: *body.IsTyping})
 	f.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// serveMediaUpload 处理 POST /media：解析 multipart，登记 file_id，返回定位信息。
+//
+// 它只做契约级校验（必须 multipart、必须有 file 部分），不做大小/MIME 限制——
+// 那些是 Violet 服务端的职责，fake 侧放宽以便测试聚焦在 saber 的上传调用链。
+func (f *fakeViolet) serveMediaUpload(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "Content-Type 必须是 multipart/form-data")
+		return
+	}
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "解析 multipart 失败: "+err.Error())
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "缺少 file 字段")
+		return
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "INTERNAL", "读取上传字节失败")
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := fmt.Sprintf("media-%d", len(f.uploadedMedia)+1)
+	mimeType := header.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	record := uploadedMedia{
+		ID:       id,
+		URL:      "/uploads/" + id,
+		MIMEType: mimeType,
+		Filename: header.Filename,
+		Bytes:    data,
+		Size:     int64(len(data)),
+	}
+	f.uploadedMedia[id] = record
+	writeAPIData(w, http.StatusCreated, mediaUploadDTO{
+		ID:       record.ID,
+		URL:      record.URL,
+		MIMEType: record.MIMEType,
+		Size:     record.Size,
+	})
 }
 
 func (f *fakeViolet) serveEvents(w http.ResponseWriter, r *http.Request) {

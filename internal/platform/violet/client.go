@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"strconv"
 	"strings"
@@ -176,6 +178,78 @@ func (c *client) edit(ctx context.Context, conversationID, messageID string, bod
 func (c *client) setTyping(ctx context.Context, conversationID string, active bool) error {
 	path := "/conversations/" + url.PathEscape(conversationID) + "/typing"
 	return c.request(ctx, http.MethodPost, path, nil, map[string]any{"is_typing": active}, "", nil)
+}
+
+// uploadMedia 以 multipart/form-data 上传一张图片到 bot 媒体端点，返回 file_id 等定位信息。
+//
+// 走独立路径而非复用 request：后者只接受 JSON body，而媒体上传必须用 multipart。
+// 鉴权头与 request 一致（Bearer token），响应仍是 Violet 的统一信封。
+func (c *client) uploadMedia(ctx context.Context, data []byte, mimeType, filename string) (*mediaUploadDTO, error) {
+	body, contentType, err := multipartImageBody(data, mimeType, filename)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/media", body)
+	if err != nil {
+		return nil, fmt.Errorf("构造 violet 媒体上传请求失败: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", contentType)
+	resp, err := c.api.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求 violet 媒体上传失败: %w", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			slog.Warn("关闭 violet 媒体上传响应失败", "error", closeErr)
+		}
+	}()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, statusError(resp)
+	}
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("读取 violet 媒体上传响应失败: %w", err)
+	}
+	if len(bytes.TrimSpace(payload)) == 0 {
+		return nil, fmt.Errorf("violet 媒体上传响应为空")
+	}
+	var env envelope
+	if err := json.Unmarshal(payload, &env); err != nil {
+		return nil, fmt.Errorf("解析 violet 媒体上传响应失败: %w", err)
+	}
+	var out mediaUploadDTO
+	if err := json.Unmarshal(env.Data, &out); err != nil {
+		return nil, fmt.Errorf("解析 violet 媒体上传数据失败: %w", err)
+	}
+	if out.ID == "" {
+		return nil, fmt.Errorf("violet 媒体上传未返回 file id")
+	}
+	return &out, nil
+}
+
+// multipartImageBody 构造 multipart/form-data 请求体与对应的 Content-Type。
+// filename 为空时用一个通用名，避免 violet 侧把空名当作缺字段拒绝。
+func multipartImageBody(data []byte, mimeType, filename string) (io.Reader, string, error) {
+	if filename == "" {
+		filename = "upload"
+	}
+	form := &bytes.Buffer{}
+	writer := multipart.NewWriter(form)
+	part, err := writer.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": {fmt.Sprintf(`form-data; name="file"; filename=%q`, filename)},
+		"Content-Type":        {mimeType},
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("构造 multipart 字段失败: %w", err)
+	}
+	if _, err := part.Write(data); err != nil {
+		return nil, "", fmt.Errorf("写入图片字节失败: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, "", fmt.Errorf("关闭 multipart writer 失败: %w", err)
+	}
+	return form, writer.FormDataContentType(), nil
 }
 
 // openEvents 打开 SSE 事件流。返回的 Body 必须由调用方关闭。

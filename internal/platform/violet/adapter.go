@@ -18,6 +18,9 @@ import (
 // platformName 是本平台在 chat.Session.Platform 与配置键里的标识，全包唯一来源。
 const platformName = "violet"
 
+// outboundMessageTypeImage 是出站图片消息的 Type 值，与 Violet domain 的 MessageImage 一致。
+const outboundMessageTypeImage = "image"
+
 // maxIdempotencyKeyBytes 对齐 Violet chat_messages.idempotency_key 的 VARCHAR(128) 上限。
 const maxIdempotencyKeyBytes = 128
 
@@ -74,6 +77,13 @@ type replyRevision struct {
 func newAdapter(api *client, account string, throttle *editThrottle) *Adapter {
 	return &Adapter{api: api, account: account, throttle: throttle, platformName: platformName}
 }
+
+// 编译期断言：*Adapter 同时满足文本 Adapter 与可选的 ImageAdapter 契约。
+// 缺任一方法在编译期即暴露，比等 meme 命令运行时回退更早。
+var (
+	_ chat.Adapter      = (*Adapter)(nil)
+	_ chat.ImageAdapter = (*Adapter)(nil)
+)
 
 // Capabilities 返回 Violet 的编辑、输入提示、引用及生成状态能力。
 func (a *Adapter) Capabilities() chat.Capabilities {
@@ -155,6 +165,37 @@ func (a *Adapter) SetTyping(ctx context.Context, session chat.Session, active bo
 		return fmt.Errorf("violet 上报输入状态失败: %w", err)
 	}
 	return nil
+}
+
+// SendImage 上传图片并发送一条 image 消息，实现 chat.ImageAdapter。
+//
+// 与文本回复不同：图片不走 pending/edit 流式状态机，一次上传 + 一次发送即终态。
+// 上层（如 meme 命令）通过 adapter.(chat.ImageAdapter) 类型断言探测本能力。
+func (a *Adapter) SendImage(ctx context.Context, reply chat.Reply, data []byte, mimeType, filename string, width, height int) (string, error) {
+	if err := a.validate(ctx, reply.Session); err != nil {
+		return "", err
+	}
+	if len(data) == 0 || mimeType == "" {
+		return "", errors.New("图片内容或 MIME 类型为空")
+	}
+	uploaded, err := a.api.uploadMedia(ctx, data, mimeType, filename)
+	if err != nil {
+		return "", fmt.Errorf("violet 上传图片失败: %w", err)
+	}
+	body := outgoingMessage{
+		Content:   reply.Text,
+		ReplyToID: reply.ReplyTo,
+		Type:      outboundMessageTypeImage,
+		MediaIDs:  []string{uploaded.ID},
+	}
+	created, err := a.api.send(ctx, reply.Session.Conversation, body, idempotencyKey(reply))
+	if err != nil {
+		return "", fmt.Errorf("violet 发送图片消息失败: %w", err)
+	}
+	if created.ID == "" {
+		return "", errors.New("violet 发送图片消息未返回消息 ID")
+	}
+	return created.ID, nil
 }
 
 // validate 确认请求可以落到本平台的会话上。

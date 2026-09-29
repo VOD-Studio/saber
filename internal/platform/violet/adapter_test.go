@@ -247,3 +247,75 @@ func TestIdempotencyKey(t *testing.T) {
 		t.Fatalf("超长事务 ID 未收敛: %q", got)
 	}
 }
+
+// TestAdapter_SendImage 验证出站图片：上传一次 + 发一条 image 消息，reply_to 与事务 ID 透传，
+// 返回的消息 ID 可供上层记录。参照 matrix.TestChatAdapter_SendImage 的断言形态。
+func TestAdapter_SendImage(t *testing.T) {
+	t.Parallel()
+	fake := newFakeViolet(t)
+	_, adapter := newTestAdapterViaPlatform(t, fake)
+	id, err := adapter.SendImage(context.Background(), chat.Reply{
+		Session:       testSession(adapter, testDirectRoom),
+		Text:          "一张猫的动图",
+		ReplyTo:       "msg-1",
+		TransactionID: "meme-txn",
+	}, []byte("gif-bytes"), "image/gif", "cat.gif", 40, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == "" {
+		t.Fatal("SendImage 必须返回平台消息 ID")
+	}
+	uploads := fake.uploadedMediaRecords()
+	if len(uploads) != 1 {
+		t.Fatalf("上传记录 = %+v", uploads)
+	}
+	if uploads[0].MIMEType != "image/gif" || uploads[0].Filename != "cat.gif" || string(uploads[0].Bytes) != "gif-bytes" {
+		t.Fatalf("上传内容不符: %+v", uploads[0])
+	}
+	sent := fake.sentMessages()
+	if len(sent) != 1 {
+		t.Fatalf("发送记录 = %+v", sent)
+	}
+	if sent[0].ReplyTo != "msg-1" || sent[0].Idempotency != "meme-txn" {
+		t.Fatalf("reply_to / 幂等键未透传: %+v", sent[0])
+	}
+	// 服务端落库的消息应当是 image 类型且引用了上传的 file_id。
+	fake.mu.Lock()
+	stored := fake.history[testDirectRoom][0]
+	fake.mu.Unlock()
+	if stored.Type != "image" || len(stored.Media) != 1 || stored.Media[0].ID != uploads[0].ID {
+		t.Fatalf("落库图片消息不符: %+v", stored)
+	}
+}
+
+// TestAdapter_SendImageRejectsInvalid 验证空数据、空 MIME、陌生会话都被挡在客户端，
+// 不会打到服务端。
+func TestAdapter_SendImageRejectsInvalid(t *testing.T) {
+	t.Parallel()
+	fake := newFakeViolet(t)
+	_, adapter := newTestAdapterViaPlatform(t, fake)
+	ctx := context.Background()
+	valid := chat.Reply{Session: testSession(adapter, testDirectRoom), Text: "cap"}
+	for _, tc := range []struct {
+		name     string
+		reply    chat.Reply
+		data     []byte
+		mimeType string
+	}{
+		{"空数据", valid, nil, "image/png"},
+		{"空 MIME", valid, []byte("x"), ""},
+		{"陌生平台", chat.Reply{Session: chat.Session{Platform: "matrix", Account: adapter.account, Conversation: testDirectRoom}, Text: "cap"}, []byte("x"), "image/png"},
+		{"陌生账号", chat.Reply{Session: chat.Session{Platform: platformName, Account: "other.host", Conversation: testDirectRoom}, Text: "cap"}, []byte("x"), "image/png"},
+	} {
+		if _, err := adapter.SendImage(ctx, tc.reply, tc.data, tc.mimeType, "f.png", 1, 1); err == nil {
+			t.Fatalf("%s 应被拒", tc.name)
+		}
+	}
+	if uploads := fake.uploadedMediaRecords(); len(uploads) != 0 {
+		t.Fatalf("被拒的请求不该上传到服务端: %+v", uploads)
+	}
+	if sent := fake.sentMessages(); len(sent) != 0 {
+		t.Fatalf("被拒的请求不该发送到服务端: %+v", sent)
+	}
+}

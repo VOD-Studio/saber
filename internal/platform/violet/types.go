@@ -41,6 +41,17 @@ type messageDTO struct {
 	IsDeleted      bool           `json:"is_deleted"`
 	EditedAt       string         `json:"edited_at,omitempty"`
 	CreatedAt      string         `json:"created_at"`
+	// Media 是图片消息携带的媒体定位信息，文本消息为空。
+	Media []messageMediaDTO `json:"media,omitempty"`
+}
+
+// messageMediaDTO 是消息内嵌的媒体快照，URL 供 saber 侧入站下载。
+type messageMediaDTO struct {
+	ID       string `json:"id"`
+	URL      string `json:"url"`
+	MIMEType string `json:"mime_type"`
+	Width    *int   `json:"width,omitempty"`
+	Height   *int   `json:"height,omitempty"`
 }
 
 // botReplyDTO 是 Violet 生成状态的读模型，revision 与写请求的递增版本一致。
@@ -58,6 +69,21 @@ type outgoingMessage struct {
 	Status    string `json:"status,omitempty"`
 	Thinking  string `json:"thinking,omitempty"`
 	Revision  int64  `json:"revision,omitempty"`
+	// Type 仅在图片消息时设为 "image"，留空时 Violet 侧回退 text。
+	Type string `json:"type,omitempty"`
+	// MediaIDs 是图片消息引用的上传 file_id 列表，type=image 时必填。
+	MediaIDs []string `json:"media_ids,omitempty"`
+}
+
+// mediaUploadDTO 是 POST /chat/bot/media 的响应：上传后的文件定位信息。
+// id 供后续 SendMessage 的 media_ids 引用，url 供 saber 侧入站下载使用。
+type mediaUploadDTO struct {
+	ID       string `json:"id"`
+	URL      string `json:"url"`
+	MIMEType string `json:"mime_type"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	Size     int64  `json:"size"`
 }
 
 // messageRefDTO 是被引用消息的紧凑预览，这里只取定位所需的 ID。
