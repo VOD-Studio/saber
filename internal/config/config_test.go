@@ -94,6 +94,12 @@ func TestAIConfigValidate(t *testing.T) {
 		{"温度边界 2", AIConfig{Enabled: true, DefaultModel: FormatModelID("openai", "gpt-4"), Temperature: 2, TimeoutSeconds: 30, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}}}, false, ""},
 		{"timeout 无效", AIConfig{Enabled: true, DefaultModel: FormatModelID("openai", "gpt-4"), TimeoutSeconds: 0, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}}}, true, "timeout_seconds must be positive"},
 		{"timeout 负数", AIConfig{Enabled: true, DefaultModel: FormatModelID("openai", "gpt-4"), TimeoutSeconds: -1, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}}}, true, "timeout_seconds must be positive"},
+
+		// media_model 校验：留空不校验，非空时验 provider 存在性
+		{"media_model 留空", AIConfig{Enabled: true, DefaultModel: FormatModelID("openai", "gpt-4"), MediaModel: "", TimeoutSeconds: 30, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}}}, false, ""},
+		{"media_model 有效", AIConfig{Enabled: true, DefaultModel: FormatModelID("openai", "gpt-4"), MediaModel: FormatModelID("openai", "gpt-4o"), TimeoutSeconds: 30, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}}}, false, ""},
+		{"media_model provider 不存在", AIConfig{Enabled: true, DefaultModel: FormatModelID("openai", "gpt-4"), MediaModel: "anthropic.claude", TimeoutSeconds: 30, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}}}, true, "media_model: provider \"anthropic\" not found"},
+		{"media_model 格式错误", AIConfig{Enabled: true, DefaultModel: FormatModelID("openai", "gpt-4"), MediaModel: "gpt-4o", TimeoutSeconds: 30, Providers: map[string]ProviderConfig{"openai": {Type: "openai", BaseURL: "https://api.openai.com/v1", APIKey: "key"}}}, true, "media_model: invalid model id format"},
 	}
 
 	for _, tt := range tests {

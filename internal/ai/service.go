@@ -445,8 +445,8 @@ func (s *Service) handleChat(ctx context.Context, message chat.Message, reply ch
 			return agent.Result{}, fmt.Errorf("AI请求速率限制: %w", err)
 		}
 	}
-	if len(message.Attachments) > 0 && s.config.Matrix.Media.Model != "" {
-		modelName = s.config.Matrix.Media.Model
+	if len(message.Attachments) > 0 && s.config.AI.MediaModel != "" {
+		modelName = s.config.AI.MediaModel
 	}
 	req, err := s.taskRequest(message, modelName)
 	if err != nil {

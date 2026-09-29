@@ -17,6 +17,7 @@ chmod 600 config.yaml
 ai:
   enabled: true
   default_model: podlink-responses.gpt-5.6-sol
+  media_model: "" # 带图片消息使用的多模态模型（provider.model），留空则走 default_model
   max_tokens: 8192
   temperature: 0.7
   reasoning_effort: ""
@@ -160,7 +161,6 @@ matrix:
     enabled: true
     max_size_mb: 10
     timeout_sec: 30
-    model: ""
   proactive:
     enabled: false
     max_messages_per_day: 5

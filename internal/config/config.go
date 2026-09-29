@@ -87,6 +87,10 @@ type AIConfig struct {
 	Providers       map[string]ProviderConfig `yaml:"providers"`                  // 多提供商配置
 	DefaultModel    string                    `yaml:"default_model"`              // 默认使用的模型（完全限定名称，如 openai.gpt-4o-mini）
 
+	// MediaModel 是带图片消息使用的多模态模型（provider.model 全限定或 ai.models 别名）。
+	// 留空则带图消息仍走 default_model，纯文本模型会拒绝图片输入。
+	MediaModel string `yaml:"media_model,omitempty"`
+
 	MaxTokens          int                    `yaml:"max_tokens"`              // 最大生成 token 数
 	Temperature        float64                `yaml:"temperature"`             // 生成温度（0-2）
 	SystemPrompt       string                 `yaml:"system_prompt"`           // 系统提示词
@@ -246,12 +250,14 @@ type DecisionConfig struct {
 	StreamEnabled  bool    `yaml:"stream_enabled"`  // 是否启用流式请求（默认 true）
 }
 
-// MediaConfig 存储媒体文件处理配置
+// MediaConfig 存储 matrix 平台入站媒体文件处理的开关与限额。
+//
+// 模型选择已移到全局 AIConfig.MediaModel（ai.media_model），所有平台共用；
+// 此处只保留 Matrix 入站图片解析的开关与大小/超时限额。
 type MediaConfig struct {
-	Enabled    bool   `yaml:"enabled"`     // 是否启用媒体文件处理
-	MaxSizeMB  int    `yaml:"max_size_mb"` // 最大文件大小（MB）
-	TimeoutSec int    `yaml:"timeout_sec"` // 处理超时时间（秒）
-	Model      string `yaml:"model"`       // 图片识别专用模型（留空则使用默认模型）
+	Enabled    bool `yaml:"enabled"`     // 是否启用入站媒体文件处理
+	MaxSizeMB  int  `yaml:"max_size_mb"` // 最大文件大小（MB）
+	TimeoutSec int  `yaml:"timeout_sec"` // 处理超时时间（秒）
 }
 
 // MemeConfig 存储 meme/GIF 搜索配置
@@ -406,7 +412,6 @@ func DefaultMediaConfig() MediaConfig {
 		Enabled:    true,
 		MaxSizeMB:  10,
 		TimeoutSec: 30,
-		Model:      "",
 	}
 }
 
@@ -499,6 +504,21 @@ func (a *AIConfig) Validate() error {
 	}
 	if _, ok := a.Providers[provider]; !ok {
 		return fmt.Errorf("default_model: provider %q not found in providers config", provider)
+	}
+
+	// 验证多模态图片模型：留空表示不切换，带图消息仍走 default_model。
+	if a.MediaModel != "" {
+		mediaProvider, mediaModelID, err := ParseModelID(a.MediaModel)
+		if err != nil {
+			return fmt.Errorf("media_model: %w", err)
+		}
+		if _, ok := a.Providers[mediaProvider]; !ok {
+			return fmt.Errorf("media_model: provider %q not found in providers config", mediaProvider)
+		}
+		if _, ok := a.Models[mediaModelID]; !ok {
+			slog.Debug("media model not explicitly configured in provider, will use provider defaults",
+				"provider", mediaProvider, "model", mediaModelID)
+		}
 	}
 
 	// 验证各提供商配置
@@ -905,6 +925,7 @@ ai:
   #         model: gpt-5.6-sol
   #         reasoning_effort: high # 按模型支持情况设置；省略则用上游默认
   default_model: "" # 例如 podlink-responses.gpt-5.6-sol
+  media_model: "" # 带图片消息使用的多模态模型，留空则走 default_model
   max_tokens: 8192 # 每次生成预算；模型配置可覆盖，并非模型能力上限
   temperature: 0.7 # Responses 仅在 reasoning_effort: none 时发送
   request_timeout_seconds: 120 # 单次请求总时限，包含流式读取
