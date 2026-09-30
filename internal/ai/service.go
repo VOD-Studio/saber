@@ -39,7 +39,7 @@ type Service struct {
 	// core 是共享核心逻辑。
 	core *Core
 	// matrixService 保留 Matrix 专属兼容入口：注册 !task/!schedule 命令、取 BotID 作为
-	// 旧历史键的账号，以及上传任务文件；普通文本回执已改经平台端口发送。
+	// 旧历史键的账号；普通文本回执与任务文件均已改经平台端口发送。
 	matrixService *matrix.CommandService
 	// contextManager 是对话上下文管理器。
 	contextManager *ContextManager
@@ -57,6 +57,8 @@ type Service struct {
 	tasks *task.Manager
 	// taskDir 是应用启动时的规范化工作目录，不执行全局 chdir。
 	taskDir string
+	// taskFiles 按平台保存具备文件发送能力的投递 adapter（chat.FileAdapter）。
+	taskFiles sync.Map
 	// taskStreams 按平台保存可编辑的后台任务临时回复设置。
 	taskStreams sync.Map
 	// executor 同时管理本地容器工具和 MCP 工具权限。

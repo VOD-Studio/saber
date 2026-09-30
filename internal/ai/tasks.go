@@ -129,6 +129,10 @@ func (s *Service) RegisterTaskDelivery(platform string, adapter chat.Adapter) er
 	}); err != nil {
 		return err
 	}
+	// 登记文件发送能力，供完整日志下载和产物交付按平台查找；未实现的平台会降级。
+	if files, ok := adapter.(chat.FileAdapter); ok {
+		s.taskFiles.Store(platform, files)
+	}
 	if adapter.Capabilities().Edit {
 		switch platform {
 		case "matrix":

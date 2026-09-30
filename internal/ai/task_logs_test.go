@@ -75,6 +75,8 @@ func TestTaskLogs_FailedTimedOutCancelledAndInterrupted(t *testing.T) {
 	s, err := NewService(&cfg, WithMatrix(commands, nil))
 	require.NoError(t, err)
 	defer s.Stop()
+	// 生产中由 RegisterTaskDelivery 登记；本测试直接替换任务管理器，故手动登记 Matrix 文件能力。
+	s.taskFiles.Store("matrix", chat.FileAdapter(matrix.NewChatAdapter(commands, nil, cfg.Matrix.Media, false, nil)))
 	dir, logs := t.TempDir(), t.TempDir()
 	s.executor, err = execution.New(config.ExecutionConfig{LogDir: logs}, nil, nil)
 	require.NoError(t, err)
@@ -131,4 +133,46 @@ func TestTaskLogs_FailedTimedOutCancelledAndInterrupted(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+// TestTaskLogs_NonMatrixPlatform 非 Matrix 平台经通用文件接口下载日志；无文件能力的平台返回明确错误。
+func TestTaskLogs_NonMatrixPlatform(t *testing.T) {
+	ctx := context.Background()
+	session := chat.Session{Platform: "violet", Account: "bot", Conversation: "room"}
+	logs := t.TempDir()
+	s := &Service{config: config.DefaultConfig(), taskDir: t.TempDir()}
+	var err error
+	s.executor, err = execution.New(config.ExecutionConfig{LogDir: logs}, nil, nil)
+	require.NoError(t, err)
+	s.tasks, err = task.Open(filepath.Join(t.TempDir(), "tasks.db"), func(context.Context, agent.Request, func(agent.Event)) (agent.Result, error) {
+		return agent.Result{Status: agent.Failed}, errors.New("execution failed")
+	}, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.tasks.Close()) })
+	logDir := filepath.Join(logs, "task-1")
+	require.NoError(t, os.MkdirAll(logDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(logDir, "output-test.log"), []byte("完整日志"), 0600))
+	source, err := s.tasks.Submit(ctx, chat.Message{ID: "m1", SenderID: "alice", Session: session, Text: "do"}, t.TempDir(), agent.Request{})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		got, err := s.tasks.Get(ctx, session, source.ID)
+		return err == nil && got.Status != "queued" && got.Status != "running"
+	}, 5*time.Second, 10*time.Millisecond)
+	identity := chat.Identity{Session: session, SenderID: "alice"}
+
+	_, err = s.taskOperation(ctx, identity, "logs", source.ID, "$d1")
+	require.EqualError(t, err, "当前平台不支持日志文件交付")
+
+	sink := &fileSink{}
+	s.taskFiles.Store("violet", chat.FileAdapter(sink))
+	reply, err := s.taskOperation(ctx, identity, "logs", source.ID, "$d1")
+	require.NoError(t, err)
+	require.Contains(t, reply, "1 份命令日志")
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	var names []string
+	for _, upload := range sink.uploads {
+		names = append(names, upload.Name)
+	}
+	require.ElementsMatch(t, []string{fmt.Sprintf("task-%d.json", source.ID), fmt.Sprintf("task-%d-output-test.log", source.ID)}, names)
 }

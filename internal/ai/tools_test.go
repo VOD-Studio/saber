@@ -12,7 +12,6 @@ import (
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/execution"
-	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/mcp"
 )
 
@@ -252,7 +251,7 @@ func TestToolExecutor_DefaultMaxIterations(t *testing.T) {
 	}
 }
 
-// TestToolExecutor_ExecuteToolCall_ReadFileDeliverUnsupported 非 Matrix 会话请求文件交付时，
+// TestToolExecutor_ExecuteToolCall_ReadFileDeliverUnsupported 平台没有文件发送能力时请求文件交付，
 // 应在执行前把错误反馈给模型，而不是等到任务结束才无法发送。
 func TestToolExecutor_ExecuteToolCall_ReadFileDeliverUnsupported(t *testing.T) {
 	dir, logs := t.TempDir(), t.TempDir()
@@ -271,25 +270,44 @@ func TestToolExecutor_ExecuteToolCall_ReadFileDeliverUnsupported(t *testing.T) {
 	require.Equal(t, -1, result.ExitCode)
 }
 
+// 平台支持文件发送时 deliver=true 不被提前拦截，而是继续交给执行器。
+func TestToolExecutor_ExecuteToolCall_ReadFileDeliverSupportedPasses(t *testing.T) {
+	dir, logs := t.TempDir(), t.TempDir()
+	cfg := config.ExecutionConfig{Enabled: true, LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"w": {Path: dir}}, Grants: []config.ExecutionGrant{{Platform: "violet", Account: "bot", Room: "room", Users: []string{"user"}, Workspace: "w", Tools: []string{"read_file"}}}}
+	executor, err := execution.New(cfg, nil, nil)
+	require.NoError(t, err)
+	s := &Service{executor: executor}
+	s.taskFiles.Store("violet", chat.FileAdapter(&fileSink{}))
+	identity := chat.Identity{Session: chat.Session{Platform: "violet", Account: "bot", Conversation: "room"}, SenderID: "user"}
+	ctx := execution.WithTask(chat.WithIdentity(context.Background(), identity), 1, dir)
+
+	got, err := NewToolExecutor(s).ExecuteToolCall(ctx, "read_file", map[string]any{"path": "a.txt", "deliver": true})
+	require.NoError(t, err)
+	result, ok := got.(execution.Result)
+	require.True(t, ok)
+	require.NotContains(t, result.Error, "该平台不支持文件交付")
+}
+
 func TestService_CanDeliverFiles(t *testing.T) {
 	withIdentity := func(platform string) context.Context {
 		return chat.WithIdentity(context.Background(), chat.Identity{Session: chat.Session{Platform: platform, Account: "bot", Conversation: "room"}, SenderID: "user"})
 	}
-	matrixSvc := &matrix.CommandService{}
+	s := &Service{}
+	s.taskFiles.Store("matrix", chat.FileAdapter(&fileSink{}))
+	s.taskFiles.Store("violet", chat.FileAdapter(&fileSink{}))
 	tests := []struct {
 		name string
-		s    *Service
 		ctx  context.Context
 		want bool
 	}{
-		{"Matrix 会话且启用 Matrix", &Service{matrixService: matrixSvc}, withIdentity("matrix"), true},
-		{"Matrix 会话但未启用 Matrix", &Service{}, withIdentity("matrix"), false},
-		{"非 Matrix 会话", &Service{matrixService: matrixSvc}, withIdentity("violet"), false},
-		{"缺少身份", &Service{matrixService: matrixSvc}, context.Background(), false},
+		{"Matrix 会话且平台支持文件", withIdentity("matrix"), true},
+		{"非 Matrix 平台支持文件也放行", withIdentity("violet"), true},
+		{"平台没有文件发送能力", withIdentity("terminal"), false},
+		{"缺少身份", context.Background(), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, tt.s.canDeliverFiles(tt.ctx))
+			require.Equal(t, tt.want, s.canDeliverFiles(tt.ctx))
 		})
 	}
 }
