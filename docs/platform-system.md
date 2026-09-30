@@ -330,7 +330,7 @@ S8 还需要一台真实 Violet 实例（管理端 `/admin/chat-bots` 注册 bot
 | S7 Violet 适配器 | 已完成 | `internal/platform/violet`：SSE 订阅 + 断线按消息历史补拉 + 提及剥离 + 自回声过滤 + 幂等发送 + 编辑节流；单测覆盖 86.7% |
 | S8 联调验证 | 未开始 | 需要一台开好 Bot 凭据的真实 Violet 实例（`/admin/chat-bots` 注册），验证见文末「验收」 |
 
-`ai` 剩余的 Matrix 触点：`internal/ai/task_logs.go` 的任务文件上传（`sendTaskLogs` 与 `deliverTask` 的产物交付都已限定在 Matrix 会话且 `matrixService` 非空；其他平台的产物会被跳过并记录警告，文字结果照常投递，`read_file deliver=true` 也会被提前拒绝），以及 `internal/ai/service.go` 为注册 Matrix 命令、绑定旧历史账号与上传任务文件而保留的 `WithMatrix`。普通文本消息的发送已全部改经平台端口，`internal/ai/proactive*.go` 也不再引用 `internal/matrix`（房间元数据与主动投递经 `ai.ProactiveRooms`）。
+`ai` 剩余的 Matrix 触点：`internal/ai/service.go` 为注册 Matrix 命令、绑定旧历史账号而保留的 `WithMatrix`。任务文件（完整日志与 `read_file deliver=true` 产物）不再直接依赖 Matrix：`deliverTask` 与 `sendTaskLogs` 都经可选端口 `chat.FileAdapter`（`UploadFile` + `SendUploadedFile`，上传载荷由任务库持久化以便断点续传）交付，平台在 `RegisterTaskDelivery` 时传入的 adapter 若实现该接口即登记为具备文件能力；Matrix 用 `UploadTaskFile`/`SendUploadedTaskFile` 实现。没有文件能力的平台（当前是 Violet）会降级：产物被跳过并记录警告，用户收到一条幂等提示「任务产生了 N 个文件，当前平台无法发送」，文字结果照常投递且不重试，`read_file deliver=true` 会被提前拒绝，`!task logs` 返回明确错误。任务投递函数的 panic 由 `task.Manager` recover 并按退避重试。普通文本消息的发送已全部改经平台端口，`internal/ai/proactive*.go` 也不再引用 `internal/matrix`（房间元数据与主动投递经 `ai.ProactiveRooms`）。
 
 出站正文的格式约定：`chat.Reply.Text` 以 Markdown 书写，渲染由平台 adapter 完成（Matrix 用 `format.RenderMarkdown` 转成 `org.matrix.custom.html`，并把原始 HTML 转义），`ai` 内不再出现任何平台标记语言。
 
@@ -371,6 +371,6 @@ Matrix 实现见 `internal/platform/matrix/rooms.go` 的 `Rooms`：它包装 `ma
 Violet 接入带出来的缺口（属有意取舍，不是待修的 bug）：
 
 - `ai.ChatEntrypoint` 是单例 setter 且签名带 mautrix 类型，命令入口目前由 Matrix 独占。Violet 因此只走 `HandleChat`：`!ai <内容>` 剥前缀当提问，`!task`/`!schedule`/上下文命令在本平台被跳过。要消掉这条，需要把端口改成平台无关 + 按平台名注册多个入口。
-- 任务产出的文件不投递：`internal/ai/task_logs.go` 的上传仍按 `Session.Platform == "matrix"` 限定，Violet 的 Bot API 也只开放文本消息，没有媒体上传通道。
+- 任务产出的文件在 Violet 上降级为文字提示：文件交付已是通用的 `chat.FileAdapter` 端口，但 Violet Bot API 目前只开放图片上传（`POST /chat/bot/media`，限 png/jpeg/gif/webp）且没有文件消息类型，`violet.Adapter` 因此不实现该端口；Violet 开放通用文件消息后，实现 `UploadFile`/`SendUploadedFile` 即可，无需改 `ai`。
 - 主动聊天不接 Violet：`ai.ProactiveRooms.SendNotice` 没有对等语义（Violet 聊天没有低优先级通知类型），房间元数据一侧的 `kind`/成员数虽然够用，接进来也得先决定 notice 怎么降级。
 - Matrix 的同步循环与事件处理器注册仍在 `internal/bot`，Violet 的连接生命周期则在平台接入端内部——两边对称之前，`Platform.Start` 的语义仍不统一（S3 未收尾的部分）。

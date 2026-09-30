@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 通用任务文件交付：新增可选端口 `chat.FileAdapter`（`UploadFile` + `SendUploadedFile`），`!task logs` 与 `read_file deliver=true` 产物不再绑定 Matrix，任何实现该端口的平台都能收到文件；Matrix 已实现。Violet 的 Bot API 目前没有通用文件消息，暂不实现，任务产物降级为一条文字提示。
+
 ### Fixed
 
-- 未启用 Matrix（如仅 violet）时，任务带文件产物会因 `matrixService` 为 nil 触发 panic，投递 goroutine 崩溃带走整个进程，且任务仍为 pending 导致重启后崩溃循环。现在非 Matrix 会话的产物会被跳过并提示用户（文字结果照常投递），`deliverTaskFile` 对 nil 兜底，任务投递 panic 会被 recover 并按退避重试，`read_file deliver=true` 在非 Matrix 会话提前返回错误。
+- 未启用 Matrix（如仅 violet）时，任务带文件产物会因 `matrixService` 为 nil 触发 panic，投递 goroutine 崩溃带走整个进程，且任务仍为 pending 导致重启后崩溃循环。现在文件交付经平台的 `chat.FileAdapter`，不依赖 `matrixService`；没有文件能力的平台降级为幂等文字提示并按成功处理（不无限重试），`deliverTaskFile` 对空发送器返回错误，任务投递 panic 会被 recover 并按退避重试，`read_file deliver=true` 仅在平台不支持文件发送时提前返回错误。
 
 ## [0.4.0] - 2026-09-29
 

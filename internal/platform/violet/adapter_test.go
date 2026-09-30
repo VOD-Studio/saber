@@ -320,3 +320,13 @@ func TestAdapter_SendImageRejectsInvalid(t *testing.T) {
 		t.Fatalf("被拒的请求不该发送到服务端: %+v", sent)
 	}
 }
+
+// TestAdapter_NoFileCapability Violet bot API 目前只允许上传 png/jpeg/gif/webp 图片且没有文件消息类型，
+// 因此 adapter 刻意不实现 chat.FileAdapter，任务产物交付会降级为文字提示。
+// 若 Violet 日后开放通用文件消息，应实现该接口并删除本测试。
+func TestAdapter_NoFileCapability(t *testing.T) {
+	var adapter chat.Adapter = &Adapter{}
+	if _, ok := adapter.(chat.FileAdapter); ok {
+		t.Fatal("violet adapter 不应实现 chat.FileAdapter")
+	}
+}
