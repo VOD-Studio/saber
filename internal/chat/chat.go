@@ -175,6 +175,30 @@ type ImageAdapter interface {
 	SendImage(context.Context, Reply, []byte, string, string, int, int) (string, error)
 }
 
+// FileUpload 描述一次文件上传请求；Data 由调用方持有，adapter 不得修改。
+type FileUpload struct {
+	// Session 是文件将要发往的会话，必须由入站消息派生。
+	Session Session
+	// ReplyTo 是文件所回复的消息 ID，可为空。
+	ReplyTo string
+	// Name 是面向用户的文件名。
+	Name string
+	// Data 是完整文件内容。
+	Data []byte
+}
+
+// FileAdapter 是能够发送任意文件的可选出站能力，用于任务产物与完整日志交付。
+//
+// 分成上传和发送两步，是为了让任务投递断点续传：UploadFile 返回的 payload 由调用方持久化，
+// 重试时只重发 SendUploadedFile，不会重复上传，也不会更换加密密钥等一次性材料。
+// 没有文件发送能力的平台不实现本接口，调用方通过类型断言探测并降级。
+type FileAdapter interface {
+	// UploadFile 把文件上传到平台并返回可重放的发送载荷，载荷对调用方不透明。
+	UploadFile(context.Context, FileUpload) ([]byte, error)
+	// SendUploadedFile 用 reply.TransactionID 作为幂等键，把 UploadFile 的载荷发到 reply.Session。
+	SendUploadedFile(context.Context, Reply, []byte) (string, error)
+}
+
 // Handler 是所有聊天 adapter 共用的消息处理入口。
 type Handler func(context.Context, Message, Adapter) (agent.Result, error)
 
