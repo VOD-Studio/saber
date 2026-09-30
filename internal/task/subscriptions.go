@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -120,10 +122,21 @@ func (m *Manager) deliverLoop() {
 			if send == nil {
 				continue
 			}
-			messageID, sendErr := send(m.ctx, t)
+			messageID, sendErr := safeSend(m.ctx, send, t)
 			if err := m.store.delivered(context.Background(), t.ID, messageID, sendErr, t.DeliveryAttempts); err != nil {
 				slog.Error("保存任务投递状态失败", "error", taskError(t.ID, err))
 			}
 		}
 	}
+}
+
+// safeSend 把投递函数的 panic 转成错误，使任务按退避重试处理而不是拖垮整个进程。
+func safeSend(ctx context.Context, send SendFunc, t Task) (messageID string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("任务投递 panic", "task", t.ID, "platform", t.Message.Session.Platform, "panic", r, "stack", string(debug.Stack()))
+			messageID, err = "", fmt.Errorf("任务投递 panic: %v", r)
+		}
+	}()
+	return send(ctx, t)
 }
