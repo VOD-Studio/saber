@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -126,8 +127,8 @@ func TestManager_DeliveryPanicIsRecoveredAndRetried(t *testing.T) {
 	var sends atomic.Int32
 	require.NoError(t, m.RegisterDelivery("matrix", func(context.Context, Task) (string, error) {
 		if sends.Add(1) == 1 {
-			var nilMap map[string]string
-			nilMap["boom"] = "panic"
+			// 模拟投递函数内部的运行时 panic（如解引用 nil）。
+			panic(errors.New("boom: simulated delivery panic"))
 		}
 		return "reply", nil
 	}))
