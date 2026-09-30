@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,6 +60,16 @@ func (s *Service) deliverTask(ctx context.Context, adapter chat.Adapter, t task.
 	}
 	artifacts, err := s.executor.Artifacts(t.ID)
 	if err != nil {
+		return messageID, err
+	}
+	// 文件交付只有 Matrix 实现；其他平台或未启用 Matrix 时不能调用 matrixService，
+	// 否则会 nil panic 并使任务永远停在 pending。文字结果已送达，这里按成功处理以免无限重试。
+	if len(artifacts) > 0 && (s.matrixService == nil || t.Message.Session.Platform != "matrix") {
+		slog.Warn("当前平台不支持任务文件交付，已跳过产物", "task", t.ID, "platform", t.Message.Session.Platform, "files", len(artifacts))
+		notice := fmt.Sprintf("任务产生了 %d 个文件，当前平台无法发送", len(artifacts))
+		_, err = s.tasks.DeliverPart(ctx, t.ID, "artifact-unsupported", func(context.Context) ([]byte, error) { return nil, nil }, func(ctx context.Context, _ []byte) (string, error) {
+			return adapter.Send(ctx, taskReply(t, "artifact-unsupported", notice))
+		})
 		return messageID, err
 	}
 	for _, artifact := range artifacts {
