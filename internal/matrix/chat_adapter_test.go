@@ -299,3 +299,66 @@ func TestChatAdapter_SendImage(t *testing.T) {
 		t.Fatalf("图片发送 = %q, %+v, %v", id, sent, err)
 	}
 }
+
+// TestChatAdapter_FileUploadAndSend 文件交付经 chat.FileAdapter：上传产出可重放载荷，发送使用固定事务 ID。
+func TestChatAdapter_FileUploadAndSend(t *testing.T) {
+	var mu sync.Mutex
+	uploads := 0
+	var sent event.MessageEventContent
+	var txn string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "/upload"):
+			mu.Lock()
+			uploads++
+			mu.Unlock()
+			if _, err := fmt.Fprint(w, `{"content_uri":"mxc://local/file"}`); err != nil {
+				t.Error(err)
+			}
+		case strings.Contains(r.URL.Path, "/send/"):
+			if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+				t.Error(err)
+			}
+			parts := strings.Split(r.URL.Path, "/")
+			txn = parts[len(parts)-1]
+			if _, err := fmt.Fprint(w, `{"event_id":"$file"}`); err != nil {
+				t.Error(err)
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	client, err := mautrix.NewClient(server.URL, "@bot:local", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files chat.FileAdapter = matrix.NewChatAdapter(matrix.NewCommandService(client, "@bot:local", nil), nil, config.MediaConfig{}, false, nil)
+	session := chat.Session{Platform: "matrix", Account: "@bot:local", Conversation: "!room:local", Thread: "$thread"}
+	payload, err := files.UploadFile(context.Background(), chat.FileUpload{Session: session, ReplyTo: "$question", Name: "a.txt", Data: []byte("hello")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply := chat.Reply{Session: session, ReplyTo: "$question", TransactionID: "file-txn"}
+	eventID, err := files.SendUploadedFile(context.Background(), reply, payload)
+	if err != nil || eventID != "$file" || txn != "file-txn" {
+		t.Fatalf("文件发送 = %q, txn=%q, %v", eventID, txn, err)
+	}
+	if sent.MsgType != event.MsgFile || sent.Body != "a.txt" || sent.File == nil || sent.RelatesTo.GetReplyTo() != "$question" || sent.RelatesTo.GetThreadParent() != "$thread" {
+		t.Fatalf("文件消息 = %+v", sent)
+	}
+	// 重发同一载荷不再上传。
+	if _, err = files.SendUploadedFile(context.Background(), reply, payload); err != nil || uploads != 1 {
+		t.Fatalf("重发 err=%v uploads=%d", err, uploads)
+	}
+	// 账号不匹配的会话被拒绝。
+	other := session
+	other.Account = "@other:local"
+	if _, err = files.UploadFile(context.Background(), chat.FileUpload{Session: other, Name: "a.txt", Data: []byte("x")}); err == nil {
+		t.Fatal("期望账号不匹配被拒绝")
+	}
+	if _, err = files.SendUploadedFile(context.Background(), reply, []byte("not json")); err == nil {
+		t.Fatal("期望无效载荷被拒绝")
+	}
+}
