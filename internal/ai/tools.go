@@ -62,6 +62,10 @@ func (te *ToolExecutor) ExecuteToolCall(ctx context.Context, toolName string, ar
 		if te.service.executor == nil {
 			return nil, fmt.Errorf("execution is not configured")
 		}
+		// 文件交付目前只有 Matrix 实现；其他平台提前反馈给模型，避免任务结束才发现无法发送。
+		if toolName == "read_file" && args["deliver"] == true && !te.service.canDeliverFiles(ctx) {
+			return execution.Result{ExitCode: -1, Error: "该平台不支持文件交付，请直接在回复中给出内容，不要使用 deliver=true"}, nil
+		}
 		result, err := te.service.executor.Run(ctx, toolName, args)
 		// 保留失败时的完整日志位置；运行时用 IsError 将失败反馈给模型。
 		if err != nil {
@@ -180,4 +184,10 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 
 	slog.Debug("启用工具调用", "tool_count", len(tools))
 	return tools, len(tools) > 0
+}
+
+// canDeliverFiles 判断当前会话能否接收任务产物文件；目前仅启用了 Matrix 服务的 Matrix 会话可以。
+func (s *Service) canDeliverFiles(ctx context.Context) bool {
+	identity, ok := chat.IdentityFromContext(ctx)
+	return ok && s.matrixService != nil && identity.Session.Platform == "matrix"
 }
