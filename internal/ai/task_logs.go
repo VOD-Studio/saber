@@ -67,6 +67,11 @@ func (s *Service) sendTaskLogs(ctx context.Context, identity chat.Identity, task
 
 // taskFileAdapter 返回能为该平台发送文件的 adapter：优先使用调用方正在使用的投递 adapter，
 // 其次使用平台注册任务投递时登记的 adapter；平台没有文件发送能力时返回 nil。
+//
+// 已知限制：登记表只按平台名（不含账号）索引。同一平台接入多个账号时，没有传入投递 adapter 的
+// 调用方（sendTaskLogs、canDeliverFiles）可能取到另一个账号的 adapter；此时 adapter 自带的
+// 会话校验会返回错误（不会错发），而 deliverTask 因直接使用本次投递的 adapter 不受影响。
+// 目前每个平台只注册一个投递 adapter，真正支持多账号时需把登记键扩展为平台+账号。
 func (s *Service) taskFileAdapter(platform string, delivery chat.Adapter) chat.FileAdapter {
 	if files, ok := delivery.(chat.FileAdapter); ok && files != nil {
 		return files

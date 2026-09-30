@@ -419,6 +419,62 @@ func TestTaskDelivery_FileSendFailureKeepsPending(t *testing.T) {
 	}, 10*time.Second, 25*time.Millisecond)
 }
 
+// noticeFlakySink 让降级提示的第一次发送失败，用来验证重试不会重复发送文字结果或提示。
+type noticeFlakySink struct {
+	replyStateSink
+	noticeAttempts int
+	noticeOK       int
+	resultSends    int
+	noticeTxns     []string
+}
+
+func (n *noticeFlakySink) Send(ctx context.Context, reply chat.Reply) (string, error) {
+	if strings.Contains(reply.Text, "当前平台无法发送") {
+		n.mu.Lock()
+		n.noticeAttempts++
+		n.noticeTxns = append(n.noticeTxns, reply.TransactionID)
+		fail := n.noticeAttempts == 1
+		if !fail {
+			n.noticeOK++
+		}
+		n.mu.Unlock()
+		if fail {
+			return "", errors.New("offline")
+		}
+		return reply.TransactionID, nil
+	}
+	n.mu.Lock()
+	n.resultSends++
+	n.mu.Unlock()
+	return n.replyStateSink.Send(ctx, reply)
+}
+
+// TestTaskDelivery_DegradeNoticeRetryIsIdempotent 降级提示发送失败后任务保持 pending，
+// 重试只补发提示，不重复发送文字结果，也不重复发送已成功的提示。
+func TestTaskDelivery_DegradeNoticeRetryIsIdempotent(t *testing.T) {
+	sink := &noticeFlakySink{}
+	manager, msg, dir := newArtifactTask(t, sink)
+	source, err := manager.Submit(context.Background(), msg, dir, agent.Request{})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		got, err := manager.Get(context.Background(), msg.Session, source.ID)
+		return err == nil && got.Delivery == "pending" && got.DeliveryAttempts == 1 && strings.Contains(got.DeliveryError, "offline")
+	}, 10*time.Second, 25*time.Millisecond)
+	var got task.Task
+	require.Eventually(t, func() bool {
+		got, err = manager.Get(context.Background(), msg.Session, source.ID)
+		return err == nil && got.Delivery == "sent"
+	}, 10*time.Second, 25*time.Millisecond)
+	require.Equal(t, 2, got.DeliveryAttempts)
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	require.Equal(t, 2, sink.noticeAttempts)
+	require.Equal(t, 1, sink.noticeOK, "提示只成功发送一次")
+	require.Equal(t, 1, sink.resultSends, "文字结果已持久化为已发送，重试不应再发")
+	require.Len(t, sink.noticeTxns, 2)
+	require.Equal(t, sink.noticeTxns[0], sink.noticeTxns[1], "重试使用同一幂等事务 ID")
+}
+
 func TestService_DeliverTaskFile_NilAdapter(t *testing.T) {
 	s := &Service{}
 	_, err := s.deliverTaskFile(context.Background(), nil, task.Task{ID: 1}, "artifact:x", "x.txt", func() ([]byte, error) {
