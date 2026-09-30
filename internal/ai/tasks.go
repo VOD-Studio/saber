@@ -130,6 +130,8 @@ func (s *Service) RegisterTaskDelivery(platform string, adapter chat.Adapter) er
 		return err
 	}
 	// 登记文件发送能力，供完整日志下载和产物交付按平台查找；未实现的平台会降级。
+	// 注意按平台名登记：当前 RegisterDelivery 拒绝同平台重复注册，所以每个平台只有一个 adapter；
+	// 若将来支持多账号同平台，日志下载可能取到别的账号的 adapter（见 taskFileAdapter 的已知限制）。
 	if files, ok := adapter.(chat.FileAdapter); ok {
 		s.taskFiles.Store(platform, files)
 	}

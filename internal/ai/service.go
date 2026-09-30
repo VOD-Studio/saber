@@ -58,6 +58,7 @@ type Service struct {
 	// taskDir 是应用启动时的规范化工作目录，不执行全局 chdir。
 	taskDir string
 	// taskFiles 按平台保存具备文件发送能力的投递 adapter（chat.FileAdapter）。
+	// 键只有平台名，不区分账号；多账号同平台的限制见 taskFileAdapter。
 	taskFiles sync.Map
 	// taskStreams 按平台保存可编辑的后台任务临时回复设置。
 	taskStreams sync.Map
