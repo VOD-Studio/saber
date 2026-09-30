@@ -362,3 +362,21 @@ func TestChatAdapter_FileUploadAndSend(t *testing.T) {
 		t.Fatal("期望无效载荷被拒绝")
 	}
 }
+
+// TestChatAdapter_FileWithoutService 未启用 Matrix 时 adapter 的 service 为 nil：
+// 文件上传/发送必须返回错误而不是解引用 nil（原任务投递崩溃现场）。
+func TestChatAdapter_FileWithoutService(t *testing.T) {
+	var files chat.FileAdapter = matrix.NewChatAdapter(nil, nil, config.MediaConfig{}, false, nil)
+	session := chat.Session{Platform: "matrix", Account: "@bot:local", Conversation: "!room:local"}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("service 为 nil 时不应 panic: %v", r)
+		}
+	}()
+	if _, err := files.UploadFile(context.Background(), chat.FileUpload{Session: session, Name: "a.txt", Data: []byte("x")}); err == nil {
+		t.Fatal("UploadFile 应返回错误")
+	}
+	if _, err := files.SendUploadedFile(context.Background(), chat.Reply{Session: session, TransactionID: "txn"}, []byte("{}")); err == nil {
+		t.Fatal("SendUploadedFile 应返回错误")
+	}
+}

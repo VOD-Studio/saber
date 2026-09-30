@@ -135,8 +135,11 @@ func TestManager_DeliveryPanicIsRecoveredAndRetried(t *testing.T) {
 	require.NoError(t, err)
 	failed := waitTask(t, m, item, func(t Task) bool { return t.DeliveryAttempts >= 1 })
 	require.Equal(t, "pending", failed.Delivery)
+	require.Equal(t, 1, failed.DeliveryAttempts, "panic 被 recover 后应计一次失败尝试")
 	require.Contains(t, failed.DeliveryError, "panic")
 	sent := waitTask(t, m, item, func(t Task) bool { return t.Delivery == "sent" })
+	require.Equal(t, 2, sent.DeliveryAttempts, "重试成功再计一次")
+	require.Empty(t, sent.DeliveryError)
 	require.Equal(t, "reply", sent.DeliveryID)
 	require.EqualValues(t, 2, sends.Load())
 }
