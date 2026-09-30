@@ -297,9 +297,37 @@ func TestTaskStream_ReplyStateKeepsProgressAcrossRounds(t *testing.T) {
 	}
 }
 
-// TestTaskDelivery_NoMatrixSkipsArtifacts 覆盖未启用 Matrix 时任务带产物的投递：
-// 之前会在 deliverTaskFile 中对 nil matrixService 解引用导致进程崩溃。
-func TestTaskDelivery_NoMatrixSkipsArtifacts(t *testing.T) {
+// fileSink 是带文件发送能力的假平台 adapter，用来验证任务文件交付不依赖 Matrix。
+type fileSink struct {
+	replyStateSink
+	uploads   []chat.FileUpload
+	fileSends map[string]int
+	sendErr   error
+}
+
+func (f *fileSink) UploadFile(_ context.Context, upload chat.FileUpload) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.uploads = append(f.uploads, upload)
+	return []byte(`{"name":"` + upload.Name + `"}`), nil
+}
+
+func (f *fileSink) SendUploadedFile(_ context.Context, reply chat.Reply, payload []byte) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sendErr != nil {
+		return "", f.sendErr
+	}
+	if f.fileSends == nil {
+		f.fileSends = map[string]int{}
+	}
+	f.fileSends[string(payload)]++
+	return reply.TransactionID, nil
+}
+
+// newArtifactTask 准备带两个产物的 violet 任务环境，返回服务、任务源和会话。
+func newArtifactTask(t *testing.T, adapter chat.Adapter) (*task.Manager, chat.Message, string) {
+	t.Helper()
 	dir, logs := t.TempDir(), t.TempDir()
 	cfg := config.ExecutionConfig{Enabled: true, LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"w": {Path: dir}}, Grants: []config.ExecutionGrant{{Platform: "violet", Account: "bot", Room: "room", Users: []string{"user"}, Workspace: "w", Tools: []string{"read_file"}}}}
 	executor, err := execution.New(cfg, nil, nil)
@@ -309,7 +337,6 @@ func TestTaskDelivery_NoMatrixSkipsArtifacts(t *testing.T) {
 	for i, name := range []string{"first.txt", "second.txt"} {
 		require.NoError(t, os.WriteFile(filepath.Join(artifactDir, fmt.Sprintf("%032d-%s", i, name)), []byte(name), 0600))
 	}
-	sink := &replyStateSink{}
 	s := &Service{config: config.DefaultConfig(), executor: executor, taskDir: t.TempDir()}
 	manager, err := task.Open(filepath.Join(t.TempDir(), "tasks.db"), func(context.Context, agent.Request, func(agent.Event)) (agent.Result, error) {
 		return agent.Result{Status: agent.Completed, Content: "done"}, nil
@@ -317,8 +344,13 @@ func TestTaskDelivery_NoMatrixSkipsArtifacts(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, manager.Close()) })
 	s.tasks = manager
-	require.NoError(t, s.RegisterTaskDelivery("violet", sink))
+	require.NoError(t, s.RegisterTaskDelivery("violet", adapter))
 	msg := chat.Message{ID: "question", SenderID: "user", Text: "files", Session: chat.Session{Platform: "violet", Account: "bot", Conversation: "room"}}
+	return manager, msg, dir
+}
+
+func waitDelivered(t *testing.T, manager *task.Manager, msg chat.Message, dir string) task.Task {
+	t.Helper()
 	source, err := manager.Submit(context.Background(), msg, dir, agent.Request{})
 	require.NoError(t, err)
 	require.Equal(t, int64(1), source.ID)
@@ -328,6 +360,42 @@ func TestTaskDelivery_NoMatrixSkipsArtifacts(t *testing.T) {
 		return err == nil && got.Delivery == "sent"
 	}, 10*time.Second, 25*time.Millisecond)
 	require.Empty(t, got.DeliveryError)
+	return got
+}
+
+// TestTaskDelivery_NonMatrixPlatformDeliversFiles 非 Matrix 平台只要实现 chat.FileAdapter，
+// 产物就经通用接口交付，且不依赖 matrixService。
+func TestTaskDelivery_NonMatrixPlatformDeliversFiles(t *testing.T) {
+	sink := &fileSink{}
+	manager, msg, dir := newArtifactTask(t, sink)
+	waitDelivered(t, manager, msg, dir)
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	require.Len(t, sink.uploads, 2)
+	names := []string{sink.uploads[0].Name, sink.uploads[1].Name}
+	require.ElementsMatch(t, []string{"first.txt", "second.txt"}, names)
+	for _, upload := range sink.uploads {
+		require.Equal(t, msg.Session, upload.Session)
+		require.Equal(t, "question", upload.ReplyTo)
+		require.Equal(t, upload.Name, string(upload.Data))
+	}
+	require.Len(t, sink.fileSends, 2)
+	for _, n := range sink.fileSends {
+		require.Equal(t, 1, n)
+	}
+	var texts []string
+	for _, reply := range sink.replies {
+		texts = append(texts, reply.Text)
+	}
+	require.Equal(t, []string{"done"}, texts, "有文件发送能力时不应出现降级提示")
+}
+
+// TestTaskDelivery_NoFileCapabilityDegrades 平台没有文件发送能力（也没有 Matrix）时，
+// 不 panic、不返回错误，文字结果照常送达并附一条幂等提示。
+func TestTaskDelivery_NoFileCapabilityDegrades(t *testing.T) {
+	sink := &replyStateSink{}
+	manager, msg, dir := newArtifactTask(t, sink)
+	waitDelivered(t, manager, msg, dir)
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
 	var texts []string
@@ -339,11 +407,34 @@ func TestTaskDelivery_NoMatrixSkipsArtifacts(t *testing.T) {
 	require.Contains(t, texts, "任务产生了 2 个文件，当前平台无法发送")
 }
 
-func TestService_DeliverTaskFile_WithoutMatrix(t *testing.T) {
+// TestTaskDelivery_FileSendFailureKeepsPending 文件发送失败属于可重试错误，任务保持 pending。
+func TestTaskDelivery_FileSendFailureKeepsPending(t *testing.T) {
+	sink := &fileSink{sendErr: errors.New("offline")}
+	manager, msg, dir := newArtifactTask(t, sink)
+	source, err := manager.Submit(context.Background(), msg, dir, agent.Request{})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		got, err := manager.Get(context.Background(), msg.Session, source.ID)
+		return err == nil && got.DeliveryAttempts >= 1 && got.Delivery == "pending" && strings.Contains(got.DeliveryError, "offline")
+	}, 10*time.Second, 25*time.Millisecond)
+}
+
+func TestService_DeliverTaskFile_NilAdapter(t *testing.T) {
 	s := &Service{}
-	_, err := s.deliverTaskFile(context.Background(), task.Task{ID: 1}, "artifact:x", "x.txt", func() ([]byte, error) {
-		t.Error("没有 Matrix 时不应读取文件")
+	_, err := s.deliverTaskFile(context.Background(), nil, task.Task{ID: 1}, "artifact:x", "x.txt", func() ([]byte, error) {
+		t.Error("没有文件发送能力时不应读取文件")
 		return nil, nil
 	})
-	require.EqualError(t, err, "文件交付需要 Matrix")
+	require.EqualError(t, err, "当前平台不支持文件交付")
+}
+
+func TestService_TaskFileAdapter(t *testing.T) {
+	registered := &fileSink{}
+	s := &Service{}
+	s.taskFiles.Store("violet", chat.FileAdapter(registered))
+	require.Nil(t, s.taskFileAdapter("matrix", nil))
+	require.Nil(t, s.taskFileAdapter("matrix", &replyStateSink{}), "投递 adapter 未实现文件能力且平台未登记")
+	require.Equal(t, chat.FileAdapter(registered), s.taskFileAdapter("violet", nil))
+	other := &fileSink{}
+	require.Equal(t, chat.FileAdapter(other), s.taskFileAdapter("violet", other), "优先使用当前投递 adapter")
 }

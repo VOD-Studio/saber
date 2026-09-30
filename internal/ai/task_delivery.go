@@ -62,9 +62,9 @@ func (s *Service) deliverTask(ctx context.Context, adapter chat.Adapter, t task.
 	if err != nil {
 		return messageID, err
 	}
-	// 文件交付只有 Matrix 实现；其他平台或未启用 Matrix 时不能调用 matrixService，
-	// 否则会 nil panic 并使任务永远停在 pending。文字结果已送达，这里按成功处理以免无限重试。
-	if len(artifacts) > 0 && (s.matrixService == nil || t.Message.Session.Platform != "matrix") {
+	// 平台没有文件发送能力时降级为一条幂等文字提示：文字结果已送达，这里按成功处理以免无限重试。
+	files := s.taskFileAdapter(t.Message.Session.Platform, adapter)
+	if len(artifacts) > 0 && files == nil {
 		slog.Warn("当前平台不支持任务文件交付，已跳过产物", "task", t.ID, "platform", t.Message.Session.Platform, "files", len(artifacts))
 		notice := fmt.Sprintf("任务产生了 %d 个文件，当前平台无法发送", len(artifacts))
 		_, err = s.tasks.DeliverPart(ctx, t.ID, "artifact-unsupported", func(context.Context) ([]byte, error) { return nil, nil }, func(ctx context.Context, _ []byte) (string, error) {
@@ -79,7 +79,7 @@ func (s *Service) deliverTask(ctx context.Context, adapter chat.Adapter, t task.
 			return messageID, err
 		}
 		key := "artifact:" + filepath.Base(artifact.Path)
-		_, err = s.deliverTaskFile(ctx, t, key, artifact.Name, func() ([]byte, error) { return os.ReadFile(artifact.Path) })
+		_, err = s.deliverTaskFile(ctx, files, t, key, artifact.Name, func() ([]byte, error) { return os.ReadFile(artifact.Path) })
 		if err != nil {
 			return messageID, err
 		}
