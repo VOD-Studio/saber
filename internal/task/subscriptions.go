@@ -122,6 +122,9 @@ func (m *Manager) deliverLoop() {
 			if send == nil {
 				continue
 			}
+			// 服务停止时 m.ctx 被取消，正在进行的这次发送会以 context canceled 失败，
+			// 并像普通失败一样多消耗一次尝试次数（delivered 用独立的 Background 上下文落盘）。
+			// 每次停机最多影响当前这一个任务，对默认 20 次上限影响很小，因此不特殊处理。
 			messageID, sendErr := safeSend(m.ctx, send, t)
 			status, err := m.store.delivered(context.Background(), t.ID, messageID, sendErr, t.DeliveryAttempts, m.deliveryMaxAttempts)
 			if err != nil {
