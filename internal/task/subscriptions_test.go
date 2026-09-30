@@ -112,3 +112,40 @@ func TestManager_ChatTurnDedupBusyAndCancel(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, history, 1)
 }
+
+// TestManager_DeliveryPanicIsRecoveredAndRetried 投递函数 panic 不能拖垮进程，
+// 任务应保持 pending 并记录错误，退避后重试成功。
+func TestManager_DeliveryPanicIsRecoveredAndRetried(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	m, err := Open(filepath.Join(dir, "tasks.db"), func(context.Context, agent.Request, func(agent.Event)) (agent.Result, error) {
+		return agent.Result{Status: agent.Completed, Content: "完成"}, nil
+	}, nil)
+	require.NoError(t, err)
+	defer closeManager(t, m)
+	var sends atomic.Int32
+	require.NoError(t, m.RegisterDelivery("matrix", func(context.Context, Task) (string, error) {
+		if sends.Add(1) == 1 {
+			var nilMap map[string]string
+			nilMap["boom"] = "panic"
+		}
+		return "reply", nil
+	}))
+	item, err := m.Submit(ctx, message("panic", "user"), dir, request("input"))
+	require.NoError(t, err)
+	failed := waitTask(t, m, item, func(t Task) bool { return t.DeliveryAttempts >= 1 })
+	require.Equal(t, "pending", failed.Delivery)
+	require.Contains(t, failed.DeliveryError, "panic")
+	sent := waitTask(t, m, item, func(t Task) bool { return t.Delivery == "sent" })
+	require.Equal(t, "reply", sent.DeliveryID)
+	require.EqualValues(t, 2, sends.Load())
+}
+
+func TestSafeSend(t *testing.T) {
+	id, err := safeSend(context.Background(), func(context.Context, Task) (string, error) { panic("boom") }, Task{ID: 7})
+	require.Empty(t, id)
+	require.ErrorContains(t, err, "boom")
+	id, err = safeSend(context.Background(), func(context.Context, Task) (string, error) { return "ok", nil }, Task{})
+	require.NoError(t, err)
+	require.Equal(t, "ok", id)
+}
