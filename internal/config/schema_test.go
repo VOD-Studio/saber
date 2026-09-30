@@ -155,7 +155,32 @@ func TestAgentConfigDefaults(t *testing.T) {
 	if cfg.TaskReceiptEnabled {
 		t.Error("agent.task_receipt_enabled 默认应关闭，任务结果仍照常投递")
 	}
+	if cfg.TaskDeliveryMaxAttempts != 20 {
+		t.Errorf("agent.task_delivery_max_attempts 默认应为 20，实际 %d", cfg.TaskDeliveryMaxAttempts)
+	}
+	if !strings.Contains(ExampleConfig(), "task_delivery_max_attempts: 20") {
+		t.Error("示例配置应说明任务投递最大尝试次数")
+	}
 	if !strings.Contains(ExampleConfig(), "task_receipt_enabled: false") {
 		t.Error("示例配置应说明任务回执开关及其默认值")
+	}
+}
+
+func TestAgentConfigValidate_TaskDeliveryMaxAttempts(t *testing.T) {
+	cfg := DefaultAgentConfig()
+	cfg.TaskDeliveryMaxAttempts = 0
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TaskDeliveryMaxAttempts != DefaultTaskDeliveryMaxAttempts {
+		t.Errorf("零值应回落到默认值，实际 %d", cfg.TaskDeliveryMaxAttempts)
+	}
+	cfg.TaskDeliveryMaxAttempts = 5
+	if err := cfg.Validate(); err != nil || cfg.TaskDeliveryMaxAttempts != 5 {
+		t.Errorf("显式值应保持，err=%v value=%d", err, cfg.TaskDeliveryMaxAttempts)
+	}
+	cfg.TaskDeliveryMaxAttempts = -1
+	if err := cfg.Validate(); err == nil {
+		t.Error("负数应被拒绝")
 	}
 }

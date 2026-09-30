@@ -101,12 +101,13 @@ type AIConfig struct {
 
 // AgentConfig 定义所有接入共用的任务执行策略。
 type AgentConfig struct {
-	ToolCallingConfig  `yaml:",inline"`
-	Context            ContextConfig        `yaml:"context"`              // 上下文管理配置
-	StreamEnabled      bool                 `yaml:"stream"`               // 是否启用流式响应
-	TaskReceiptEnabled bool                 `yaml:"task_receipt_enabled"` // 是否在任务入库后发送接收回执
-	Retry              RetryConfig          `yaml:"retry"`                // 重试配置
-	CircuitBreaker     CircuitBreakerConfig `yaml:"circuit_breaker"`      // 熔断器配置
+	ToolCallingConfig       `yaml:",inline"`
+	Context                 ContextConfig        `yaml:"context"`                    // 上下文管理配置
+	StreamEnabled           bool                 `yaml:"stream"`                     // 是否启用流式响应
+	TaskReceiptEnabled      bool                 `yaml:"task_receipt_enabled"`       // 是否在任务入库后发送接收回执
+	TaskDeliveryMaxAttempts int                  `yaml:"task_delivery_max_attempts"` // 任务结果投递最大尝试次数（含首次），零值用默认 20
+	Retry                   RetryConfig          `yaml:"retry"`                      // 重试配置
+	CircuitBreaker          CircuitBreakerConfig `yaml:"circuit_breaker"`            // 熔断器配置
 }
 
 // ContextConfig 存储上下文管理配置
@@ -293,15 +294,20 @@ func DefaultAIConfig() AIConfig {
 	}
 }
 
+// DefaultTaskDeliveryMaxAttempts 是任务结果投递的默认最大尝试次数，与 task.DefaultDeliveryMaxAttempts 保持一致：
+// 退避封顶 256 秒，20 次约容忍 51 分钟的持续投递故障。
+const DefaultTaskDeliveryMaxAttempts = 20
+
 // DefaultAgentConfig 返回通用任务默认策略。
 func DefaultAgentConfig() AgentConfig {
 	return AgentConfig{
-		Context:            DefaultContextConfig(),
-		StreamEnabled:      true,
-		TaskReceiptEnabled: false,
-		Retry:              DefaultRetryConfig(),
-		ToolCallingConfig:  DefaultToolCallingConfig(),
-		CircuitBreaker:     DefaultCircuitBreakerConfig(),
+		Context:                 DefaultContextConfig(),
+		StreamEnabled:           true,
+		TaskReceiptEnabled:      false,
+		TaskDeliveryMaxAttempts: DefaultTaskDeliveryMaxAttempts,
+		Retry:                   DefaultRetryConfig(),
+		ToolCallingConfig:       DefaultToolCallingConfig(),
+		CircuitBreaker:          DefaultCircuitBreakerConfig(),
 	}
 }
 
@@ -561,6 +567,12 @@ func (a *AIConfig) Validate() error {
 func (a *AgentConfig) Validate() error {
 	if err := a.ToolCallingConfig.Validate(); err != nil {
 		return err
+	}
+	if a.TaskDeliveryMaxAttempts == 0 {
+		a.TaskDeliveryMaxAttempts = DefaultTaskDeliveryMaxAttempts
+	}
+	if a.TaskDeliveryMaxAttempts < 0 {
+		return fmt.Errorf("task_delivery_max_attempts must be positive")
 	}
 	if a.Context.MaxMessages < 1 || a.Context.MaxTokens < 1 {
 		return fmt.Errorf("context max_messages and max_input_tokens must be positive")
@@ -933,6 +945,7 @@ ai:
 agent:
   stream: true # 模型传输开关，所有接入共同遵守
   task_receipt_enabled: false # 默认不发送「已接收，任务 #...」；结果仍正常投递
+  task_delivery_max_attempts: 20 # 结果投递最大尝试次数（含首次）；退避封顶 256 秒，20 次约 51 分钟，用尽后放弃自动重试
   max_rounds: 5 # 包含最终回答
   timeout_seconds: 600 # 整次任务，包含请求、重试等待与工具执行
   max_tool_output_bytes: 32768

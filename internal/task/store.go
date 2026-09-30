@@ -36,9 +36,10 @@ type Task struct {
 	Error string
 	// CancelRequested 表示用户已请求取消，执行退出前仍持有目录锁。
 	CancelRequested bool
-	// Delivery 为 pending 或 sent，仅终态任务可投递。
+	// Delivery 为 pending、sent 或 abandoned，仅终态任务可投递；
+	// abandoned 表示重试次数用尽后放弃，结果仍保存在数据库中但不再自动投递。
 	Delivery string
-	// DeliveryAttempts 记录结果投递尝试次数。
+	// DeliveryAttempts 记录结果投递尝试次数，重启后据此判断是否已达上限。
 	DeliveryAttempts int
 	// DeliveryError 记录最近的投递错误。
 	DeliveryError string
@@ -359,14 +360,31 @@ func (s *store) backfillTasks(ctx context.Context, limit int, afterID int64) ([]
 	return tasks, rows.Err()
 }
 
-func (s *store) delivered(ctx context.Context, taskID int64, messageID string, sendErr error, attempts int) error {
+// DefaultDeliveryMaxAttempts 是结果投递的默认最大尝试次数（含首次）。
+//
+// 退避为 1、2、4…秒，封顶 256 秒（见 deliveryDelay）：前 9 次失败累计等待 511 秒，
+// 此后每次 256 秒。20 次（19 次等待）约为 511 + 10×256 = 3071 秒（约 51 分钟）的持续故障容忍，
+// 足够覆盖常见的服务端重启或短时网络中断，又不会让无法投递的任务永远占用投递循环。
+const DefaultDeliveryMaxAttempts = 20
+
+// deliveryDelay 返回第 attempts 次失败（从 0 计）之后的等待时间：2^attempts 秒，封顶 256 秒。
+func deliveryDelay(attempts int) time.Duration {
+	return time.Second * time.Duration(1<<min(attempts, 8))
+}
+
+// delivered 记录一次投递尝试并返回任务新的投递状态。
+// 失败且累计尝试次数已达 maxAttempts 时标记为 abandoned，不再进入投递队列；
+// 已持久化的分片（task_delivery_parts）不受影响。
+func (s *store) delivered(ctx context.Context, taskID int64, messageID string, sendErr error, attempts, maxAttempts int) (string, error) {
 	status, detail := "sent", ""
 	if sendErr != nil {
 		status, detail = "pending", sendErr.Error()
+		if attempts+1 >= maxAttempts {
+			status = "abandoned"
+		}
 	}
-	delay := time.Second * time.Duration(1<<min(attempts, 8))
-	_, err := s.db.ExecContext(ctx, `UPDATE tasks SET delivery=?,delivery_attempts=delivery_attempts+1,delivery_error=?,delivery_id=?,next_delivery=? WHERE id=?`, status, detail, messageID, time.Now().Add(delay).UnixMilli(), taskID)
-	return err
+	_, err := s.db.ExecContext(ctx, `UPDATE tasks SET delivery=?,delivery_attempts=delivery_attempts+1,delivery_error=?,delivery_id=?,next_delivery=? WHERE id=?`, status, detail, messageID, time.Now().Add(deliveryDelay(attempts)).UnixMilli(), taskID)
+	return status, err
 }
 
 func scope(session chat.Session) []any {

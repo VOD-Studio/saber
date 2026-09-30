@@ -25,6 +25,9 @@ type Options struct {
 	Manage       func(chat.Identity) bool
 	Context      agent.ContextPolicy
 	OnProjection func()
+	// DeliveryMaxAttempts 是结果投递的最大尝试次数（含首次），用尽后任务的投递状态变为 abandoned；
+	// 零值使用 DefaultDeliveryMaxAttempts。
+	DeliveryMaxAttempts int
 }
 
 // Manager 管理单个机器人进程的队列；同一数据库只允许一个 Manager 实例。
@@ -46,6 +49,8 @@ type Manager struct {
 	manage        func(chat.Identity) bool
 	contextPolicy agent.ContextPolicy
 	onProjection  func()
+	// deliveryMaxAttempts 是结果投递的最大尝试次数，恒为正数。
+	deliveryMaxAttempts int
 }
 
 // Open 打开数据库，标记中断任务，并启动队列和结果投递。
@@ -63,7 +68,11 @@ func Open(path string, run RunFunc, send SendFunc, options ...Options) (*Manager
 		return nil, errors.Join(err, s.db.Close())
 	}
 	m := &Manager{store: s, run: run, deliveries: make(map[string]SendFunc), ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), done: make(chan struct{}), active: make(map[int64]context.CancelFunc)}
+	m.deliveryMaxAttempts = DefaultDeliveryMaxAttempts
 	if len(options) > 0 {
+		if options[0].DeliveryMaxAttempts > 0 {
+			m.deliveryMaxAttempts = options[0].DeliveryMaxAttempts
+		}
 		m.authorize = options[0].Schedule
 		m.manage = options[0].Manage
 		m.contextPolicy = options[0].Context

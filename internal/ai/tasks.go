@@ -93,9 +93,10 @@ func (s *Service) EnableTasks(path string) error {
 			}
 		})
 	}, nil, task.Options{
-		Context:  s.contextPolicy(),
-		Schedule: s.authorizeSchedule,
-		Manage:   func(identity chat.Identity) bool { return s.executor != nil && s.executor.IsTaskAdmin(identity) },
+		Context:             s.contextPolicy(),
+		DeliveryMaxAttempts: s.config.Agent.TaskDeliveryMaxAttempts,
+		Schedule:            s.authorizeSchedule,
+		Manage:              func(identity chat.Identity) bool { return s.executor != nil && s.executor.IsTaskAdmin(identity) },
 		OnProjection: func() {
 			if s.memory != nil {
 				_ = s.syncHistoryProjections(context.Background())

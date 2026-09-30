@@ -123,8 +123,14 @@ func (m *Manager) deliverLoop() {
 				continue
 			}
 			messageID, sendErr := safeSend(m.ctx, send, t)
-			if err := m.store.delivered(context.Background(), t.ID, messageID, sendErr, t.DeliveryAttempts); err != nil {
+			status, err := m.store.delivered(context.Background(), t.ID, messageID, sendErr, t.DeliveryAttempts, m.deliveryMaxAttempts)
+			if err != nil {
 				slog.Error("保存任务投递状态失败", "error", taskError(t.ID, err))
+				continue
+			}
+			if status == "abandoned" {
+				// 结果仍完整保存在数据库中，可用 !task status / !task logs 查看；这里不再自动重试。
+				slog.Error("任务结果投递重试次数用尽，已放弃", "task", t.ID, "platform", t.Message.Session.Platform, "attempts", t.DeliveryAttempts+1, "max_attempts", m.deliveryMaxAttempts, "error", sendErr)
 			}
 		}
 	}
