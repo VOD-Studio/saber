@@ -55,6 +55,7 @@ ai:
 agent:
   stream: true
   task_receipt_enabled: false
+  task_delivery_max_attempts: 20
   max_rounds: 5
   timeout_seconds: 600
   max_tool_output_bytes: 32768
@@ -79,6 +80,8 @@ agent:
 `stream` 控制模型传输，TUI、Matrix 和 Violet 都遵守。关闭后 TUI 仍显示任务状态，聊天平台在完整回答到达后展示正文。TUI 自己管理刷新和 Markdown 渲染，没有 Matrix 消息编辑阈值配置。
 
 `task_receipt_enabled` 默认关闭，控制聊天平台在任务入库后是否发送「已接收，任务 #…」。关闭后任务仍会运行并投递最终结果；设为 `true` 可恢复接收回执。TUI 自己展示任务状态，不发送这条聊天回执。
+
+`task_delivery_max_attempts` 是任务结果投递的最大尝试次数（含首次，默认 20，必须为正数，省略或 0 使用默认值）。失败按 1、2、4…秒退避，封顶 256 秒：20 次约容忍 51 分钟的持续投递故障；用尽后任务的投递状态变为 `abandoned` 并写 ERROR 日志，不再自动重试，结果仍保存在 `tasks.db`。
 
 `max_rounds` 包含最终回答；`timeout_seconds` 覆盖整次任务的模型请求、重试等待与工具执行。`execution.timeout_seconds` 单独限制一次执行工具调用。
 
