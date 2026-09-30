@@ -67,6 +67,9 @@ func (s *Service) sendTaskLogs(ctx context.Context, identity chat.Identity, task
 }
 
 func (s *Service) deliverTaskFile(ctx context.Context, t task.Task, key, name string, read func() ([]byte, error)) (string, error) {
+	if s.matrixService == nil {
+		return "", errors.New("文件交付需要 Matrix")
+	}
 	return s.tasks.DeliverPart(ctx, t.ID, key, func(ctx context.Context) ([]byte, error) {
 		data, err := read()
 		if err != nil {

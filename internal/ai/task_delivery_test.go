@@ -296,3 +296,54 @@ func TestTaskStream_ReplyStateKeepsProgressAcrossRounds(t *testing.T) {
 		require.Contains(t, reply.Thinking, "第一轮思考")
 	}
 }
+
+// TestTaskDelivery_NoMatrixSkipsArtifacts 覆盖未启用 Matrix 时任务带产物的投递：
+// 之前会在 deliverTaskFile 中对 nil matrixService 解引用导致进程崩溃。
+func TestTaskDelivery_NoMatrixSkipsArtifacts(t *testing.T) {
+	dir, logs := t.TempDir(), t.TempDir()
+	cfg := config.ExecutionConfig{Enabled: true, LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"w": {Path: dir}}, Grants: []config.ExecutionGrant{{Platform: "violet", Account: "bot", Room: "room", Users: []string{"user"}, Workspace: "w", Tools: []string{"read_file"}}}}
+	executor, err := execution.New(cfg, nil, nil)
+	require.NoError(t, err)
+	artifactDir := filepath.Join(logs, "task-1", "artifacts")
+	require.NoError(t, os.MkdirAll(artifactDir, 0700))
+	for i, name := range []string{"first.txt", "second.txt"} {
+		require.NoError(t, os.WriteFile(filepath.Join(artifactDir, fmt.Sprintf("%032d-%s", i, name)), []byte(name), 0600))
+	}
+	sink := &replyStateSink{}
+	s := &Service{config: config.DefaultConfig(), executor: executor, taskDir: t.TempDir()}
+	manager, err := task.Open(filepath.Join(t.TempDir(), "tasks.db"), func(context.Context, agent.Request, func(agent.Event)) (agent.Result, error) {
+		return agent.Result{Status: agent.Completed, Content: "done"}, nil
+	}, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, manager.Close()) })
+	s.tasks = manager
+	require.NoError(t, s.RegisterTaskDelivery("violet", sink))
+	msg := chat.Message{ID: "question", SenderID: "user", Text: "files", Session: chat.Session{Platform: "violet", Account: "bot", Conversation: "room"}}
+	source, err := manager.Submit(context.Background(), msg, dir, agent.Request{})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), source.ID)
+	var got task.Task
+	require.Eventually(t, func() bool {
+		got, err = manager.Get(context.Background(), msg.Session, source.ID)
+		return err == nil && got.Delivery == "sent"
+	}, 10*time.Second, 25*time.Millisecond)
+	require.Empty(t, got.DeliveryError)
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	var texts []string
+	for _, reply := range sink.replies {
+		texts = append(texts, reply.Text)
+	}
+	require.Len(t, texts, 2, "文字结果和文件不可发送提示各一条")
+	require.Contains(t, texts, "done")
+	require.Contains(t, texts, "任务产生了 2 个文件，当前平台无法发送")
+}
+
+func TestService_DeliverTaskFile_WithoutMatrix(t *testing.T) {
+	s := &Service{}
+	_, err := s.deliverTaskFile(context.Background(), task.Task{ID: 1}, "artifact:x", "x.txt", func() ([]byte, error) {
+		t.Error("没有 Matrix 时不应读取文件")
+		return nil, nil
+	})
+	require.EqualError(t, err, "文件交付需要 Matrix")
+}
