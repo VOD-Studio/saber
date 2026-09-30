@@ -330,7 +330,7 @@ S8 还需要一台真实 Violet 实例（管理端 `/admin/chat-bots` 注册 bot
 | S7 Violet 适配器 | 已完成 | `internal/platform/violet`：SSE 订阅 + 断线按消息历史补拉 + 提及剥离 + 自回声过滤 + 幂等发送 + 编辑节流；单测覆盖 86.7% |
 | S8 联调验证 | 未开始 | 需要一台开好 Bot 凭据的真实 Violet 实例（`/admin/chat-bots` 注册），验证见文末「验收」 |
 
-`ai` 剩余的 Matrix 触点：`internal/ai/task_logs.go` 的任务文件上传（已由 `identity.Session.Platform == "matrix"` 限定），以及 `internal/ai/service.go` 为注册 Matrix 命令、绑定旧历史账号与上传任务文件而保留的 `WithMatrix`。普通文本消息的发送已全部改经平台端口，`internal/ai/proactive*.go` 也不再引用 `internal/matrix`（房间元数据与主动投递经 `ai.ProactiveRooms`）。
+`ai` 剩余的 Matrix 触点：`internal/ai/task_logs.go` 的任务文件上传（`sendTaskLogs` 与 `deliverTask` 的产物交付都已限定在 Matrix 会话且 `matrixService` 非空；其他平台的产物会被跳过并记录警告，文字结果照常投递，`read_file deliver=true` 也会被提前拒绝），以及 `internal/ai/service.go` 为注册 Matrix 命令、绑定旧历史账号与上传任务文件而保留的 `WithMatrix`。普通文本消息的发送已全部改经平台端口，`internal/ai/proactive*.go` 也不再引用 `internal/matrix`（房间元数据与主动投递经 `ai.ProactiveRooms`）。
 
 出站正文的格式约定：`chat.Reply.Text` 以 Markdown 书写，渲染由平台 adapter 完成（Matrix 用 `format.RenderMarkdown` 转成 `org.matrix.custom.html`，并把原始 HTML 转义），`ai` 内不再出现任何平台标记语言。
 

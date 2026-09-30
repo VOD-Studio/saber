@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 未启用 Matrix（如仅 violet）时，任务带文件产物会因 `matrixService` 为 nil 触发 panic，投递 goroutine 崩溃带走整个进程，且任务仍为 pending 导致重启后崩溃循环。现在非 Matrix 会话的产物会被跳过并提示用户（文字结果照常投递），`deliverTaskFile` 对 nil 兜底，任务投递 panic 会被 recover 并按退避重试，`read_file deliver=true` 在非 Matrix 会话提前返回错误。
+
 ## [0.4.0] - 2026-09-29
 
 ### Changed
