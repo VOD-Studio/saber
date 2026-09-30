@@ -154,3 +154,53 @@ func TestManager_AbandonedKeepsDeliveryParts(t *testing.T) {
 	require.NoError(t, m.store.db.QueryRow(`SELECT message_id FROM task_delivery_parts WHERE task_id=? AND part='result'`, item.ID).Scan(&messageID))
 	require.Equal(t, "$sent", messageID)
 }
+
+// 旧任务的尝试次数已超过上限（如上限调小、或升级前已大量失败）时，再试一次：
+// 失败直接变 abandoned，成功则变 sent。固定「再试一次后放弃」的行为。
+func TestManager_DeliveryAttemptsAlreadyOverLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		sendErr error
+		want    string
+	}{
+		{"再试失败直接放弃", errors.New("still offline"), "abandoned"},
+		{"再试成功变 sent", nil, "sent"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			dir := t.TempDir()
+			path := filepath.Join(dir, "tasks.db")
+			m, err := Open(path, completedRunner, nil, Options{DeliveryMaxAttempts: 3})
+			require.NoError(t, err)
+			item, err := m.Submit(ctx, message("over", "user"), dir, request("input"))
+			require.NoError(t, err)
+			waitTask(t, m, item, func(t Task) bool { return t.Status == "completed" })
+			// 模拟旧数据：尝试 7 次仍 pending，已超过上限 3。
+			_, err = m.store.db.Exec(`UPDATE tasks SET delivery='pending',delivery_attempts=7,delivery_error='old error',next_delivery=0 WHERE id=?`, item.ID)
+			require.NoError(t, err)
+			var sends atomic.Int32
+			require.NoError(t, m.RegisterDelivery("matrix", func(context.Context, Task) (string, error) {
+				sends.Add(1)
+				if tc.sendErr != nil {
+					return "", tc.sendErr
+				}
+				return "reply", nil
+			}))
+			got := waitTask(t, m, item, func(t Task) bool { return t.Delivery != "pending" })
+			require.Equal(t, tc.want, got.Delivery)
+			require.Equal(t, 8, got.DeliveryAttempts)
+			if tc.sendErr != nil {
+				require.Equal(t, "still offline", got.DeliveryError)
+			} else {
+				require.Empty(t, got.DeliveryError)
+				require.Equal(t, "reply", got.DeliveryID)
+			}
+			// 终态之后不再被取到。
+			_, err = m.store.db.Exec(`UPDATE tasks SET next_delivery=0`)
+			require.NoError(t, err)
+			time.Sleep(600 * time.Millisecond)
+			require.EqualValues(t, 1, sends.Load())
+			closeManager(t, m)
+		})
+	}
+}
