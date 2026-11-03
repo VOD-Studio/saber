@@ -85,12 +85,6 @@ func (e *Executor) Run(ctx context.Context, tool string, args map[string]any) (r
 	if err = e.Check(ctx, tool); err != nil {
 		return result, err
 	}
-	// 危险命令在打开任何执行环境之前拦截。
-	if tool == "exec" {
-		if err = e.ensureCommandAllowed(args); err != nil {
-			return result, err
-		}
-	}
 	if !LocalTool(tool) {
 		return result, errors.New("not a local tool")
 	}
@@ -100,6 +94,12 @@ func (e *Executor) Run(ctx context.Context, tool string, args map[string]any) (r
 	}
 	if err = validateArgs(tool, args); err != nil {
 		return result, err
+	}
+	// 危险命令在打开任何执行环境之前检查；ask 会在这里消费一次性批准。
+	if tool == "exec" {
+		if err = e.gateCommand(ctx, "exec", args); err != nil {
+			return result, err
+		}
 	}
 	if tool == "read_output" {
 		// 归档读取不需要容器或挂载检查，权限由任务祖先关系单独校验。

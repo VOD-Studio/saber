@@ -71,7 +71,7 @@ func TestValidateConfig_CommandGuard(t *testing.T) {
 
 	cfg.CommandGuard = "warn"
 	_, err = ValidateConfig(cfg, nil, nil)
-	require.ErrorContains(t, err, "command_guard must be block or off")
+	require.ErrorContains(t, err, "command_guard must be block, ask or off")
 
 	cfg.CommandGuard = "block"
 	cfg.CommandGuardDeny = make([]string, maxGuardRules+1)

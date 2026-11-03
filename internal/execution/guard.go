@@ -1,7 +1,6 @@
 package execution
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 
@@ -74,17 +73,4 @@ func (g *commandGuard) check(command string) (string, bool) {
 		return rmRootLabel, true
 	}
 	return "", false
-}
-
-// ensureCommandAllowed 在任一后端启动命令前检查绊线规则。
-// 拒绝是普通工具错误，既不 panic，也不返回空结果冒充成功。
-func (e *Executor) ensureCommandAllowed(args map[string]any) error {
-	if e == nil || e.guard == nil {
-		return nil
-	}
-	command, _ := args["command"].(string)
-	if rule, blocked := e.guard.check(command); blocked {
-		return fmt.Errorf("命令被安全策略拒绝（命中规则 %q），未执行", rule)
-	}
-	return nil
 }

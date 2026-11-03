@@ -42,6 +42,10 @@ type Executor struct {
 	processes map[int64]map[string]*processRecord
 	// guard 是危险命令绊线；CommandGuard 为 off 时为 nil。
 	guard *commandGuard
+	// approvalMu 保护一次性命令审批表；审批只存在于内存，重启即失效。
+	approvalMu           sync.Mutex
+	approvals            map[string]*approvalRequest
+	approvalFingerprints map[string]string
 }
 
 type scope struct {
@@ -98,9 +102,21 @@ func ValidateConfig(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets
 	switch cfg.CommandGuard {
 	case "":
 		cfg.CommandGuard = "block"
-	case "block", "off":
+	case "block", "ask", "off":
 	default:
-		return cfg, errors.New("execution.command_guard must be block or off")
+		return cfg, errors.New("execution.command_guard must be block, ask or off")
+	}
+	if cfg.ApprovalTTLSeconds == 0 {
+		cfg.ApprovalTTLSeconds = 600
+	}
+	if cfg.ApprovalTTLSeconds < 60 || cfg.ApprovalTTLSeconds > 3600 {
+		return cfg, errors.New("execution approval_ttl_seconds must be 60..3600 seconds")
+	}
+	if cfg.ApprovalMaxPending == 0 {
+		cfg.ApprovalMaxPending = 32
+	}
+	if cfg.ApprovalMaxPending < 1 || cfg.ApprovalMaxPending > 256 {
+		return cfg, errors.New("execution approval_max_pending must be 1..256")
 	}
 	if len(cfg.CommandGuardDeny) > maxGuardRules {
 		return cfg, fmt.Errorf("execution.command_guard_deny allows at most %d rules", maxGuardRules)
@@ -306,7 +322,9 @@ func New(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) 
 		envs:      make(map[int64]*envEntry),
 		processes: make(map[int64]map[string]*processRecord),
 		// 规则在 ValidateConfig 校验后只编译这一次。
-		guard: newCommandGuard(cfg),
+		guard:                newCommandGuard(cfg),
+		approvals:            make(map[string]*approvalRequest),
+		approvalFingerprints: make(map[string]string),
 	}
 	for _, admin := range cfg.TaskAdmins {
 		for _, user := range admin.Users {

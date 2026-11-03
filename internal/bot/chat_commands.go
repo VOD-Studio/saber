@@ -111,6 +111,28 @@ func (s *appState) buildCommands() error {
 	}
 	if aiSvc := s.services.aiService; aiSvc != nil {
 		r.SetReceipts(aiSvc.Tasks())
+		// 审批命令与 Matrix、terminal/violet 共用同一注册表；身份只取自消息入口。
+		for _, op := range []struct {
+			id, name, description string
+			approve               bool
+		}{
+			{"exec.approve", "approve", "批准一次危险命令审批码", true},
+			{"exec.deny", "deny", "拒绝一次危险命令审批码", false},
+		} {
+			if err := add(op.id, []string{op.name}, op.description, "conversation",
+				[]command.Argument{{Name: "code", Type: "string", Required: true}},
+				[][]string{{"exec-" + op.name}}, "", nil,
+				func(ctx context.Context, m chat.Message, a chat.Adapter, raw string) error {
+					text, err := aiSvc.ApproveCommand(ctx, chat.Identity{Session: m.Session, SenderID: m.SenderID, Direct: m.Direct}, raw, op.approve)
+					if err != nil {
+						// 错误回执不回显命令正文。
+						return reply(ctx, m, a, "审批未生效："+err.Error())
+					}
+					return reply(ctx, m, a, text)
+				}); err != nil {
+				return err
+			}
+		}
 		admin := s.cfg.Commands.IsAdmin
 		writer := func(identity chat.Identity) bool { return identity.Direct || s.cfg.Commands.CanWriteSession(identity) }
 		if err := add("ai.chat", []string{"ai"}, "向 Saber 提问", "conversation", []command.Argument{{Name: "question", Type: "string", Required: true}}, nil, "", nil,
@@ -368,6 +390,7 @@ func (s *appState) statusReport(message chat.Message) string {
 func onceCommand(id string) bool {
 	switch id {
 	case "ai.clear", "ai.switch", "task.cancel", "schedule.pause", "schedule.delete", "meme",
+		"exec.approve", "exec.deny",
 		"memory.add", "memory.edit", "memory.forget", "memory.approve", "memory.reject", "memory.pause", "memory.resume",
 		"skill.add", "skill.edit", "skill.delete", "skill.approve", "skill.reject":
 		return true

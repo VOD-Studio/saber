@@ -18,10 +18,15 @@ type ExecutionConfig struct {
 	LogDir string `yaml:"log_dir"`
 	// TimeoutSeconds 是单次工具调用上限，默认 60 秒。
 	TimeoutSeconds int `yaml:"timeout_seconds"`
-	// CommandGuard 控制危险命令绊线：block（默认）拒绝命中规则的命令，off 关闭全部检查。
+	// CommandGuard 控制危险命令绊线：block（默认）拒绝命中规则的命令，
+	// ask 生成一次性的群内审批请求，off 关闭全部检查。
 	CommandGuard string `yaml:"command_guard"`
 	// CommandGuardDeny 是额外的字面量子串规则（大小写不敏感），最多 64 条，每条 1..256 字节。
 	CommandGuardDeny []string `yaml:"command_guard_deny"`
+	// ApprovalTTLSeconds 是一次性命令审批码的有效期，默认 600 秒，范围 60..3600。
+	ApprovalTTLSeconds int `yaml:"approval_ttl_seconds"`
+	// ApprovalMaxPending 是内存中同时保留的待审批请求上限，默认 32，范围 1..256。
+	ApprovalMaxPending int `yaml:"approval_max_pending"`
 	// Workspaces 将管理员命名的工作区绑定到宿主目录。
 	Workspaces map[string]WorkspaceConfig `yaml:"workspaces"`
 	// TaskAdmins 仅授予同群任务取消、日志读取和计划管理，不授予执行工具。
@@ -81,10 +86,12 @@ type TaskAdmin struct {
 func DefaultExecutionConfig() ExecutionConfig {
 	defaultNetwork := true
 	return ExecutionConfig{
-		Enabled:        false,
-		Network:        &defaultNetwork,
-		TimeoutSeconds: 60,
-		CommandGuard:   "block",
+		Enabled:            false,
+		Network:            &defaultNetwork,
+		TimeoutSeconds:     60,
+		CommandGuard:       "block",
+		ApprovalTTLSeconds: 600,
+		ApprovalMaxPending: 32,
 	}
 }
 

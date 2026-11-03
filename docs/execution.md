@@ -9,7 +9,7 @@
 
 ## 工具
 
-模型可连续调用以下工具，不需要逐条确认：
+模型可连续调用以下工具：授权按工作区连续生效，不逐条确认；只有命中危险命令规则且 `command_guard: ask` 时，才需要本群授权成员一次性批准。
 
 - `exec {command}`：在当前工作区运行 shell 命令；非零退出作为可纠正的工具错误返回，不自动重跑。
 - `process {action,...}`：`start|list|status|wait|logs|kill` 管理本任务后台作业；每任务最多 8 个运行中作业，作业 ID 为 `p_<32hex>`，只能由当前任务访问。
@@ -26,9 +26,30 @@
 
 ## 危险命令绊线
 
-`exec` 与 `process start` 两个入口都会在打开任何执行环境、创建任何进程之前，按 `execution.command_guard` 检查命令文本：默认 `block`，命中规则时返回普通工具错误 `命令被安全策略拒绝（命中规则 "<规则>"），未执行`，不回显命令正文或环境变量；`off` 关闭全部检查（含自定义规则）。内置规则（大小写不敏感子串）：`/var/run/docker.sock`、`--privileged`、`--cap-add`、`--pid=host`、`--net=host`、`--userns=host`、`--security-opt`、`/etc/shadow`、`/etc/sudoers`、`/.ssh/`、`/.aws/`、`.git-credentials`、`.netrc`、`:(){`，以及匹配 `rm -rf /` 一类根目录删除的正则（`rm -rf /tmp/x` 不命中）。`execution.command_guard_deny` 可追加最多 64 条 1..256 字节的字面量子串。
+`exec` 与 `process start` 两个入口都会在打开任何执行环境、创建任何进程之前，按 `execution.command_guard` 检查命令文本：默认 `block`，命中规则时返回普通工具错误 `命令被安全策略拒绝（命中规则 "<规则>"），未执行`，不回显命令正文或环境变量；`ask` 改为一次性审批（见下节）；`off` 关闭全部检查（含自定义规则）。内置规则（大小写不敏感子串）：`/var/run/docker.sock`、`--privileged`、`--cap-add`、`--pid=host`、`--net=host`、`--userns=host`、`--security-opt`、`/etc/shadow`、`/etc/sudoers`、`/.ssh/`、`/.aws/`、`.git-credentials`、`.netrc`、`:(){`，以及匹配 `rm -rf /` 一类根目录删除的正则（`rm -rf /tmp/x` 不命中）。`execution.command_guard_deny` 可追加最多 64 条 1..256 字节的字面量子串。
 
 这是防止误操作的绊线，不是沙箱边界：命令经 `sh -c` 执行，引号、变量展开、命令替换或编码都能绕过字符串匹配；`local` 后端本身也不构成隔离。需要真实边界时使用 `backend: docker`，并保持 `room` 与成员授权精确。
+
+## 一次性命令审批（ask）
+
+`command_guard: ask` 时，命中内置或自定义规则不再直接拒绝，而是登记一次性审批请求并返回普通工具错误，内容包含规则名、审批码与「需要本群授权成员执行 `!approve <码>`」，**不回显命令正文或环境变量**：
+
+```
+命令命中安全策略规则 "--privileged"，需要本群授权成员执行 !approve 3f9c…（或 /approve 3f9c…）；
+审批码 10 分钟内有效，批准后重新执行同一命令才会生效
+```
+
+审批状态机（全部在内存中，Saber 重启即失效，不会持久化）：
+
+1. 首次命中 → `pending`，审批码由 8 字节 `crypto/rand` 生成；同一身份、工具、命令与目录重复触发时复用同一码，不额外占用名额。
+2. `!approve <码>` → `approved`。只有**同一机器人账号下该工作区的有效授权成员**或该群 `task_admins` 可以操作；批准回执向审批者展示工具与完整命令（审批者本来就有权查看），并提示只能生效一次。
+3. 再次执行**完全相同**的命令（工具、命令正文、可信身份、工作区目录四者的 SHA-256 指纹一致）→ 在打开环境/创建进程之前消费批准并执行；一次消费后删除，重放需要重新审批。
+4. `!deny <码>`、TTL 过期或重启 → 请求直接失效；被拒绝后再次执行会生成新码。
+5. 内存中同时最多保留 `approval_max_pending` 条请求（默认 32），超限时拒绝新请求并提示先批准、拒绝或等待过期。
+
+命令、工具、身份或目录任一不符都不会复用已有批准：命令不符时生成新的待审批码，身份不符的成员无法批准（授权成员号与工作区也会校验），目录绑定到授予该身份的工作区。审批码与请求不接受模型参数，身份只取自消息入口。审批命令走共享 `command.Registry`，Matrix 的 `!approve` 与其他平台的 `/approve` 等价。
+
+**这是降低误操作风险的确认机制，不是沙箱，也不是权限模型本身**：已获授权的成员仍在工作区内连续自主执行；审批者看到的是与执行完全一致的字符串，不能阻止经 `sh -c` 混淆、编码或变量展开的等价危险命令；`local` 后端仍以宿主用户身份运行。需要真实隔离时使用 `backend: docker` 并保持授权精确。
 
 ## 输出、回读与取消
 
@@ -67,8 +88,10 @@ execution:
   # network: false # 仅 docker；默认开启
   log_dir: "/srv/saber-private/execution"
   timeout_seconds: 60
-  command_guard: block # block（默认）拦截危险命令；off 关闭全部检查，包括自定义规则
-  command_guard_deny: [] # 可选：追加字面量子串，最多 64 条、每条 1..256 字节
+  command_guard: block # block（默认）拦截危险命令；ask 改为一次性审批；off 关闭全部检查，包括自定义规则
+  # command_guard_deny: [] # 可选：追加字面量子串，最多 64 条、每条 1..256 字节
+  approval_ttl_seconds: 600 # ask 模式审批码有效期，60..3600，默认 600；审批只存内存，重启失效
+  approval_max_pending: 32 # 待审批请求上限，1..256，默认 32；超限拒绝新请求
   workspaces:
     project:
       path: "/srv/workspaces/project"
