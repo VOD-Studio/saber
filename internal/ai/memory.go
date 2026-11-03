@@ -218,6 +218,24 @@ func (s *Service) augmentMemory(ctx context.Context, req agent.Request) agent.Re
 	return req
 }
 
+// scheduledMemoryRequest 为定时计划任务从持久化来源快照重建记忆作用域后再注入。
+//
+// 计划不在原始聊天轮次里运行，因此不能直接复用当前上下文的作用域结论；这里只信任计划
+// 保存的原消息快照：发送者、会话与私聊标记都必须与当前可信身份一致。私聊计划只注入发起人
+// 个人记忆，群计划只注入该群记忆；无法证明作用域时保持原请求不变，绝不跨用户或跨群注入。
+func (s *Service) scheduledMemoryRequest(ctx context.Context, source chat.Message, req agent.Request) (context.Context, agent.Request) {
+	current, ok := chat.IdentityFromContext(ctx)
+	if !ok {
+		return ctx, req
+	}
+	identity := chat.Identity{Session: source.Session, SenderID: source.SenderID, Direct: source.Direct}
+	if current.Session != identity.Session || current.SenderID != identity.SenderID || current.Direct != identity.Direct {
+		return ctx, req
+	}
+	ctx = chat.WithIdentity(ctx, identity)
+	return ctx, s.augmentMemory(ctx, req)
+}
+
 // appendRuntimeContext 把记忆与技能目录作为运行时资料携带；不进入持久化请求或摘要输入。
 func appendRuntimeContext(req agent.Request, text string) agent.Request {
 	req.RuntimeContext = append(req.RuntimeContext, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: text})

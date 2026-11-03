@@ -46,6 +46,8 @@ type Task struct {
 	DeliveryError string
 	// DeliveryID 是已投递的平台消息 ID。
 	DeliveryID string
+	// Silent 表示计划选择不向聊天投递；终态仍完整落库，可用任务命令查询。
+	Silent bool
 	// CreatedAt 是接收时间。
 	CreatedAt time.Time
 }
@@ -78,6 +80,7 @@ func openStore(path string) (*store, error) {
 		cancel_requested INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
 		delivery TEXT NOT NULL DEFAULT 'pending', delivery_attempts INTEGER NOT NULL DEFAULT 0,
 		delivery_error TEXT NOT NULL DEFAULT '', delivery_id TEXT NOT NULL DEFAULT '', next_delivery INTEGER NOT NULL DEFAULT 0,
+		silent INTEGER NOT NULL DEFAULT 0,
 		UNIQUE(platform, account, room, event)
 	);
 	CREATE UNIQUE INDEX IF NOT EXISTS tasks_running_dir ON tasks(work_dir) WHERE status = 'running';
@@ -124,7 +127,34 @@ func openStore(path string) (*store, error) {
 	if err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
+	if err = s.migrateColumns(); err != nil {
+		return nil, errors.Join(err, db.Close())
+	}
 	return s, nil
+}
+
+// migrateColumns 为已有数据库补齐新增列；CREATE TABLE IF NOT EXISTS 不会修改旧表结构。
+//
+// 表名与列定义都是本包常量：表名以单引号字面量传给 pragma_table_info，列定义直接拼进 ALTER TABLE，
+// 都来自固定列表，不接受外部输入。重复执行先查 pragma，已存在则跳过。
+func (s *store) migrateColumns() error {
+	for _, c := range []struct{ table, column, definition string }{
+		{"tasks", "silent", "INTEGER NOT NULL DEFAULT 0"},
+		{"schedules", "requires_execution", "INTEGER NOT NULL DEFAULT 1"},
+		{"schedules", "delivery", "TEXT NOT NULL DEFAULT 'origin'"},
+	} {
+		var exists int
+		if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info('`+c.table+`') WHERE name=?)`, c.column).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 1 {
+			continue
+		}
+		if _, err := s.db.Exec(`ALTER TABLE ` + c.table + ` ADD COLUMN ` + c.column + ` ` + c.definition); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func canonicalDir(dir string) (string, error) {
@@ -204,16 +234,18 @@ func (s *store) submit(ctx context.Context, message chat.Message, dir string, re
 	return t, tx.Commit()
 }
 
-const taskColumns = `id,message,work_dir,request,status,result,error,cancel_requested,delivery,delivery_attempts,delivery_error,delivery_id,created_at,event`
+const taskColumns = `id,message,work_dir,request,status,result,error,cancel_requested,delivery,delivery_attempts,delivery_error,delivery_id,created_at,event,silent`
 
 func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
 	var m, req, result []byte
 	var created int64
-	err := row.Scan(&t.ID, &m, &t.WorkDir, &req, &t.Status, &result, &t.Error, &t.CancelRequested, &t.Delivery, &t.DeliveryAttempts, &t.DeliveryError, &t.DeliveryID, &created, &t.EventKey)
+	var silent int
+	err := row.Scan(&t.ID, &m, &t.WorkDir, &req, &t.Status, &result, &t.Error, &t.CancelRequested, &t.Delivery, &t.DeliveryAttempts, &t.DeliveryError, &t.DeliveryID, &created, &t.EventKey, &silent)
 	if err != nil {
 		return t, err
 	}
+	t.Silent = silent != 0
 	t.CreatedAt = time.UnixMilli(created)
 	return t, errors.Join(json.Unmarshal(m, &t.Message), json.Unmarshal(req, &t.Request), json.Unmarshal(result, &t.Result))
 }
@@ -432,7 +464,7 @@ func (s *store) finish(ctx context.Context, t Task, result agent.Result, runErr 
 	return tx.Commit()
 }
 
-const qualifiedTaskColumns = `tasks.id,tasks.message,tasks.work_dir,tasks.request,tasks.status,tasks.result,tasks.error,tasks.cancel_requested,tasks.delivery,tasks.delivery_attempts,tasks.delivery_error,tasks.delivery_id,tasks.created_at,tasks.event`
+const qualifiedTaskColumns = `tasks.id,tasks.message,tasks.work_dir,tasks.request,tasks.status,tasks.result,tasks.error,tasks.cancel_requested,tasks.delivery,tasks.delivery_attempts,tasks.delivery_error,tasks.delivery_id,tasks.created_at,tasks.event,tasks.silent`
 
 func (s *store) pendingProjections(ctx context.Context, limit int) ([]Task, error) {
 	if limit <= 0 {

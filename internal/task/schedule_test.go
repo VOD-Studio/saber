@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"sync/atomic"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
+	"rua.plus/saber/internal/db"
 )
 
 func TestScheduleSpec_Next(t *testing.T) {
@@ -202,4 +204,137 @@ func TestSchedule_RevokedAtDueAndPausedBeforeExecution(t *testing.T) {
 	require.NoError(t, err)
 	_, err = m.checkScheduledTask(ctx, queued)
 	require.Error(t, err)
+}
+
+// 纯聊天计划创建、到点和排队执行都不需要执行授权；默认计划仍然要求授权。
+func TestSchedule_PureChatSkipsAuthorization(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	s, err := openStore(filepath.Join(dir, "tasks.db"))
+	require.NoError(t, err)
+	m := &Manager{store: s, ctx: ctx, authorize: func(chat.Identity, string) error { return errors.New("no grant") }}
+	defer func() { require.NoError(t, s.db.Close()) }()
+	want, err := canonicalDir(dir)
+	require.NoError(t, err)
+	// 未声明纯聊天时保持旧行为：没有执行授权不能创建。
+	msg := message("with-tools", "alice")
+	_, err = m.CreateSchedule(ctx, msg, dir, request("goal"), ScheduleSpec{Kind: "every", Timezone: "UTC", Every: "1h"})
+	require.Error(t, err)
+	// 未知投递目标在创建时报错，不落库。
+	msg.ID = "bad-delivery"
+	_, err = m.CreateSchedule(ctx, msg, dir, request("goal"), ScheduleSpec{Kind: "every", Timezone: "UTC", Every: "1h"}, ScheduleRequiresExecution(false), WithScheduleDelivery("page"))
+	require.Error(t, err)
+	msg.ID = "chat"
+	plan, err := m.CreateSchedule(ctx, msg, dir, request("纯聊天目标"), ScheduleSpec{Kind: "every", Timezone: "UTC", Every: "1h"}, ScheduleRequiresExecution(false), WithScheduleDelivery("silent"))
+	require.NoError(t, err)
+	require.False(t, plan.RequiresExecution)
+	require.Equal(t, "silent", plan.Delivery)
+	require.Equal(t, want, plan.WorkDir)
+	// 到点不复查授权，照常建任务并带上静默标记。
+	require.NoError(t, m.tickSchedules(ctx, plan.NextRun))
+	plan, err = m.GetSchedule(ctx, msg.Session, plan.ID)
+	require.NoError(t, err)
+	require.NotZero(t, plan.LastTask)
+	queued, err := m.Get(ctx, msg.Session, plan.LastTask)
+	require.NoError(t, err)
+	require.True(t, queued.Silent)
+	require.Equal(t, want, queued.WorkDir)
+	scheduled, err := m.checkScheduledTask(ctx, queued)
+	require.NoError(t, err)
+	require.True(t, scheduled)
+	_, err = m.checkScheduledTask(ctx, queued)
+	require.NoError(t, err)
+}
+
+// legacyTaskSchema 是新增 silent、requires_execution、delivery 之前的表结构。
+const legacyTaskSchema = `
+CREATE TABLE tasks (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ platform TEXT NOT NULL, account TEXT NOT NULL, room TEXT NOT NULL, event TEXT NOT NULL,
+ sender TEXT NOT NULL, work_dir TEXT NOT NULL, message BLOB NOT NULL, request BLOB NOT NULL,
+ status TEXT NOT NULL DEFAULT 'queued', result BLOB NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '',
+ cancel_requested INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
+ delivery TEXT NOT NULL DEFAULT 'pending', delivery_attempts INTEGER NOT NULL DEFAULT 0,
+ delivery_error TEXT NOT NULL DEFAULT '', delivery_id TEXT NOT NULL DEFAULT '', next_delivery INTEGER NOT NULL DEFAULT 0,
+ UNIQUE(platform, account, room, event)
+);
+CREATE TABLE schedules (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ platform TEXT NOT NULL, account TEXT NOT NULL, room TEXT NOT NULL, event TEXT NOT NULL,
+ message BLOB NOT NULL, work_dir TEXT NOT NULL, request BLOB NOT NULL, spec BLOB NOT NULL,
+ status TEXT NOT NULL DEFAULT 'active', next_run INTEGER NOT NULL,
+ last_task INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL DEFAULT '',
+ UNIQUE(platform,account,room,event)
+);
+CREATE TABLE schedule_runs (
+ schedule_id INTEGER NOT NULL REFERENCES schedules(id), due INTEGER NOT NULL,
+ handled_at INTEGER NOT NULL, outcome TEXT NOT NULL, detail TEXT NOT NULL,
+ task_id INTEGER REFERENCES tasks(id), PRIMARY KEY(schedule_id,due)
+);`
+
+// 旧数据库升级：新增列必须幂等补齐，旧行回退到“需要执行授权 + 回复原消息 + 不静默”。
+func TestSchedule_LegacyDatabaseMigration(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tasks.db")
+	raw, err := sql.Open(db.DriverName, path)
+	require.NoError(t, err)
+	_, err = raw.Exec(legacyTaskSchema)
+	require.NoError(t, err)
+	msg := message("legacy", "alice")
+	msgData, err := json.Marshal(msg)
+	require.NoError(t, err)
+	reqData, err := json.Marshal(request("legacy goal"))
+	require.NoError(t, err)
+	specData, err := json.Marshal(ScheduleSpec{Kind: "every", Timezone: "UTC", Every: "1h"})
+	require.NoError(t, err)
+	_, err = raw.Exec(`INSERT INTO schedules(platform,account,room,event,message,work_dir,request,spec,next_run) VALUES(?,?,?,?,?,?,?,?,?)`,
+		msg.Session.Platform, msg.Session.Account, msg.Session.Conversation, msg.ID, msgData, dir, reqData, specData, time.Now().Add(time.Hour).UnixMilli())
+	require.NoError(t, err)
+	_, err = raw.Exec(`INSERT INTO tasks(platform,account,room,event,sender,work_dir,message,request,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		msg.Session.Platform, msg.Session.Account, msg.Session.Conversation, "legacy-task", msg.SenderID, dir, msgData, reqData, "queued", time.Now().UnixMilli())
+	require.NoError(t, err)
+	require.NoError(t, raw.Close())
+
+	s, err := openStore(path)
+	require.NoError(t, err)
+	for _, c := range []struct{ table, column string }{
+		{"tasks", "silent"}, {"schedules", "requires_execution"}, {"schedules", "delivery"},
+	} {
+		var exists int
+		require.NoError(t, s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info('`+c.table+`') WHERE name=?)`, c.column).Scan(&exists))
+		require.Equal(t, 1, exists, "%s.%s 未补齐", c.table, c.column)
+	}
+	m := &Manager{store: s, ctx: ctx, authorize: func(chat.Identity, string) error { return nil }}
+	plans, err := m.ListSchedules(ctx, msg.Session)
+	require.NoError(t, err)
+	require.Len(t, plans, 1)
+	require.True(t, plans[0].RequiresExecution, "旧计划必须继续要求执行授权")
+	require.Equal(t, "origin", plans[0].Delivery)
+	legacy, err := m.Get(ctx, msg.Session, 1)
+	require.NoError(t, err)
+	require.False(t, legacy.Silent)
+	// 迁移后的库继续接受新语义，并在关闭重开后保持。
+	chatMsg := message("pure-chat", "alice")
+	plan, err := m.CreateSchedule(ctx, chatMsg, dir, request("纯聊天"), ScheduleSpec{Kind: "every", Timezone: "UTC", Every: "1h"}, ScheduleRequiresExecution(false), WithScheduleDelivery("silent"))
+	require.NoError(t, err)
+	require.NoError(t, m.tickSchedules(ctx, plan.NextRun))
+	plan, err = m.GetSchedule(ctx, msg.Session, plan.ID)
+	require.NoError(t, err)
+	require.NotZero(t, plan.LastTask)
+	require.NoError(t, s.db.Close())
+	s, err = openStore(path)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, s.db.Close()) }()
+	m.store = s
+	plan, err = m.GetSchedule(ctx, msg.Session, plan.ID)
+	require.NoError(t, err)
+	require.False(t, plan.RequiresExecution)
+	require.Equal(t, "silent", plan.Delivery)
+	taskRow, err := m.Get(ctx, msg.Session, plan.LastTask)
+	require.NoError(t, err)
+	require.True(t, taskRow.Silent)
+	plans, err = m.ListSchedules(ctx, msg.Session)
+	require.NoError(t, err)
+	require.Len(t, plans, 2)
 }

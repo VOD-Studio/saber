@@ -22,6 +22,7 @@ import (
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/execution"
 	"rua.plus/saber/internal/matrix"
+	"rua.plus/saber/internal/memory"
 	"rua.plus/saber/internal/task"
 )
 
@@ -106,6 +107,7 @@ func TestSchedules_CommandsRestartReportAndNaturalTool(t *testing.T) {
 	plans, err := s.tasks.ListSchedules(ctx, session)
 	require.NoError(t, err)
 	require.Len(t, plans, 1)
+	require.True(t, plans[0].RequiresExecution, "持有执行工具的创建者应保留授权要求")
 	require.Contains(t, scheduleText(plans[0]), "Asia/Shanghai")
 	require.Contains(t, scheduleText(plans[0]), "+08:00")
 	require.Zero(t, calls.Load()) // 确定性创建入口不访问模型。
@@ -168,7 +170,188 @@ func TestSchedules_CommandsRestartReportAndNaturalTool(t *testing.T) {
 	require.NotContains(t, text, "独立目标")
 	_, err = s.toolExecutor.ExecuteToolCall(context.Background(), "saber_schedule", map[string]any{"action": "list"})
 	require.Error(t, err)
+	// 没有执行授权的成员也能创建纯聊天计划：不申请工作区，目标末尾 --silent 即静默投递。
+	chatMsg := msg
+	chatMsg.ID, chatMsg.SenderID = "$bob-chat", "@bob:test"
+	bobText, err := s.scheduleOperation(ctx, chatMsg, scheduleInput{Action: "create", Goal: "纯聊天提醒 --silent", Spec: task.ScheduleSpec{Kind: "every", Timezone: "UTC", Every: "1h"}})
+	require.NoError(t, err)
+	require.Contains(t, bobText, "纯聊天")
+	bobPlans, err := s.tasks.ListSchedules(ctx, session)
+	require.NoError(t, err)
+	require.NotEmpty(t, bobPlans)
+	require.Equal(t, "@bob:test", bobPlans[0].Message.SenderID)
+	require.False(t, bobPlans[0].RequiresExecution)
+	require.Equal(t, "silent", bobPlans[0].Delivery)
+	require.Equal(t, s.taskDir, bobPlans[0].WorkDir)
 	msg.Session.Conversation = "!elsewhere:test"
 	_, err = s.scheduleOperation(ctx, msg, scheduleInput{Action: "status", ID: plan.ID})
 	require.Error(t, err)
+}
+
+// silentAdapter 只记录发送次数，用于验证静默计划不向聊天投递。
+type silentAdapter struct{ sends atomic.Int32 }
+
+func (a *silentAdapter) Capabilities() chat.Capabilities { return chat.Capabilities{} }
+
+func (a *silentAdapter) Send(context.Context, chat.Reply) (string, error) {
+	a.sends.Add(1)
+	return "$sent", nil
+}
+
+func (a *silentAdapter) Edit(context.Context, string, chat.Reply) error { return nil }
+
+func (a *silentAdapter) SetTyping(context.Context, chat.Session, bool) error { return nil }
+
+// 纯聊天计划没有执行授权也能创建和运行：静默投递只落库，记忆按计划来源作用域注入。
+func TestSchedules_PureChatSilentRunAndMemoryScope(t *testing.T) {
+	type captured struct {
+		goal  string
+		text  string
+		tools []string
+	}
+	var mu sync.Mutex
+	var requests []captured
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []openai.ChatCompletionMessage `json:"messages"`
+			Tools    []openai.Tool                  `json:"tools"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		var item captured
+		for i, message := range body.Messages {
+			item.text += message.Content + "\n"
+			if i == len(body.Messages)-1 {
+				item.goal = message.Content
+			}
+		}
+		for _, tool := range body.Tools {
+			item.tools = append(item.tools, tool.Function.Name)
+		}
+		mu.Lock()
+		requests = append(requests, item)
+		mu.Unlock()
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{
+			"message": map[string]any{"role": "assistant", "content": "到点了"}, "finish_reason": "stop",
+		}}}))
+	}))
+	defer model.Close()
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled, cfg.Agent.StreamEnabled = true, false
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: model.URL, APIKey: "test"}}
+	cfg.AI.DefaultModel = "openai.local"
+	cfg.AI.SystemPrompt = "system"
+	mem := newTestMemory(t, memory.Config{GroupWriter: func(chat.Identity) bool { return true }})
+	dm := chat.Identity{Session: chat.Session{Platform: "matrix", Account: "@bot:test", Conversation: "!dm:test"}, SenderID: "@alice:test", Direct: true}
+	group := chat.Identity{Session: chat.Session{Platform: "matrix", Account: "@bot:test", Conversation: "!room:test"}, SenderID: "@alice:test"}
+	_, err := mem.Add(chat.WithIdentity(context.Background(), dm), dm, "私聊偏好：只喝美式", memory.Source{}, true)
+	require.NoError(t, err)
+	_, err = mem.Add(chat.WithIdentity(context.Background(), group), group, "群约定：周五发周报", memory.Source{}, true)
+	require.NoError(t, err)
+	svc, err := NewService(&cfg, WithMemory(mem))
+	require.NoError(t, err)
+	defer svc.Stop()
+	require.NoError(t, svc.EnableTasks(filepath.Join(t.TempDir(), "tasks.db")))
+	adapter := &silentAdapter{}
+	require.NoError(t, svc.RegisterTaskDelivery("matrix", adapter))
+	ctx := context.Background()
+	at := time.Now().Add(3 * time.Second).Format(time.RFC3339)
+	dmMessage := chat.Message{Session: dm.Session, ID: "$dm-chat", SenderID: dm.SenderID, Direct: true, Text: "dm"}
+	_, err = svc.scheduleOperation(ctx, dmMessage, scheduleInput{Action: "create", Goal: "私聊晚安", Delivery: "silent", Spec: task.ScheduleSpec{Kind: "once", Timezone: "UTC", At: at}})
+	require.NoError(t, err)
+	groupMessage := chat.Message{Session: group.Session, ID: "$group-chat", SenderID: group.SenderID, Text: "group"}
+	_, err = svc.scheduleOperation(ctx, groupMessage, scheduleInput{Action: "create", Goal: "群里周报", Delivery: "silent", Spec: task.ScheduleSpec{Kind: "once", Timezone: "UTC", At: at}})
+	require.NoError(t, err)
+	plans, err := svc.tasks.ListSchedules(ctx, dm.Session)
+	require.NoError(t, err)
+	require.Len(t, plans, 1)
+	require.False(t, plans[0].RequiresExecution)
+	require.Equal(t, "silent", plans[0].Delivery)
+	require.Equal(t, svc.taskDir, plans[0].WorkDir)
+	var dmTask, groupTask task.Task
+	require.Eventually(t, func() bool {
+		dmTasks, dmErr := svc.tasks.List(ctx, dm.Session)
+		groupTasks, groupErr := svc.tasks.List(ctx, group.Session)
+		if dmErr != nil || groupErr != nil || len(dmTasks) != 1 || len(groupTasks) != 1 {
+			return false
+		}
+		dmTask, groupTask = dmTasks[0], groupTasks[0]
+		return dmTask.Status == "completed" && groupTask.Status == "completed" && dmTask.Delivery == "sent" && groupTask.Delivery == "sent"
+	}, 15*time.Second, 50*time.Millisecond)
+	require.True(t, dmTask.Silent)
+	require.True(t, groupTask.Silent)
+	require.Zero(t, adapter.sends.Load(), "静默计划不应向聊天投递")
+	require.Equal(t, "到点了", dmTask.Result.Content)
+	// 私聊计划只注入个人记忆，群计划只注入群记忆；工具集合不含执行或 MCP 能力。
+	mu.Lock()
+	defer mu.Unlock()
+	seen := map[string]bool{}
+	for _, item := range requests {
+		switch item.goal {
+		case "私聊晚安":
+			seen["dm"] = true
+			require.Contains(t, item.text, "私聊偏好：只喝美式")
+			require.NotContains(t, item.text, "群约定：周五发周报")
+		case "群里周报":
+			seen["group"] = true
+			require.Contains(t, item.text, "群约定：周五发周报")
+			require.NotContains(t, item.text, "私聊偏好：只喝美式")
+		default:
+			continue
+		}
+		require.Contains(t, item.text, "不是本轮指令")
+		for _, name := range item.tools {
+			require.True(t, chatToolNames[name], "纯聊天计划拿到了工具 %s", name)
+		}
+	}
+	require.True(t, seen["dm"] && seen["group"], "两次计划的模型请求都应到达")
+}
+
+// 静默计划在投递层直接成功返回，不触发任何平台发送。
+func TestSchedules_SilentDeliverySkipsSend(t *testing.T) {
+	adapter := &silentAdapter{}
+	svc := &Service{}
+	id, err := svc.deliverTask(context.Background(), adapter, task.Task{ID: 7, Status: "completed", Silent: true})
+	require.NoError(t, err)
+	require.Empty(t, id)
+	require.Zero(t, adapter.sends.Load())
+}
+
+// 定时运行的记忆注入只信任计划保存的来源快照：私聊注入个人记忆，群计划只注入群记忆，
+// 快照与当前可信身份不一致时跳过。
+func TestSchedules_ScheduledMemoryScope(t *testing.T) {
+	mem := newTestMemory(t, memory.Config{GroupWriter: func(chat.Identity) bool { return true }})
+	ctx := context.Background()
+	dm := chat.Identity{Session: chat.Session{Platform: "matrix", Account: "@bot:test", Conversation: "!dm:test"}, SenderID: "@alice:test", Direct: true}
+	group := chat.Identity{Session: chat.Session{Platform: "matrix", Account: "@bot:test", Conversation: "!room:test"}, SenderID: "@alice:test"}
+	_, err := mem.Add(chat.WithIdentity(ctx, dm), dm, "私聊偏好：只喝美式", memory.Source{}, true)
+	require.NoError(t, err)
+	_, err = mem.Add(chat.WithIdentity(ctx, group), group, "群约定：周五发周报", memory.Source{}, true)
+	require.NoError(t, err)
+	svc := newMemoryAIService(t, mem, 0)
+	req := agent.Request{Messages: []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleSystem, Content: "base"}}}
+	text := func(got agent.Request) string {
+		var joined strings.Builder
+		for _, message := range got.RuntimeContext {
+			joined.WriteString(message.Content)
+		}
+		return joined.String()
+	}
+	// 私聊快照与当前身份一致：注入个人记忆，不注入群记忆。
+	dmMessage := chat.Message{Session: dm.Session, ID: "$dm", SenderID: dm.SenderID, Direct: true, Text: "提醒"}
+	_, got := svc.scheduledMemoryRequest(chat.WithIdentity(ctx, dm), dmMessage, req)
+	require.Contains(t, text(got), "私聊偏好：只喝美式")
+	require.NotContains(t, text(got), "群约定：周五发周报")
+	// 群快照：只注入群记忆，个人记忆不跨群。
+	groupMessage := chat.Message{Session: group.Session, ID: "$group", SenderID: group.SenderID, Text: "周报"}
+	_, got = svc.scheduledMemoryRequest(chat.WithIdentity(ctx, group), groupMessage, req)
+	require.Contains(t, text(got), "群约定：周五发周报")
+	require.NotContains(t, text(got), "私聊偏好：只喝美式")
+	// 快照私聊标记与当前身份不一致：无法证明作用域，跳过注入。
+	forged := groupMessage
+	forged.Direct = true
+	_, got = svc.scheduledMemoryRequest(chat.WithIdentity(ctx, group), forged, req)
+	require.Empty(t, got.RuntimeContext)
+	// 发送者不一致：跳过注入。
+	_, got = svc.scheduledMemoryRequest(chat.WithIdentity(ctx, dm), chat.Message{Session: dm.Session, ID: "$x", SenderID: "@bob:test", Direct: true, Text: "x"}, req)
+	require.Empty(t, got.RuntimeContext)
 }

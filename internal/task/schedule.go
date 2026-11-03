@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS schedules (
  message BLOB NOT NULL, work_dir TEXT NOT NULL, request BLOB NOT NULL, spec BLOB NOT NULL,
  status TEXT NOT NULL DEFAULT 'active', next_run INTEGER NOT NULL,
  last_task INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL DEFAULT '',
+ requires_execution INTEGER NOT NULL DEFAULT 1, delivery TEXT NOT NULL DEFAULT 'origin',
  UNIQUE(platform,account,room,event)
 );
 CREATE INDEX IF NOT EXISTS schedules_due ON schedules(status,next_run);
@@ -111,6 +112,35 @@ type Schedule struct {
 	LastTask int64
 	// Reason 保留最近跳过、暂停或合并周期的原因。
 	Reason string
+	// RequiresExecution 冻结创建时是否需要执行授权；纯聊天计划为 false，使用启动目录作为工作目录。
+	RequiresExecution bool
+	// Delivery 是投递目标：origin 回复原消息（默认），silent 只落库不向聊天投递。
+	Delivery string
+}
+
+// ScheduleOption 在创建计划时追加执行授权与投递目标选项；未提供时保持旧行为。
+type ScheduleOption func(*Schedule)
+
+// ScheduleRequiresExecution 显式声明计划是否需要执行授权；默认需要，避免旧调用方意外放宽。
+func ScheduleRequiresExecution(required bool) ScheduleOption {
+	return func(s *Schedule) { s.RequiresExecution = required }
+}
+
+// WithScheduleDelivery 设置投递目标；取值在创建时校验，未知值直接报错。
+func WithScheduleDelivery(target string) ScheduleOption {
+	return func(s *Schedule) { s.Delivery = target }
+}
+
+// normalizeScheduleDelivery 把空值落为默认投递目标，并拒绝未知值。
+func normalizeScheduleDelivery(target string) (string, error) {
+	switch target {
+	case "":
+		return "origin", nil
+	case "origin", "silent":
+		return target, nil
+	default:
+		return "", fmt.Errorf("未知投递目标 %q，只支持 origin 或 silent", target)
+	}
 }
 
 // ScheduleRun 是一次到点决策；skipped 表示上次未结束，paused 表示权限失效。
@@ -127,19 +157,21 @@ type ScheduleRun struct {
 	TaskID int64
 }
 
-const scheduleColumns = `id,message,work_dir,request,spec,status,next_run,last_task,reason`
+const scheduleColumns = `id,message,work_dir,request,spec,status,next_run,last_task,reason,requires_execution,delivery`
 
 func scanSchedule(row interface{ Scan(...any) error }) (Schedule, error) {
 	var s Schedule
 	var msg, req, spec []byte
 	var next int64
-	err := row.Scan(&s.ID, &msg, &s.WorkDir, &req, &spec, &s.Status, &next, &s.LastTask, &s.Reason)
+	var requires int
+	err := row.Scan(&s.ID, &msg, &s.WorkDir, &req, &spec, &s.Status, &next, &s.LastTask, &s.Reason, &requires, &s.Delivery)
 	if err != nil {
 		return s, err
 	}
 	if next != 0 {
 		s.NextRun = time.UnixMilli(next)
 	}
+	s.RequiresExecution = requires != 0
 	return s, errors.Join(json.Unmarshal(msg, &s.Message), json.Unmarshal(req, &s.Request), json.Unmarshal(spec, &s.Spec))
 }
 
@@ -151,7 +183,8 @@ func (m *Manager) authorizeSchedule(s Schedule) error {
 }
 
 // CreateSchedule 使用真实来源去重；同一消息最多创建一个计划，重试不会复活已删除计划。
-func (m *Manager) CreateSchedule(ctx context.Context, msg chat.Message, dir string, req agent.Request, spec ScheduleSpec) (Schedule, error) {
+// 未提供选项时保持旧行为：要求执行授权并按原消息回复。
+func (m *Manager) CreateSchedule(ctx context.Context, msg chat.Message, dir string, req agent.Request, spec ScheduleSpec, opts ...ScheduleOption) (Schedule, error) {
 	m.scheduleMu.Lock()
 	defer m.scheduleMu.Unlock()
 	if err := msg.Validate(); err != nil {
@@ -170,13 +203,23 @@ func (m *Manager) CreateSchedule(ctx context.Context, msg chat.Message, dir stri
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Schedule{}, err
 	}
-	dir, err = canonicalDir(dir)
-	if err != nil {
+	s := Schedule{Message: msg, WorkDir: dir, Request: req, Spec: spec, RequiresExecution: true, Delivery: "origin"}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&s)
+		}
+	}
+	if s.Delivery, err = normalizeScheduleDelivery(s.Delivery); err != nil {
 		return Schedule{}, err
 	}
-	s := Schedule{Message: msg, WorkDir: dir, Request: req, Spec: spec}
-	if err := m.authorizeSchedule(s); err != nil {
+	if s.WorkDir, err = canonicalDir(s.WorkDir); err != nil {
 		return Schedule{}, err
+	}
+	// 纯聊天计划不申请执行授权；能跳过授权的前提是创建时已经冻结了工具集合结论。
+	if s.RequiresExecution {
+		if err := m.authorizeSchedule(s); err != nil {
+			return Schedule{}, err
+		}
 	}
 	next, err := spec.next(time.Now())
 	if err != nil {
@@ -197,7 +240,7 @@ func (m *Manager) CreateSchedule(ctx context.Context, msg chat.Message, dir stri
 	if err != nil {
 		return Schedule{}, err
 	}
-	result, err := m.store.db.ExecContext(ctx, `INSERT INTO schedules(platform,account,room,event,message,work_dir,request,spec,next_run) VALUES(?,?,?,?,?,?,?,?,?)`, msg.Session.Platform, msg.Session.Account, msg.Session.Conversation, msg.ID, data, dir, requestData, specData, next.UnixMilli())
+	result, err := m.store.db.ExecContext(ctx, `INSERT INTO schedules(platform,account,room,event,message,work_dir,request,spec,next_run,requires_execution,delivery) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, msg.Session.Platform, msg.Session.Account, msg.Session.Conversation, msg.ID, data, s.WorkDir, requestData, specData, next.UnixMilli(), s.RequiresExecution, s.Delivery)
 	if err != nil {
 		return Schedule{}, err
 	}
@@ -316,8 +359,11 @@ func (m *Manager) fireSchedule(ctx context.Context, s Schedule, now time.Time) (
 	} else {
 		nextMillis = next.UnixMilli()
 	}
-	if authErr := m.authorizeSchedule(s); authErr != nil {
-		status, outcome, detail = "paused", "paused", authErr.Error()
+	// 纯聊天计划创建时已冻结为不需要执行授权，到点也不复查授权。
+	if s.RequiresExecution {
+		if authErr := m.authorizeSchedule(s); authErr != nil {
+			status, outcome, detail = "paused", "paused", authErr.Error()
+		}
 	}
 	tx, err := m.store.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -350,7 +396,7 @@ func (m *Manager) fireSchedule(ctx context.Context, s Schedule, now time.Time) (
 		}
 		// SQL 去重键区分每次发生，消息快照仍保留真实原事件供引用及文件投递。
 		event := fmt.Sprintf("saber-schedule:%d:%d", s.ID, s.NextRun.UnixMilli())
-		result, insertErr := tx.ExecContext(ctx, `INSERT INTO tasks(platform,account,room,event,sender,work_dir,message,request,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, s.Message.Session.Platform, s.Message.Session.Account, s.Message.Session.Conversation, event, s.Message.SenderID, s.WorkDir, msg, req, now.UnixMilli())
+		result, insertErr := tx.ExecContext(ctx, `INSERT INTO tasks(platform,account,room,event,sender,work_dir,message,request,created_at,silent) VALUES(?,?,?,?,?,?,?,?,?,?)`, s.Message.Session.Platform, s.Message.Session.Account, s.Message.Session.Conversation, event, s.Message.SenderID, s.WorkDir, msg, req, now.UnixMilli(), s.Delivery == "silent")
 		if insertErr != nil {
 			return insertErr
 		}
@@ -369,22 +415,36 @@ func (m *Manager) fireSchedule(ctx context.Context, s Schedule, now time.Time) (
 	return tx.Commit()
 }
 
+// ScheduleForTask 返回由该任务到点生成的计划；非计划任务返回 ok=false。
+//
+// 只读取持久化记录，不复查授权：调用方按计划的 RequiresExecution 决定是否要求执行授权。
+func (m *Manager) ScheduleForTask(ctx context.Context, taskID int64) (Schedule, bool, error) {
+	s, err := scanSchedule(m.store.db.QueryRowContext(ctx, `SELECT `+scheduleColumns+` FROM schedules WHERE id=(SELECT schedule_id FROM schedule_runs WHERE task_id=?)`, taskID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Schedule{}, false, nil
+	}
+	if err != nil {
+		return Schedule{}, false, err
+	}
+	return s, true, nil
+}
+
 func (m *Manager) checkScheduledTask(ctx context.Context, t Task) (bool, error) {
 	m.scheduleMu.Lock()
 	defer m.scheduleMu.Unlock()
-	s, err := scanSchedule(m.store.db.QueryRowContext(ctx, `SELECT `+scheduleColumns+` FROM schedules WHERE id=(SELECT schedule_id FROM schedule_runs WHERE task_id=?)`, t.ID))
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
+	s, scheduled, err := m.ScheduleForTask(ctx, t.ID)
+	if err != nil || !scheduled {
 		return false, err
 	}
 	if s.Status == "paused" || s.Status == "deleted" {
 		return true, fmt.Errorf("计划 #%d 已%s，停止排队执行", s.ID, s.Status)
 	}
-	if err = m.authorizeSchedule(s); err != nil {
-		_, saveErr := m.store.db.ExecContext(ctx, `UPDATE schedules SET status='paused',reason=? WHERE id=?`, err.Error(), s.ID)
-		return true, errors.Join(err, saveErr)
+	// 纯聊天计划不持有执行授权，排队进入执行前同样不复查；运行时另行裁剪工具集合。
+	if s.RequiresExecution {
+		if err = m.authorizeSchedule(s); err != nil {
+			_, saveErr := m.store.db.ExecContext(ctx, `UPDATE schedules SET status='paused',reason=? WHERE id=?`, err.Error(), s.ID)
+			return true, errors.Join(err, saveErr)
+		}
 	}
 	return true, nil
 }

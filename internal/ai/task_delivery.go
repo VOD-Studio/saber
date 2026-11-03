@@ -15,6 +15,11 @@ import (
 )
 
 func (s *Service) deliverTask(ctx context.Context, adapter chat.Adapter, t task.Task) (string, error) {
+	// 静默计划不向聊天投递：结果已完整落库，直接按成功记录，既不发正文也不发文件，
+	// 从而不会因为“没发出去”进入无限重试。
+	if t.Silent {
+		return "", nil
+	}
 	messageID, err := s.tasks.DeliverPart(ctx, t.ID, "result", func(context.Context) ([]byte, error) { return nil, nil }, func(ctx context.Context, _ []byte) (string, error) {
 		text := task.Report(t)
 		if t.Status == "completed" {
