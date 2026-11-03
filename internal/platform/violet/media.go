@@ -3,6 +3,7 @@ package violetplatform
 import (
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 )
@@ -24,6 +25,18 @@ func encodeImageAsDataURL(data []byte, mimeType string) string {
 	}
 	encoded := base64.StdEncoding.EncodeToString(data)
 	return fmt.Sprintf("data:%s;base64,%s", mimeType, encoded)
+}
+
+// sniffImageMIME 按字节魔数识别图片 MIME，只接受 image/* 结果。
+//
+// 自定义表情快照只给 URL 不给 mime_type，靠扩展名猜会把 webp/png 当 jpeg；
+// 识别不出图片时返回空串，由调用方跳过，避免把 HTML 错误页当成图片投给模型。
+func sniffImageMIME(data []byte) string {
+	detected := http.DetectContentType(data)
+	if !strings.HasPrefix(detected, "image/") {
+		return ""
+	}
+	return detected
 }
 
 // resolveMediaURL 把消息内的 media.url 解析为可下载的绝对 URL。

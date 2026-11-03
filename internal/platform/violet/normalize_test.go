@@ -54,6 +54,33 @@ func TestMentionsUser(t *testing.T) {
 	}
 }
 
+// TestReferencedCustomEmotes 验证只认快照登记过的表情 token，并按正文顺序去重。
+//
+// 正则形状也会出现在普通正文里；没有 custom_emote 快照就没有可下载的图，
+// 不能把用户正文当成表情处理。
+func TestReferencedCustomEmotes(t *testing.T) {
+	t.Parallel()
+	emotes := map[string]customEmoteDTO{
+		"[cat:2f]":  {URL: "/uploads/emojis/cat.jpg", CustomEmojiID: "2f"},
+		"[dog:3a]":  {URL: "/uploads/emojis/dog.jpg", CustomEmojiID: "3a"},
+		"[fish:4b]": {URL: "/uploads/emojis/fish.jpg", CustomEmojiID: "4b"},
+	}
+	content := "看[cat:2f]和[dog:3a]，还有[cat:2f]，以及未登记的[ghost:9c]"
+	refs := referencedCustomEmotes(content, emotes)
+	if len(refs) != 2 || refs[0].token != "[cat:2f]" || refs[1].token != "[dog:3a]" {
+		t.Fatalf("引用识别不符: %+v", refs)
+	}
+	if got := stripCustomEmotes(content, refs); got != "看和，还有，以及未登记的[ghost:9c]" {
+		t.Fatalf("剥离结果 = %q", got)
+	}
+	if refs := referencedCustomEmotes(content, nil); refs != nil {
+		t.Fatalf("无快照时不该产生引用: %+v", refs)
+	}
+	if got := stripCustomEmotes("普通正文", nil); got != "普通正文" {
+		t.Fatalf("无引用时正文被改动: %q", got)
+	}
+}
+
 // TestMentionResidue 验证「只 @ 不提问」能被识别成空内容。
 func TestMentionResidue(t *testing.T) {
 	t.Parallel()

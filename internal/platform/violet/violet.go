@@ -444,7 +444,12 @@ func (p *Platform) normalizeMessage(ctx context.Context, item inbound) (chat.Mes
 	if !isCommand && addressed && strings.HasPrefix(body, "//") {
 		text = body
 	}
-	if text == "" {
+	// 自定义表情在正文里只是一个 [name:id] token：剥掉 token 把图片作为附件投递，
+	// 否则模型只能读到一串 UUID，等于看不见用户发的那张图。
+	emotes := referencedCustomEmotes(message.Content, message.CustomEmote)
+	text = stripCustomEmotes(text, emotes)
+	attachments := p.customEmoteAttachments(ctx, message.ID, emotes)
+	if text == "" && len(attachments) == 0 {
 		slog.Debug("violet 消息剥离后为空，跳过", "message", message.ID)
 		return chat.Message{}, false
 	}
@@ -459,11 +464,12 @@ func (p *Platform) normalizeMessage(ctx context.Context, item inbound) (chat.Mes
 			Account:      p.adapter.account,
 			Conversation: item.conversationID,
 		},
-		ID:       message.ID,
-		SenderID: message.Sender.ID,
-		Direct:   p.states.get(item.conversationID).storedKind() == kindDirect,
-		Text:     text,
-		ReplyTo:  replyTo,
+		ID:          message.ID,
+		SenderID:    message.Sender.ID,
+		Direct:      p.states.get(item.conversationID).storedKind() == kindDirect,
+		Text:        text,
+		Attachments: attachments,
+		ReplyTo:     replyTo,
 	}, true
 }
 
@@ -491,22 +497,13 @@ func (p *Platform) normalizeImageMessage(ctx context.Context, item inbound, botU
 	}
 	attachments := make([]chat.Attachment, 0, len(message.Media))
 	for _, media := range message.Media {
-		resolved, err := resolveMediaURL(p.violet.Endpoint, media.URL)
-		if err != nil {
-			slog.Warn("violet 图片地址不可用，跳过该图", "message", message.ID, "media_id", media.ID, "error", err)
-			continue
+		if attachment, ok := p.fetchImageAttachment(ctx, message.ID, media.ID, media.URL, media.MIMEType); ok {
+			attachments = append(attachments, attachment)
 		}
-		data, err := p.api.downloadMedia(ctx, resolved)
-		if err != nil {
-			slog.Warn("下载 violet 图片失败，跳过该图", "message", message.ID, "media_id", media.ID, "error", err)
-			continue
-		}
-		attachments = append(attachments, chat.Attachment{
-			Kind:     "image",
-			Name:     media.ID,
-			MIMEType: media.MIMEType,
-			URL:      encodeImageAsDataURL(data, media.MIMEType),
-		})
+	}
+	if emotes := referencedCustomEmotes(message.Content, message.CustomEmote); len(emotes) > 0 {
+		caption = stripCustomEmotes(caption, emotes)
+		attachments = append(attachments, p.customEmoteAttachments(ctx, message.ID, emotes)...)
 	}
 	if len(attachments) == 0 && caption == "" {
 		slog.Debug("violet 图片消息全部下载失败且无 caption，跳过", "message", message.ID)
@@ -528,6 +525,51 @@ func (p *Platform) normalizeImageMessage(ctx context.Context, item inbound, botU
 		Text:        stripMentions(caption),
 		Attachments: attachments,
 		ReplyTo:     replyTo,
+	}, true
+}
+
+// customEmoteAttachments 下载正文引用的自定义表情图片，按引用顺序返回可用附件。
+//
+// 单张下载失败只跳过该张：表情是句子的修饰，不该让整条消息投递失败。
+func (p *Platform) customEmoteAttachments(ctx context.Context, messageID string, refs []customEmoteRef) []chat.Attachment {
+	if len(refs) == 0 {
+		return nil
+	}
+	attachments := make([]chat.Attachment, 0, len(refs))
+	for _, ref := range refs {
+		// 表情快照不带 mime_type，靠字节魔数识别，由 fetchImageAttachment 兜底。
+		if attachment, ok := p.fetchImageAttachment(ctx, messageID, ref.emote.CustomEmojiID, ref.emote.URL, ""); ok {
+			attachments = append(attachments, attachment)
+		}
+	}
+	return attachments
+}
+
+// fetchImageAttachment 下载一张站内图片并转成 data URL 附件；失败时记日志并放弃。
+//
+// mimeType 为空时按字节魔数推断，供不带 mime_type 的自定义表情使用。
+func (p *Platform) fetchImageAttachment(ctx context.Context, messageID, mediaID, rawURL, mimeType string) (chat.Attachment, bool) {
+	resolved, err := resolveMediaURL(p.violet.Endpoint, rawURL)
+	if err != nil {
+		slog.Warn("violet 图片地址不可用，跳过该图", "message", messageID, "media_id", mediaID, "error", err)
+		return chat.Attachment{}, false
+	}
+	data, err := p.api.downloadMedia(ctx, resolved)
+	if err != nil {
+		slog.Warn("下载 violet 图片失败，跳过该图", "message", messageID, "media_id", mediaID, "error", err)
+		return chat.Attachment{}, false
+	}
+	if mimeType == "" {
+		if mimeType = sniffImageMIME(data); mimeType == "" {
+			slog.Warn("violet 图片类型无法识别，跳过该图", "message", messageID, "media_id", mediaID)
+			return chat.Attachment{}, false
+		}
+	}
+	return chat.Attachment{
+		Kind:     "image",
+		Name:     mediaID,
+		MIMEType: mimeType,
+		URL:      encodeImageAsDataURL(data, mimeType),
 	}, true
 }
 

@@ -662,5 +662,75 @@ func TestPlatform_InboundImageDownloadFailure(t *testing.T) {
 	}
 }
 
+// TestPlatform_InboundCustomEmote 验证正文里的自定义表情 token 被剥离，
+// 表情图片作为图片附件随消息投递：token 只有 UUID，模型看不到图就答不了「这是谁」。
+func TestPlatform_InboundCustomEmote(t *testing.T) {
+	t.Parallel()
+	fake := newFakeViolet(t)
+	// JPEG 魔数足以让 MIME 嗅探识别成 image/jpeg；表情快照本身不带 mime_type。
+	fake.addUploadedImage("emojis/who.jpg", "image/jpeg", []byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00"))
+	handler := newRecordingHandler()
+	startTestPlatform(t, fake, handler)
+	const token = "[ac4648d6-6d8c-4678-a23c-5313302d9d49:8180be12-9b13-4d3a-b18e-edf7a149a1e4]"
+	msg := fake.pushMessage(testDirectRoom, "user-1", "alice", "这是谁"+token, time.Now())
+	msg.CustomEmote = map[string]customEmoteDTO{token: {URL: "/uploads/emojis/who.jpg", CustomEmojiID: "8180be12-9b13-4d3a-b18e-edf7a149a1e4"}}
+	fake.pushEvent(msg)
+	got := handler.waitForMessage(t, 0)
+	if got.Text != "这是谁" {
+		t.Fatalf("表情 token 未剥离: %q", got.Text)
+	}
+	if len(got.Attachments) != 1 {
+		t.Fatalf("附件数 = %d, want 1", len(got.Attachments))
+	}
+	att := got.Attachments[0]
+	if att.Kind != "image" || att.MIMEType != "image/jpeg" {
+		t.Fatalf("附件形态不符: %+v", att)
+	}
+	if !strings.HasPrefix(att.URL, "data:image/jpeg;base64,") {
+		t.Fatalf("附件不是 data URL: %q", att.URL[:min(40, len(att.URL))])
+	}
+}
+
+// TestPlatform_InboundCustomEmoteOnly 验证只发表情的消息照常投递：
+// 剥离 token 后正文为空，但附件非空即视为有内容。
+func TestPlatform_InboundCustomEmoteOnly(t *testing.T) {
+	t.Parallel()
+	fake := newFakeViolet(t)
+	fake.addUploadedImage("emojis/only.png", "image/png", []byte("\x89PNG\r\n\x1a\nbytes"))
+	handler := newRecordingHandler()
+	startTestPlatform(t, fake, handler)
+	const token = "[only:9f]"
+	msg := fake.pushMessage(testDirectRoom, "user-1", "alice", token, time.Now())
+	msg.CustomEmote = map[string]customEmoteDTO{token: {URL: "/uploads/emojis/only.png", CustomEmojiID: "9f"}}
+	fake.pushEvent(msg)
+	got := handler.waitForMessage(t, 0)
+	if got.Text != "" {
+		t.Fatalf("纯表情剥离后应为空，got %q", got.Text)
+	}
+	if len(got.Attachments) != 1 || got.Attachments[0].MIMEType != "image/png" {
+		t.Fatalf("附件不符: %+v", got.Attachments)
+	}
+}
+
+// TestPlatform_InboundCustomEmoteDownloadFailure 验证表情图下载失败只丢附件：
+// token 仍被剥离，正文照常投递，不会因为一张表情让整条消息消失。
+func TestPlatform_InboundCustomEmoteDownloadFailure(t *testing.T) {
+	t.Parallel()
+	fake := newFakeViolet(t)
+	handler := newRecordingHandler()
+	startTestPlatform(t, fake, handler)
+	const token = "[gone:7c]"
+	msg := fake.pushMessage(testDirectRoom, "user-1", "alice", "这是谁"+token, time.Now())
+	msg.CustomEmote = map[string]customEmoteDTO{token: {URL: "/uploads/emojis/gone.jpg", CustomEmojiID: "7c"}}
+	fake.pushEvent(msg)
+	got := handler.waitForMessage(t, 0)
+	if got.Text != "这是谁" {
+		t.Fatalf("token 未剥离: %q", got.Text)
+	}
+	if len(got.Attachments) != 0 {
+		t.Fatalf("下载失败不该留下附件: %+v", got.Attachments)
+	}
+}
+
 // ptrInt 返回 int 的指针，用于 messageMediaDTO 的可选宽高字段。
 func ptrInt(v int) *int { return &v }

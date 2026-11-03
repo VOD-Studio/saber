@@ -43,6 +43,15 @@ type messageDTO struct {
 	CreatedAt      string         `json:"created_at"`
 	// Media 是图片消息携带的媒体定位信息，文本消息为空。
 	Media []messageMediaDTO `json:"media,omitempty"`
+	// CustomEmote 是正文内联自定义表情的快照，键为正文里出现的 [name:id] token。
+	CustomEmote map[string]customEmoteDTO `json:"custom_emote,omitempty"`
+}
+
+// customEmoteDTO 是自定义表情的定位信息：正文只留 token，图片要靠这个 URL 下载。
+type customEmoteDTO struct {
+	URL           string `json:"url"`
+	CustomEmojiID string `json:"custom_emoji_id"`
+	Relation      string `json:"relation"`
 }
 
 // messageMediaDTO 是消息内嵌的媒体快照，URL 供 saber 侧入站下载。

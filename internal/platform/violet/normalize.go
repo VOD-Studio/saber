@@ -52,6 +52,56 @@ func stripImagePlaceholders(content string) string {
 	return inlineImagePlaceholderPattern.ReplaceAllString(content, "")
 }
 
+// customEmoteTokenPattern 匹配正文里的自定义表情 token [name:custom_emoji_id]。
+//
+// 名字与 ID 都不含方括号与冒号，与 Violet 前端生成 token 的规则一致。
+var customEmoteTokenPattern = regexp.MustCompile(`\[[^\[\]:]+:[^\[\]:]+\]`)
+
+// customEmoteRef 是一次正文引用：token 用于剥离，快照用于下载图片。
+type customEmoteRef struct {
+	token string
+	emote customEmoteDTO
+}
+
+// referencedCustomEmotes 按正文出现顺序返回被引用的自定义表情，重复引用只保留一次。
+//
+// 只认快照里确实登记过的 token：正则形状可能出现在用户正文里（例如引用一段日志），
+// 没有快照就没有可下载的图，不该被当成表情处理。
+func referencedCustomEmotes(content string, emotes map[string]customEmoteDTO) []customEmoteRef {
+	if len(emotes) == 0 {
+		return nil
+	}
+	var refs []customEmoteRef
+	seen := make(map[string]struct{}, len(emotes))
+	for _, token := range customEmoteTokenPattern.FindAllString(content, -1) {
+		emote, ok := emotes[token]
+		if !ok {
+			continue
+		}
+		if _, dup := seen[token]; dup {
+			continue
+		}
+		seen[token] = struct{}{}
+		refs = append(refs, customEmoteRef{token: token, emote: emote})
+	}
+	return refs
+}
+
+// stripCustomEmotes 剥离正文里的自定义表情 token。
+//
+// 表情图片已经作为附件投递，token 里的 ID 对模型是纯噪声；只删快照里登记过的
+// token，避免误删用户正文里同形态的方括号。
+func stripCustomEmotes(content string, refs []customEmoteRef) string {
+	if len(refs) == 0 {
+		return content
+	}
+	replacements := make([]string, 0, len(refs)*2)
+	for _, ref := range refs {
+		replacements = append(replacements, ref.token, "")
+	}
+	return strings.NewReplacer(replacements...).Replace(content)
+}
+
 // stripMentions 剥离提及 token 里的 ID 部分。
 //
 // Violet 把 @(name:uuid) 原样留在正文里，uuid 对模型是纯噪声，
