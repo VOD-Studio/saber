@@ -199,3 +199,27 @@ func TestParseBudgetDecision(t *testing.T) {
 	_, err = ParseBudgetDecision("not json")
 	require.Error(t, err)
 }
+
+func TestRuntime_UnlimitedTotalTokensSkipsLedger(t *testing.T) {
+	calls := 0
+	runtime := Runtime{
+		Limits: Limits{MaxRounds: 3, Timeout: 5 * time.Second, MaxToolOutputBytes: 1024},
+		Model: func(ctx context.Context, _ Request, _ func(Event)) (Response, error) {
+			if _, gated := AttemptGateFromContext(ctx); gated {
+				t.Error("max_total_tokens: 0 must not attach an attempt gate")
+			}
+			calls++
+			if calls == 3 {
+				return Response{FinishReason: "stop", Content: "done", Usage: openai.Usage{TotalTokens: 1000}}, nil
+			}
+			return Response{FinishReason: "tool_calls", Usage: openai.Usage{TotalTokens: 1000}, ToolCalls: []openai.ToolCall{{ID: fmt.Sprintf("call-%d", calls), Type: openai.ToolTypeFunction, Function: openai.FunctionCall{Name: "echo", Arguments: `{}`}}}}, nil
+		},
+		Execute: func(context.Context, string, map[string]any) (ToolOutput, error) { return ToolOutput{Value: "ok"}, nil },
+	}
+	result, err := runtime.Run(context.Background(), budgetRequest(), nil)
+	require.NoError(t, err)
+	require.Equal(t, Completed, result.Status)
+	require.Equal(t, 3, calls)
+	require.Zero(t, result.Budget.AccountedTokens)
+	require.Equal(t, 3000, result.Usage.TotalTokens)
+}

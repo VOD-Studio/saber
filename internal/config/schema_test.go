@@ -72,6 +72,11 @@ func TestAgentConfigValidate(t *testing.T) {
 			t.Fatalf("invalid limits accepted: %+v", cfg)
 		}
 	}
+	unlimited := DefaultAgentConfig()
+	unlimited.Budget.MaxTotalTokens = 0
+	if err := unlimited.Validate(); err != nil {
+		t.Fatalf("max_total_tokens: 0 must mean unlimited: %v", err)
+	}
 }
 
 func TestModelZeroTemperatureInheritance(t *testing.T) {

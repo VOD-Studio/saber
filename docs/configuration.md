@@ -63,7 +63,7 @@ agent:
     enabled: true
     initial_rounds: 0 # 0 = min(5, max_rounds)
     extension_rounds: 5
-    max_total_tokens: 200000
+    max_total_tokens: 200000 # 0 表示不设上限
   context:
     enabled: true
     max_messages: 50
@@ -94,7 +94,7 @@ agent:
 
 `max_rounds` 是硬上限，包含最终回答；默认 40。`timeout_seconds` 覆盖整次任务的模型请求、重试等待与工具执行，不会被预算追加动态延长。`execution.timeout_seconds` 单独限制一次前台执行工具调用。
 
-`budget.enabled` 开启自适应轮数：到达 `initial_rounds`（0 表示 `min(5, max_rounds)`）后，程序先做确定性否决（取消/截止、用量不足、三次同名同参数且实质输出相同），再用主模型做一次无工具评估；只有程序决定才按 `extension_rounds` 追加，封顶 `max_rounds`。`max_total_tokens` 是任务级保守用量上限，覆盖主请求、重试、摘要和评估；`admit` 在真实 HTTP 请求前收紧输出预算（全局 `max_tokens: 0` 时不发送输出上限，只预留输入，实际用量照常记账），无 usage 时按输入/输出字节估算。关闭自适应时仍按 `max_rounds` 固定执行并遵守用量上限。
+`budget.enabled` 开启自适应轮数：到达 `initial_rounds`（0 表示 `min(5, max_rounds)`）后，程序先做确定性否决（取消/截止、用量不足、三次同名同参数且实质输出相同），再用主模型做一次无工具评估；只有程序决定才按 `extension_rounds` 追加，封顶 `max_rounds`。`max_total_tokens` 是任务级保守用量上限，覆盖主请求、重试、摘要和评估，设为 0 表示不设上限（仍受 `max_rounds`、`timeout_seconds` 与单次输出上限约束）；`admit` 在真实 HTTP 请求前收紧输出预算（全局 `max_tokens: 0` 时不发送输出上限，只预留输入，实际用量照常记账），无 usage 时按输入/输出字节估算。关闭自适应时仍按 `max_rounds` 固定执行并遵守用量上限。
 
 `max_rounds > 100` 会提示成本风险，默认 40 不告警。
 

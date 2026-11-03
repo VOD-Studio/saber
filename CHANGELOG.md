@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - 支持不设输出上限：全局 `ai.max_tokens: 0` 时主请求、评估与摘要请求都省略 `max_output_tokens`/`max_tokens`，交由模型或上游默认，避免推理模型的思考 token 被固定上限截断；任务仍按实际用量记账，超过 `agent.budget.max_total_tokens` 后拒绝后续请求。模型级 `max_tokens: 0` 仍表示继承全局。
+- `agent.budget.max_total_tokens: 0` 表示不设任务用量上限：不再创建预算账本，实际用量仍汇总在任务结果中；`max_rounds`、`agent.timeout_seconds` 与单次输出上限继续生效。
 
 ### Fixed
 

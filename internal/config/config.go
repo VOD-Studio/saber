@@ -116,7 +116,7 @@ type BudgetConfig struct {
 	Enabled         bool `yaml:"enabled"`
 	InitialRounds   int  `yaml:"initial_rounds"` // 0 表示 min(5, max_rounds)
 	ExtensionRounds int  `yaml:"extension_rounds"`
-	MaxTotalTokens  int  `yaml:"max_total_tokens"`
+	MaxTotalTokens  int  `yaml:"max_total_tokens"` // 全任务用量上限；0 表示不设上限
 }
 
 // ContextConfig 存储上下文管理配置
@@ -607,8 +607,8 @@ func (a *AgentConfig) Validate() error {
 			return fmt.Errorf("context.compaction requires 0 < target_ratio < trigger_ratio < 1")
 		}
 	}
-	if a.Budget.ExtensionRounds <= 0 || a.Budget.MaxTotalTokens <= 0 {
-		return fmt.Errorf("budget.extension_rounds and budget.max_total_tokens must be positive")
+	if a.Budget.ExtensionRounds <= 0 || a.Budget.MaxTotalTokens < 0 {
+		return fmt.Errorf("budget.extension_rounds must be positive and max_total_tokens non-negative")
 	}
 	if a.Budget.InitialRounds < 0 || a.Budget.InitialRounds > a.MaxIterations {
 		return fmt.Errorf("budget.initial_rounds must be 0 or between 1 and max_rounds")
@@ -989,7 +989,7 @@ agent:
     enabled: true
     initial_rounds: 0 # 0 = min(5, max_rounds)
     extension_rounds: 5 # 每次评估通过后追加
-    max_total_tokens: 200000 # 全任务保守用量上限，包含摘要与评估
+    max_total_tokens: 200000 # 全任务保守用量上限，包含摘要与评估；0 表示不设上限
   context:
     enabled: true
     max_messages: 50
