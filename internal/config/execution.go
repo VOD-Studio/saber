@@ -57,7 +57,9 @@ type ExecutionGrant struct {
 	Workspace string `yaml:"workspace"`
 	// Tools 精确列出工具名或 mcp:服务器:工具。
 	Tools []string `yaml:"tools"`
-	// Capabilities 单独授予 external、publish、deploy 或 cross_directory 能力。
+	// Capabilities 只接受本构建真正检查的能力：MCP 工具调用额外要求 external。
+	// publish、deploy、cross_directory 等未实施的名称会在启动时被拒绝
+	// （capability "..." is not enforced by this build），不会被静默当成已生效的保护。
 	Capabilities []string `yaml:"capabilities"`
 }
 

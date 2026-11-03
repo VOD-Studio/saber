@@ -26,7 +26,7 @@
 
 ## 危险命令绊线
 
-`exec` 与 `process start` 在启动命令前按 `execution.command_guard` 检查命令文本：默认 `block`，命中规则时返回普通工具错误 `命令被安全策略拒绝（命中规则 "<规则>"），未执行`，不回显命令正文或环境变量；`off` 关闭全部检查（含自定义规则）。内置规则（大小写不敏感子串）：`/var/run/docker.sock`、`--privileged`、`--cap-add`、`--pid=host`、`--net=host`、`--userns=host`、`--security-opt`、`/etc/shadow`、`/etc/sudoers`、`/.ssh/`、`/.aws/`、`.git-credentials`、`.netrc`、`:(){`，以及匹配 `rm -rf /` 一类根目录删除的正则（`rm -rf /tmp/x` 不命中）。`execution.command_guard_deny` 可追加最多 64 条 1..256 字节的字面量子串。
+`exec` 与 `process start` 两个入口都会在打开任何执行环境、创建任何进程之前，按 `execution.command_guard` 检查命令文本：默认 `block`，命中规则时返回普通工具错误 `命令被安全策略拒绝（命中规则 "<规则>"），未执行`，不回显命令正文或环境变量；`off` 关闭全部检查（含自定义规则）。内置规则（大小写不敏感子串）：`/var/run/docker.sock`、`--privileged`、`--cap-add`、`--pid=host`、`--net=host`、`--userns=host`、`--security-opt`、`/etc/shadow`、`/etc/sudoers`、`/.ssh/`、`/.aws/`、`.git-credentials`、`.netrc`、`:(){`，以及匹配 `rm -rf /` 一类根目录删除的正则（`rm -rf /tmp/x` 不命中）。`execution.command_guard_deny` 可追加最多 64 条 1..256 字节的字面量子串。
 
 这是防止误操作的绊线，不是沙箱边界：命令经 `sh -c` 执行，引号、变量展开、命令替换或编码都能绕过字符串匹配；`local` 后端本身也不构成隔离。需要真实边界时使用 `backend: docker`，并保持 `room` 与成员授权精确。
 
@@ -68,7 +68,7 @@ execution:
   log_dir: "/srv/saber-private/execution"
   timeout_seconds: 60
   command_guard: block # block（默认）拦截危险命令；off 关闭全部检查，包括自定义规则
-  # command_guard_deny: ["terraform destroy"] # 追加字面量子串，最多 64 条、每条 1..256 字节
+  command_guard_deny: [] # 可选：追加字面量子串，最多 64 条、每条 1..256 字节
   workspaces:
     project:
       path: "/srv/workspaces/project"

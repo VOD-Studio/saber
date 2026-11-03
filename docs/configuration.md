@@ -141,7 +141,7 @@ shutdown:
 
 令牌和任务数据库位于配置文件目录，令牌首次启动自动创建，权限为 `0600`。不同服务实例必须使用独立的数据目录和监听端口。
 
-MCP 默认关闭，不加载内置或外部服务器。开启后还必须通过 `execution` 配置当前身份的工作区、工具列表、`mcp_requirements` 和所需能力。只把 `mcp.enabled` 改为 true 不代表工具已授权；本地 TUI 也不自动获得权限。本构建只实施 `external` 能力：`publish`、`deploy`、`cross_directory` 会在启动时被拒绝，`local` 后端也不接受 `room: "*"` 或成员 `"*"` 的通配授权。具体配置见 [执行与 MCP 授权](execution.md)。
+MCP 默认关闭，不加载内置或外部服务器。开启后还必须通过 `execution` 配置当前身份的工作区、工具列表、`mcp_requirements` 和所需能力。只把 `mcp.enabled` 改为 true 不代表工具已授权；本地 TUI 也不自动获得权限。本构建只实施 `external` 能力：`publish`、`deploy`、`cross_directory` 会在启动时被拒绝，`local` 后端也不接受 `room: "*"` 或成员 `"*"` 的通配授权。执行工具另有危险命令绊线：`execution.command_guard` 默认 `block`（`off` 关闭全部检查），`execution.command_guard_deny` 默认空，用于追加最多 64 条字面量子串；它拦截 `exec` 与 `process start`，但只防误操作，不是沙箱边界。具体配置见 [执行与 MCP 授权](execution.md)。
 
 ## 长期记忆
 
