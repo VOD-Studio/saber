@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-03
+
 ### Added
 
 - P0 单 Agent 长任务能力：持久任务状态（原始指令、计划、发现、产物、未决问题）与运行内上下文压缩；压缩按完整模型批次提交检查点，失败不删除历史；续接从检查点水位恢复。`agent.max_rounds` 默认 40，新增 `agent.budget` 自动评估追加轮数并以 `max_total_tokens` 封顶。
@@ -489,7 +491,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 结构化日志
 - 基础命令系统（`!ping`, `!help`）
 
-[Unreleased]: https://github.com/VOD-Studio/saber/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/VOD-Studio/saber/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/VOD-Studio/saber/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/VOD-Studio/saber/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/VOD-Studio/saber/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/VOD-Studio/saber/compare/v0.1.0...v0.2.0
