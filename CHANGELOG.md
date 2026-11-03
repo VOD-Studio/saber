@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- 软限评估只看到工作状态和已完成轮次的工具结果：模型没有用 `saber_task_state` 记录计划时，第 5 轮（默认软限）就会被判成「无计划、无发现，仅有环境探测结果」而终止，即使它刚请求了下一步工具调用；任务链的原始用户指令也从未进入评估输入。现在评估输入包含逐字原始指令（按 2048 字节保留最近的）、最近轮次的助手文本，以及当前轮刚请求、尚未执行的工具调用（`BudgetProgress.Recent` 的最后一项），提示词同时说明「工作状态为空不等于没有进展」。
 - 预算账本此前混用两种单位：预留按序列化字节扣减 `max_total_tokens`，记账在提供商返回 usage 时又按真实 token 累加，同一个整数里既有字节又有 token，长任务会在不可预期的位置提前耗尽。现在账本只保留 token 单位，预留与记账共用同一估算器；实际消耗超过预留时完整计入，只让后续请求失败。嵌套运行（子代理）不再替换 ctx 中的父账本，而是保留自己的上限并把每笔消耗上推父账本，父账本余额同时限制子运行的准入——此前每个子运行都有独立的 `max_total_tokens`，总开销随子运行数量成倍放大且父任务完全看不到。`BudgetStats` 新增 `main_usage`/`aux_usage` 拆分，`Result.Usage` 只表示主请求用量，任务状态里的「用量」补上 token 单位。
 - 预算评估与摘要请求的输出上限原本固定为 512/1024 token，而推理模型的思考 token 同样计入 `max_output_tokens`（Responses）或 completion tokens，思考一旦超过上限，上游就以 `incomplete: max_output_tokens` 截断；评估失败随后被当成「轮数预算耗尽」终止任务，用户只能看到底层模型错误，前半段回复也没有任何实际动作。现在两类辅助请求沿用模型自身的 `max_tokens`，时限沿用请求超时，并遵守 `agent.retry` 的瞬时错误重试，一次 5xx 不再直接判死整次任务。
 

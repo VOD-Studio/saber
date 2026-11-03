@@ -223,3 +223,38 @@ func TestRuntime_UnlimitedTotalTokensSkipsLedger(t *testing.T) {
 	require.Zero(t, result.Budget.AccountedTokens)
 	require.Equal(t, 3000, result.Usage.TotalTokens)
 }
+
+// TestRuntime_EvaluatorSeesCurrentIntent 验证评估器收到最新轮次的模型文本与刚请求的工具调用。
+// 本轮调用尚未执行，评估器仍须据此判断是否存在下一步，否则未记录状态的任务会被误判为停滞。
+func TestRuntime_EvaluatorSeesCurrentIntent(t *testing.T) {
+	calls := 0
+	var progress []BudgetProgress
+	runtime := Runtime{
+		Limits: Limits{MaxRounds: 3, InitialRounds: 1, ExtensionRounds: 1, Timeout: 5 * time.Second, MaxToolOutputBytes: 1024},
+		Model: func(_ context.Context, _ Request, _ func(Event)) (Response, error) {
+			calls++
+			return Response{FinishReason: "tool_calls", Content: fmt.Sprintf("步骤 %d", calls), ToolCalls: []openai.ToolCall{{
+				ID: fmt.Sprintf("call-%d", calls), Type: openai.ToolTypeFunction, Function: openai.FunctionCall{Name: "echo", Arguments: `{"n":1}`},
+			}}}, nil
+		},
+		Execute: func(context.Context, string, map[string]any) (ToolOutput, error) { return ToolOutput{Value: "ok"}, nil },
+		Evaluate: func(_ context.Context, current BudgetProgress) (BudgetDecision, error) {
+			progress = append(progress, current)
+			return BudgetDecision{Continue: true, Reason: "还有下一步"}, nil
+		},
+	}
+	_, err := runtime.Run(context.Background(), budgetRequest(), nil)
+	require.ErrorIs(t, err, ErrBudgetExhausted)
+	require.Len(t, progress, 2)
+	// 第一次评估：只有当前轮请求，工具尚未执行。
+	require.Len(t, progress[0].Recent, 1)
+	require.Empty(t, progress[0].Recent[0].Tools)
+	require.Equal(t, "步骤 1", progress[0].Recent[0].Response.Content)
+	require.Len(t, progress[0].Recent[0].Response.ToolCalls, 1)
+	// 第二次评估：已完成的第一轮带工具结果，最后一轮是刚请求的下一步。
+	require.Len(t, progress[1].Recent, 2)
+	require.Len(t, progress[1].Recent[0].Tools, 1)
+	require.JSONEq(t, `"ok"`, progress[1].Recent[0].Tools[0].Content)
+	require.Len(t, progress[1].Recent[1].Response.ToolCalls, 1)
+	require.Empty(t, progress[1].Recent[1].Tools)
+}

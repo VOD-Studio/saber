@@ -220,7 +220,12 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 			if len(completed) > 0 {
 				completed = completed[:len(completed)-1]
 			}
-			progress.Recent = completed[max(0, len(completed)-3):]
+			// 最近三轮已完成轨迹之后追加当前轮：本轮只带着模型刚请求的工具调用，
+			// 结果尚未产生。评估器需要它判断「下一步」是否存在，不能把未执行的调用当成停滞。
+			recent := completed[max(0, len(completed)-3):]
+			progress.Recent = append(append([]Round(nil), recent...), Round{Response: Response{
+				Content: response.Content, ToolCalls: response.ToolCalls,
+			}})
 			if led != nil {
 				progress.AccountedTokens = led.accountedTokens()
 			}
