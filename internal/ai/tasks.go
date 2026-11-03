@@ -98,6 +98,7 @@ func (s *Service) EnableTasks(path string) error {
 		Schedule:            s.authorizeSchedule,
 		Manage:              func(identity chat.Identity) bool { return s.executor != nil && s.executor.IsTaskAdmin(identity) },
 		OnProjection: func() {
+			<-ready
 			if s.memory != nil {
 				_ = s.syncHistoryProjections(context.Background())
 				s.triggerBackgroundReview()
