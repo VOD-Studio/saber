@@ -122,9 +122,10 @@ func TestAugmentMemory_InjectsSkillCatalog(t *testing.T) {
 	// 原请求不应被修改
 	require.Len(t, req.Messages, 1)
 
-	// 增强后的请求应注入技能目录
-	require.Len(t, got.Messages, 2)
-	snapContent := got.Messages[1].Content
+	// 增强后的请求把技能目录放在运行时资料中，不写入持久化 Messages。
+	require.Len(t, got.Messages, 1)
+	require.Len(t, got.RuntimeContext, 1)
+	snapContent := got.RuntimeContext[0].Content
 	require.Contains(t, snapContent, "【可用技能目录")
 	require.Contains(t, snapContent, "- rebase-flow: Git 变基与排错流程 (v1)")
 	require.Contains(t, snapContent, "【技能目录结束】")

@@ -32,9 +32,10 @@ func (s *Service) runAgent(ctx context.Context, req agent.Request, emit func(age
 		return s.getClient(model)
 	}
 	runtime := agent.Runtime{
-		Context: s.contextPolicy(),
-		Limits:  agent.Limits{MaxRounds: s.config.Agent.MaxIterations, Timeout: time.Duration(s.config.Agent.TimeoutSeconds) * time.Second, MaxToolOutputBytes: s.config.Agent.MaxToolOutputBytes},
-		Model:   model.AgentModel(getClient, retry),
+		Context:   s.contextPolicy(),
+		Summarize: s.summarizer(req.Model),
+		Limits:    agent.Limits{MaxRounds: s.config.Agent.MaxIterations, Timeout: time.Duration(s.config.Agent.TimeoutSeconds) * time.Second, MaxToolOutputBytes: s.config.Agent.MaxToolOutputBytes},
+		Model:     model.AgentModel(getClient, retry),
 		Execute: func(ctx context.Context, name string, args map[string]any) (agent.ToolOutput, error) {
 			value, err := s.toolExecutor.ExecuteToolCall(ctx, name, args)
 			output := agent.ToolOutput{Value: value}
@@ -54,5 +55,14 @@ func (s *Service) runAgent(ctx context.Context, req agent.Request, emit func(age
 
 func (s *Service) contextPolicy() agent.ContextPolicy {
 	c := s.config.Agent.Context
-	return agent.ContextPolicy{Enabled: c.Enabled, MaxMessages: c.MaxMessages, MaxInputTokens: c.MaxTokens}
+	return agent.ContextPolicy{
+		Enabled:        c.Enabled,
+		MaxMessages:    c.MaxMessages,
+		MaxInputTokens: c.MaxTokens,
+		Compaction: agent.CompactionPolicy{
+			Enabled:      c.Compaction.Enabled,
+			TriggerRatio: c.Compaction.TriggerRatio,
+			TargetRatio:  c.Compaction.TargetRatio,
+		},
+	}
 }

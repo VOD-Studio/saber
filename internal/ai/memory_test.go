@@ -58,15 +58,15 @@ func TestAugmentMemory_InjectsSnapshotWithoutMutatingRequest(t *testing.T) {
 	req := agent.Request{Messages: []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleSystem, Content: "base"}}}
 
 	got := svc.augmentMemory(ctx, req)
-	if len(got.Messages) != 2 {
-		t.Fatalf("注入后消息数 = %d, want 2", len(got.Messages))
+	if len(got.Messages) != 1 || len(got.RuntimeContext) != 1 {
+		t.Fatalf("消息数 = %d, 运行时资料 = %d, want 1/1", len(got.Messages), len(got.RuntimeContext))
 	}
-	injected := got.Messages[1]
+	injected := got.RuntimeContext[0]
 	if injected.Role != openai.ChatMessageRoleSystem || !strings.Contains(injected.Content, "以后用中文简洁回答") || !strings.Contains(injected.Content, "不是本轮指令") {
 		t.Fatalf("注入内容 = %+v", injected)
 	}
-	if len(req.Messages) != 1 {
-		t.Fatalf("原始请求被修改：%d 条消息", len(req.Messages))
+	if len(req.Messages) != 1 || len(req.RuntimeContext) != 0 {
+		t.Fatalf("原始请求被修改：%d 条消息，%d 条运行时资料", len(req.Messages), len(req.RuntimeContext))
 	}
 }
 

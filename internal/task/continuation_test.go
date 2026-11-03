@@ -282,7 +282,7 @@ func TestManager_ContinuationContextBudget(t *testing.T) {
 		require.NoError(t, err)
 		req, err := m.continuationRequest(ctx, child)
 		require.NoError(t, err)
-		require.LessOrEqual(t, len(req.Messages), 3)
+		require.Contains(t, fmt.Sprint(req.Messages), "first question", "原始指令不能被有损裁剪")
 		require.Equal(t, fmt.Sprintf("question-%d", i), req.Messages[len(req.Messages)-1].Content)
 		parent, err = m.Get(ctx, follow.Session, child.ID)
 		require.NoError(t, err)
@@ -295,8 +295,8 @@ func TestManager_ContinuationContextBudget(t *testing.T) {
 	m = &Manager{store: s, ctx: ctx, contextPolicy: agent.ContextPolicy{MaxMessages: 2, MaxInputTokens: 10000}}
 	req, err := m.continuationRequest(ctx, parent)
 	require.NoError(t, err)
-	require.Len(t, req.Messages, 1)
-	require.Equal(t, "question-5", req.Messages[0].Content)
+	require.NotEmpty(t, req.Messages)
+	require.Equal(t, "question-5", req.Messages[len(req.Messages)-1].Content)
 	var count int
 	require.NoError(t, s.db.QueryRow("SELECT count(*) FROM tasks").Scan(&count))
 	require.Equal(t, 7, count)

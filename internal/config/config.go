@@ -112,11 +112,19 @@ type AgentConfig struct {
 
 // ContextConfig 存储上下文管理配置
 type ContextConfig struct {
-	Enabled           bool `yaml:"enabled"`          // 是否启用上下文管理
-	MaxMessages       int  `yaml:"max_messages"`     // 最大保留消息数
-	MaxTokens         int  `yaml:"max_input_tokens"` // 最大 token 数
-	ExpiryMinutes     int  `yaml:"-"`                // 上下文过期时间（分钟）
-	InactiveRoomHours int  `yaml:"-"`                // 不活跃房间清理阈值（小时）
+	Enabled           bool             `yaml:"enabled"`          // 是否启用上下文管理
+	MaxMessages       int              `yaml:"max_messages"`     // 最大保留消息数
+	MaxTokens         int              `yaml:"max_input_tokens"` // 最大 token 数
+	Compaction        CompactionConfig `yaml:"compaction"`       // 运行内上下文压缩
+	ExpiryMinutes     int              `yaml:"-"`                // 上下文过期时间（分钟）
+	InactiveRoomHours int              `yaml:"-"`                // 不活跃房间清理阈值（小时）
+}
+
+// CompactionConfig 控制运行内压缩的软触发与目标水位。
+type CompactionConfig struct {
+	Enabled      bool    `yaml:"enabled"`
+	TriggerRatio float64 `yaml:"trigger_ratio"`
+	TargetRatio  float64 `yaml:"target_ratio"`
 }
 
 // StreamEditConfig 存储 Matrix 专属的流式编辑配置。
@@ -317,6 +325,7 @@ func DefaultContextConfig() ContextConfig {
 		Enabled:           true,
 		MaxMessages:       50,
 		MaxTokens:         32768,
+		Compaction:        CompactionConfig{Enabled: true, TriggerRatio: 0.8, TargetRatio: 0.5},
 		ExpiryMinutes:     0,
 		InactiveRoomHours: 0,
 	}
@@ -576,6 +585,12 @@ func (a *AgentConfig) Validate() error {
 	}
 	if a.Context.MaxMessages < 1 || a.Context.MaxTokens < 1 {
 		return fmt.Errorf("context max_messages and max_input_tokens must be positive")
+	}
+	if a.Context.Compaction.Enabled {
+		trigger, target := a.Context.Compaction.TriggerRatio, a.Context.Compaction.TargetRatio
+		if trigger <= 0 || trigger >= 1 || target <= 0 || target >= trigger {
+			return fmt.Errorf("context.compaction requires 0 < target_ratio < trigger_ratio < 1")
+		}
 	}
 	if a.Retry.MaxRetries < 0 || a.Retry.InitialDelayMs < 0 || a.Retry.MaxDelayMs < a.Retry.InitialDelayMs || int64(a.Retry.MaxDelayMs) > 9223372036854 || a.Retry.BackoffFactor < 1 {
 		return fmt.Errorf("invalid retry limits")
@@ -953,6 +968,10 @@ agent:
     enabled: true
     max_messages: 50
     max_input_tokens: 32768 # 保守估算输入预算，不删除数据库历史
+    compaction: # 运行内压缩，仅对持久化任务生效
+      enabled: true
+      trigger_ratio: 0.8
+      target_ratio: 0.5
   retry:
     enabled: true
     max_retries: 3

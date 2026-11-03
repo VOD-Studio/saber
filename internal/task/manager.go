@@ -294,6 +294,17 @@ func (m *Manager) execute(ctx context.Context, cancel context.CancelFunc, t Task
 	}
 	var journalErr error
 	req, resumeErr := m.continuationRequest(ctx, t)
+	if resumeErr == nil {
+		state, stateErr := m.initialTaskState(ctx, t)
+		if stateErr != nil {
+			resumeErr = stateErr
+		} else {
+			req.State = &state
+			if err := m.markStateInitialized(context.WithoutCancel(ctx), t.ID, state); err != nil {
+				resumeErr = err
+			}
+		}
+	}
 	result, runErr := agent.Result{}, resumeErr
 	if resumeErr == nil {
 		result, runErr = m.run(ctx, req, func(event agent.Event) {

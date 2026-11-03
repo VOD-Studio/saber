@@ -29,15 +29,51 @@ const (
 // ErrBudgetExhausted 允许调用方识别轮数耗尽，避免重跑整个任务。
 var ErrBudgetExhausted = errors.New("agent round budget exhausted")
 
+// Instruction 是程序保存的原始用户指令，不允许模型修改。
+type Instruction struct {
+	TaskID int64  `json:"task_id"`
+	Text   string `json:"text"`
+}
+
+// PlanStep 是任务计划中的一步，状态只接受 pending、in_progress、done。
+type PlanStep struct {
+	Text   string `json:"text"`
+	Status string `json:"status"`
+}
+
+// TaskState 是程序持久化的工作状态；Instructions 与 revision 只由程序维护。
+type TaskState struct {
+	Instructions []Instruction `json:"instructions"`
+	Revision     int64         `json:"revision"`
+	Plan         []PlanStep    `json:"plan"`
+	Findings     []string      `json:"findings"`
+	Artifacts    []string      `json:"artifacts"`
+	OpenIssues   []string      `json:"open_issues"`
+}
+
+// Checkpoint 保存已提交的压缩请求与已完整执行的主模型轮次水位。
+type Checkpoint struct {
+	Request      Request `json:"request"`
+	ThroughRound int     `json:"through_round"`
+}
+
 // Request 保留现有模型协议，供流式和非流式 adapter 共用。
 type Request struct {
 	// ReasoningEffort 非空时覆盖当前模型的默认思考等级，不修改共享客户端配置。
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// ResponsesHistory 按首个工具调用 ID 保存原始输出，保留加密推理和消息 phase。
 	ResponsesHistory map[string][]json.RawMessage `json:"responses_history,omitempty"`
+	// State 是程序维护的任务状态，只在渲染时注入模型输入。
+	State *TaskState `json:"task_state,omitempty"`
+	// Summary 是滚动上下文摘要，只在渲染时注入。
+	Summary string `json:"summary,omitempty"`
 
 	// Messages 是当前轮的对话历史；adapter 不得修改其中的消息。
 	Messages []openai.ChatCompletionMessage `json:"messages"`
+	// RuntimeContext 是本次运行临时取得的资料，不进入持久化请求或摘要输入。
+	RuntimeContext []openai.ChatCompletionMessage `json:"-"`
+	// Purpose 仅供内部计费用途（main、summary、evaluation），不能来自模型或外部请求。
+	Purpose string `json:"-"`
 	// Stream 选择模型传输方式，不改变运行规则。
 	Stream bool `json:"stream"`
 	// MaxTokens 限制单次模型生成长度。
@@ -154,6 +190,10 @@ type Result struct {
 	Usage openai.Usage
 	// Duration 是运行总耗时。
 	Duration time.Duration
+	// State 是本次运行结束时的最终工作状态，未启用状态时为 nil。
+	State *TaskState
+	// Checkpoint 是最后已提交的压缩检查点，没有压缩时为 nil。
+	Checkpoint *Checkpoint
 }
 
 // EventKind 表示可由聊天 adapter 或测试消费的运行事件。
@@ -182,6 +222,10 @@ const (
 	RunFinished EventKind = "run_finished"
 	// EnvironmentCleanupFailed 表示任务环境清理失败，工作区保持锁定等待人工核查。
 	EnvironmentCleanupFailed EventKind = "environment_cleanup_failed"
+	// TaskStateUpdated 表示工作状态已更新并持久化。
+	TaskStateUpdated EventKind = "task_state_updated"
+	// ContextCompacted 表示上下文已压缩并提交检查点。
+	ContextCompacted EventKind = "context_compacted"
 )
 
 // Event 由 Run 串行发送；回调应快速返回，不得修改引用的响应数据。
@@ -201,6 +245,10 @@ type Event struct {
 	Tool ToolRecord
 	// Status 仅在运行结束时设置。
 	Status Status
+	// State 是工作状态快照（初始化或更新事件）。
+	State *TaskState
+	// Checkpoint 是压缩后提交的检查点。
+	Checkpoint *Checkpoint
 	// Error 是运行终止原因。
 	Error error
 }

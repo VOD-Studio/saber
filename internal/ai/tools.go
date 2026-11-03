@@ -165,7 +165,7 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 	}
 
 	for _, mcpTool := range mcpTools {
-		if execution.LocalTool(mcpTool.Name) || mcpTool.Name == "saber_task" || mcpTool.Name == "saber_schedule" || mcpTool.Name == "saber_memory" || mcpTool.Name == "saber_history" || mcpTool.Name == "saber_skill" {
+		if execution.LocalTool(mcpTool.Name) || mcpTool.Name == "saber_task" || mcpTool.Name == "saber_schedule" || mcpTool.Name == "saber_memory" || mcpTool.Name == "saber_history" || mcpTool.Name == "saber_skill" || mcpTool.Name == "saber_task_state" {
 			continue
 		}
 		server := te.service.mcpManager.GetServerForTool(mcpTool.Name)

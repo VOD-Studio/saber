@@ -103,7 +103,8 @@ func TestManager_IsolationDedupAndDeliveryRetry(t *testing.T) {
 	mu.Unlock()
 	records, err := m.Events(ctx, a.Message.Session, a.ID)
 	require.NoError(t, err)
-	require.Len(t, records, 2)
+	// 初始化状态事件 + 两次工具事件。
+	require.Len(t, records, 3)
 	list, err := m.List(ctx, a.Message.Session)
 	require.NoError(t, err)
 	require.Len(t, list, 2)

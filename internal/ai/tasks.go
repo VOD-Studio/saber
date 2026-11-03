@@ -79,6 +79,10 @@ func (s *Service) EnableTasks(path string) error {
 		}
 		// 重启恢复时按当前权限重新筛选，旧请求快照不能保留已撤销能力。
 		req.Tools, _ = s.toolExecutor.PrepareTools(ctx)
+		if req.State != nil {
+			// 状态工具由 Runtime 内部执行，不交给外部 ToolExecutor。
+			req.Tools = append(req.Tools, agent.TaskStateTool())
+		}
 		if err := s.core.WaitForRateLimit(ctx); err != nil {
 			return agent.Result{}, err
 		}

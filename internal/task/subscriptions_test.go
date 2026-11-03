@@ -37,11 +37,12 @@ func TestManager_ExecutionWithoutDeliveryAndReplay(t *testing.T) {
 	require.Equal(t, "pending", completed.Delivery)
 	events, err := m.ReadEvents(ctx, msg.Session, first.ID, 0)
 	require.NoError(t, err)
-	require.Len(t, events, 3)
-	require.Equal(t, "你好", events[0].Text)
-	tail, err := m.ReadEvents(ctx, msg.Session, first.ID, events[0].ID)
+	require.Len(t, events, 4)
+	require.Equal(t, agent.TaskStateUpdated, events[0].Kind)
+	require.Equal(t, "你好", events[1].Text)
+	tail, err := m.ReadEvents(ctx, msg.Session, first.ID, events[1].ID)
 	require.NoError(t, err)
-	require.Equal(t, events[1:], tail)
+	require.Equal(t, events[2:], tail)
 	other := msg.Session
 	other.Conversation = "other"
 	_, err = m.ReadEvents(ctx, other, first.ID, 0)

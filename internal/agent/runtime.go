@@ -24,6 +24,8 @@ type Runtime struct {
 	Limits Limits
 	// Context 在每轮模型请求前裁剪历史，包含后续工具结果。
 	Context ContextPolicy
+	// Summarize 在带任务状态的运行中压缩超预算上下文；为空时不做压缩。
+	Summarize SummaryFunc
 }
 
 // Run 顺序执行模型与工具，任何终态都返回已有记录并发出一次 RunFinished。
@@ -35,8 +37,12 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 		emit = func(Event) {}
 	}
 	result.Status = Failed
+	var finalState *TaskState
+	var checkpoint *Checkpoint
 	defer func() {
 		result.Duration = time.Since(started)
+		result.State = CloneTaskState(finalState)
+		result.Checkpoint = checkpoint
 		emit(Event{Kind: RunFinished, Round: len(result.Rounds), Status: result.Status, Text: result.Content, Error: err})
 	}()
 	emit(Event{Kind: RunStarted})
@@ -83,6 +89,9 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 	// 新建切片防止追加历史覆盖调用方预留的容量。
 	req.Messages = append([]openai.ChatCompletionMessage(nil), req.Messages...)
 	req.ResponsesHistory = maps.Clone(req.ResponsesHistory)
+	finalState = req.State
+	compacted := 0
+	var pendingCheckpoint *Checkpoint
 	allowed := make(map[string]bool, len(req.Tools))
 	for _, tool := range req.Tools {
 		if tool.Function != nil {
@@ -93,16 +102,31 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 		if err := ctx.Err(); err != nil {
 			return stop(err)
 		}
-		req, err = TrimContext(req, r.Context)
+		var roundCheckpoint *Checkpoint
+		req, compacted, roundCheckpoint, err = r.prepareContext(ctx, req, number, limits.MaxRounds, emit, compacted)
 		if err != nil {
 			return stop(err)
+		}
+		if roundCheckpoint != nil {
+			// 检查点只有在事件落盘且 ctx 仍有效后才成为运行终态。
+			pendingCheckpoint = roundCheckpoint
+		}
+		finalState = req.State
+		if err := ctx.Err(); err != nil {
+			return stop(err)
+		}
+		if pendingCheckpoint != nil {
+			checkpoint = pendingCheckpoint
+			pendingCheckpoint = nil
 		}
 		emit(Event{Kind: ModelStarted, Round: number})
 		if err := ctx.Err(); err != nil {
 			return stop(err)
 		}
 		round := Round{}
-		response, modelErr := r.Model(ctx, req, func(event Event) {
+		// 真正发送渲染后的输入；持久化请求保持未渲染基线，避免重复注入。
+		sendReq := renderRequest(req)
+		response, modelErr := r.Model(ctx, sendReq, func(event Event) {
 			event.Round = number
 			// adapter 只能发布模型事件，不能自行宣布运行终态。
 			switch event.Kind {
@@ -163,7 +187,13 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 			if err := ctx.Err(); err != nil {
 				return stop(err)
 			}
-			record := r.callTool(ctx, call, allowed, limits.MaxToolOutputBytes)
+			var record ToolRecord
+			if call.Function.Name == "saber_task_state" && req.State != nil {
+				record = r.callStateTool(ctx, call, &req.State, number, limits.MaxToolOutputBytes, emit)
+			} else {
+				record = r.callTool(ctx, call, allowed, limits.MaxToolOutputBytes)
+			}
+			finalState = req.State
 			result.Rounds[number-1].Tools = append(result.Rounds[number-1].Tools, record)
 			req.Messages = append(req.Messages, openai.ChatCompletionMessage{
 				Role: openai.ChatMessageRoleTool, ToolCallID: call.ID, Content: record.Content,
@@ -273,7 +303,6 @@ func (r Runtime) callTool(ctx context.Context, call openai.ToolCall, allowed map
 }
 
 func errorContent(code, message string) []byte {
-	// 仅序列化字符串字段，不存在不支持的值类型。
 	var b strings.Builder
 	enc := json.NewEncoder(&b)
 	if err := enc.Encode(map[string]any{"ok": false, "error": map[string]string{"code": code, "message": message}}); err != nil {

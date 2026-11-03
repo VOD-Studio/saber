@@ -218,8 +218,8 @@ func (s *Service) augmentMemory(ctx context.Context, req agent.Request) agent.Re
 	return req
 }
 
-// appendRuntimeContext 在系统提示之后追加一条带来源的资料消息；TrimContext 会保留它。
+// appendRuntimeContext 把记忆与技能目录作为运行时资料携带；不进入持久化请求或摘要输入。
 func appendRuntimeContext(req agent.Request, text string) agent.Request {
-	req.Messages = append(req.Messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: text})
+	req.RuntimeContext = append(req.RuntimeContext, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: text})
 	return req
 }

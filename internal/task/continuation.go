@@ -103,28 +103,34 @@ func (m *Manager) Continue(ctx context.Context, message chat.Message, dir string
 }
 
 func (m *Manager) continuationRequest(ctx context.Context, t Task) (agent.Request, error) {
-	return m.restoreContinuationRequest(ctx, t, true)
+	return m.restoreContinuationRequest(ctx, t)
 }
 
-func (m *Manager) restoreContinuationRequest(ctx context.Context, t Task, applyBudget bool) (agent.Request, error) {
+// contextInheritance 区分显式关闭继承与未配置的零值策略。
+func (m *Manager) contextInheritance() bool {
+	if m.contextPolicy.Enabled {
+		return true
+	}
+	return m.contextPolicy.MaxMessages == 0 && m.contextPolicy.MaxInputTokens == 0
+}
+
+// restoreContinuationRequest 从父任务最后检查点恢复压缩请求，再按轮次水位追加后段轨迹。
+func (m *Manager) restoreContinuationRequest(ctx context.Context, t Task) (agent.Request, error) {
+	if !m.contextInheritance() {
+		// 关闭继承时新任务只使用当前请求与当前真实用户指令。
+		return t.Request, nil
+	}
 	var ready bool
 	if err := m.store.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM task_contexts WHERE task_id=?)`, t.ID).Scan(&ready); err != nil {
 		return t.Request, err
 	}
 	if ready {
 		messages, changed := sanitizeToolHistory(t.Request.Messages)
-		if !changed && (!applyBudget || m.contextPolicy.MaxMessages == 0 && m.contextPolicy.MaxInputTokens == 0) {
+		if !changed {
 			return t.Request, nil
 		}
 		req := t.Request
 		req.Messages = messages
-		if applyBudget {
-			var err error
-			req, err = agent.TrimContext(req, m.contextPolicy)
-			if err != nil {
-				return req, err
-			}
-		}
 		return req, m.saveContinuationRequest(ctx, t.ID, req)
 	}
 	var parentID int64
@@ -139,37 +145,40 @@ func (m *Manager) restoreContinuationRequest(ctx context.Context, t Task, applyB
 	if err != nil {
 		return t.Request, err
 	}
-	parentReq, err := m.restoreContinuationRequest(ctx, parent, false)
+	parentReq, err := m.restoreContinuationRequest(ctx, parent)
 	if err != nil {
 		return t.Request, err
 	}
-	messages := append([]openai.ChatCompletionMessage(nil), parentReq.Messages...)
-	responsesHistory := maps.Clone(parentReq.ResponsesHistory)
-	rounds := parent.Result.Rounds
-	// 硬退出可能来不及保存 Result，使用已落盘的模型和工具完成事件恢复轨迹。
-	if len(rounds) == 0 {
-		records, err := m.Events(ctx, t.Message.Session, parent.ID)
-		if err != nil {
-			return t.Request, err
-		}
-		for _, record := range records {
-			var e struct {
-				Kind     agent.EventKind
-				Response agent.Response
-				Tool     agent.ToolRecord
-			}
-			if err = json.Unmarshal([]byte(record), &e); err != nil {
-				return t.Request, err
-			}
-			if e.Kind == agent.ModelCompleted {
-				rounds = append(rounds, agent.Round{Response: e.Response})
-			}
-			if e.Kind == agent.ToolFinished && len(rounds) > 0 {
-				rounds[len(rounds)-1].Tools = append(rounds[len(rounds)-1].Tools, e.Tool)
-			}
-		}
+	state, checkpoint, err := m.store.runtimeState(ctx, parent.ID)
+	if err != nil {
+		return t.Request, err
 	}
-	for _, round := range rounds {
+	if checkpoint == nil {
+		checkpoint = parent.Result.Checkpoint
+	}
+	if state == nil {
+		state = parent.Result.State
+	}
+	messages := []openai.ChatCompletionMessage{}
+	responsesHistory := map[string][]json.RawMessage{}
+	startRound := 0
+	if checkpoint != nil {
+		messages = append(messages, checkpoint.Request.Messages...)
+		responsesHistory = maps.Clone(checkpoint.Request.ResponsesHistory)
+		startRound = checkpoint.ThroughRound
+		if state == nil {
+			state = checkpoint.Request.State
+		}
+	} else {
+		messages = append(messages, parentReq.Messages...)
+		responsesHistory = maps.Clone(parentReq.ResponsesHistory)
+	}
+	rounds, err := m.completedRounds(ctx, parent)
+	if err != nil {
+		return t.Request, err
+	}
+	for index := startRound; index < len(rounds); index++ {
+		round := rounds[index]
 		resp := round.Response
 		if err := agent.ValidateResponse(resp); err != nil {
 			messages = append(messages, historyDiagnostic(err, resp))
@@ -196,7 +205,7 @@ func (m *Manager) restoreContinuationRequest(ctx context.Context, t Task, applyB
 			messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleTool, ToolCallID: call.ID, Content: content})
 		}
 	}
-	if len(rounds) == 0 && parent.Result.Content != "" {
+	if startRound == 0 && len(rounds) == 0 && parent.Result.Content != "" {
 		messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: parent.Result.Content})
 	}
 	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: fmt.Sprintf("[任务续接] 前序任务 #%d 状态 %s。保留原目标与约束，结合以下补充继续；对未确认完成的操作先核查，不自动重放。", parent.ID, parent.Status)})
@@ -209,13 +218,46 @@ func (m *Manager) restoreContinuationRequest(ctx context.Context, t Task, applyB
 	req := t.Request
 	req.Messages, _ = sanitizeToolHistory(messages)
 	req.ResponsesHistory = responsesHistory
-	if applyBudget {
-		req, err = agent.TrimContext(req, m.contextPolicy)
-		if err != nil {
-			return req, err
-		}
+	req.State = state
+	if checkpoint != nil {
+		req.Summary = checkpoint.Request.Summary
 	}
 	return req, m.saveContinuationRequest(ctx, t.ID, req)
+}
+
+// completedRounds 优先使用终态轨迹，硬退出时从已落盘事件重建。
+func (m *Manager) completedRounds(ctx context.Context, parent Task) ([]agent.Round, error) {
+	rounds := parent.Result.Rounds
+	if len(rounds) > 0 {
+		return rounds, nil
+	}
+	records, err := m.store.db.QueryContext(ctx, `SELECT record FROM task_events WHERE task_id=? ORDER BY id`, parent.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = records.Close() }()
+	for records.Next() {
+		var record []byte
+		if err := records.Scan(&record); err != nil {
+			return nil, err
+		}
+		var e struct {
+			Kind     agent.EventKind
+			Round    int
+			Response agent.Response
+			Tool     agent.ToolRecord
+		}
+		if err := json.Unmarshal(record, &e); err != nil {
+			return nil, err
+		}
+		if e.Kind == agent.ModelCompleted {
+			rounds = append(rounds, agent.Round{Response: e.Response})
+		}
+		if e.Kind == agent.ToolFinished && len(rounds) > 0 {
+			rounds[len(rounds)-1].Tools = append(rounds[len(rounds)-1].Tools, e.Tool)
+		}
+	}
+	return rounds, records.Err()
 }
 
 func (m *Manager) saveContinuationRequest(ctx context.Context, taskID int64, req agent.Request) error {

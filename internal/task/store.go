@@ -117,6 +117,9 @@ func openStore(path string) (*store, error) {
  CREATE TABLE IF NOT EXISTS task_pending_projections (
   task_id INTEGER PRIMARY KEY REFERENCES tasks(id),
   created_at INTEGER NOT NULL
+ );
+ CREATE TABLE IF NOT EXISTS task_runtime_state (
+  task_id INTEGER PRIMARY KEY REFERENCES tasks(id), state BLOB, checkpoint BLOB
  );` + scheduleSchema)
 	if err != nil {
 		return nil, errors.Join(err, db.Close())
@@ -319,8 +322,60 @@ func (s *store) record(ctx context.Context, taskID int64, event agent.Event) err
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO task_events(task_id,created_at,record) VALUES(?,?,?)`, taskID, time.Now().UnixMilli(), data)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx, `INSERT INTO task_events(task_id,created_at,record) VALUES(?,?,?)`, taskID, time.Now().UnixMilli(), data); err != nil {
+		return err
+	}
+	if event.State != nil || event.Checkpoint != nil {
+		var stateJSON, checkpointJSON []byte
+		if event.State != nil {
+			if stateJSON, err = json.Marshal(event.State); err != nil {
+				return err
+			}
+		}
+		if event.Checkpoint != nil {
+			if checkpointJSON, err = json.Marshal(event.Checkpoint); err != nil {
+				return err
+			}
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO task_runtime_state(task_id,state,checkpoint) VALUES(?,?,?)
+			ON CONFLICT(task_id) DO UPDATE SET state=COALESCE(excluded.state,task_runtime_state.state),
+			checkpoint=COALESCE(excluded.checkpoint,task_runtime_state.checkpoint)`, taskID, stateJSON, checkpointJSON); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// runtimeState 返回已持久化的状态与检查点；没有记录时返回 nil。
+func (s *store) runtimeState(ctx context.Context, taskID int64) (*agent.TaskState, *agent.Checkpoint, error) {
+	var stateJSON, checkpointJSON []byte
+	err := s.db.QueryRowContext(ctx, `SELECT state,checkpoint FROM task_runtime_state WHERE task_id=?`, taskID).Scan(&stateJSON, &checkpointJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	var state *agent.TaskState
+	var checkpoint *agent.Checkpoint
+	if len(stateJSON) > 0 {
+		state = &agent.TaskState{}
+		if err = json.Unmarshal(stateJSON, state); err != nil {
+			return nil, nil, err
+		}
+	}
+	if len(checkpointJSON) > 0 {
+		checkpoint = &agent.Checkpoint{}
+		if err = json.Unmarshal(checkpointJSON, checkpoint); err != nil {
+			return nil, nil, err
+		}
+	}
+	return state, checkpoint, nil
 }
 
 func (s *store) finish(ctx context.Context, t Task, result agent.Result, runErr error, interrupted bool) error {
@@ -362,6 +417,16 @@ func (s *store) finish(ctx context.Context, t Task, result agent.Result, runErr 
 		_, err = tx.ExecContext(ctx, `INSERT INTO task_pending_projections(task_id,created_at) VALUES(?,?) ON CONFLICT(task_id) DO NOTHING`, t.ID, time.Now().UnixMilli())
 		if err != nil {
 			return err
+		}
+		if result.State != nil {
+			stateJSON, marshalErr := json.Marshal(result.State)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if _, err = tx.ExecContext(ctx, `INSERT INTO task_runtime_state(task_id,state) VALUES(?,?)
+				ON CONFLICT(task_id) DO UPDATE SET state=excluded.state`, t.ID, stateJSON); err != nil {
+				return err
+			}
 		}
 	}
 	return tx.Commit()
