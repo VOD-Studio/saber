@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/memory"
@@ -577,4 +579,88 @@ func TestMemoryReview_SkillAutoAddPersonalAndGroup(t *testing.T) {
 	require.Len(t, pending, 1)
 	require.Equal(t, "git-rebase-conflict", pending[0].Name)
 	require.Equal(t, memory.StatusPending, pending[0].Status)
+}
+
+// TestMemoryReview_FailureRemainsPending 验证失败和轮数耗尽不丢弃待复盘历史，恢复后可继续沉淀。
+func TestMemoryReview_FailureRemainsPending(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		budget      bool
+		failedUsage int
+	}{
+		{"模型错误", false, 0},
+		{"轮数耗尽", true, 26},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var recovered atomic.Bool
+			modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if !recovered.Load() && !tc.budget {
+					w.WriteHeader(http.StatusBadRequest)
+					if err := json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "暂时无法复盘", "type": "invalid_request_error"}}); err != nil {
+						t.Error(err)
+					}
+					return
+				}
+				var req agent.Request
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Error(err)
+					return
+				}
+				message := map[string]any{"role": "assistant", "content": "复盘完成"}
+				finish := "stop"
+				if !recovered.Load() || req.Messages[len(req.Messages)-1].Role != "tool" {
+					args := `{"action":"list"}`
+					if recovered.Load() {
+						args = `{"action":"add","content":"用户喜欢简洁回答"}`
+					}
+					message["tool_calls"] = []map[string]any{{"id": "review-memory", "type": "function", "function": map[string]any{"name": "saber_memory", "arguments": args}}}
+					finish = "tool_calls"
+				}
+				if err := json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{{"message": message, "finish_reason": finish}}, "usage": map[string]int{"total_tokens": 13}}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer modelServer.Close()
+			cfg := *config.DefaultConfig()
+			cfg.AI.Enabled = true
+			cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: modelServer.URL}}
+			cfg.AI.DefaultModel = "openai.local"
+			cfg.Memory.Enabled = true
+			mem := newTestMemory(t, memory.Config{})
+			svc, err := NewService(&cfg, WithMemory(mem))
+			require.NoError(t, err)
+			defer svc.Stop()
+			identity := personalIdentity("@alice:test")
+			scope, ok := memory.Space(identity)
+			require.True(t, ok)
+			ctx := context.Background()
+			_, err = mem.RecordProjection(ctx, memory.ProjectionInput{TaskID: 9001, Scope: scope, Conversation: "dm", SenderID: identity.SenderID, UserMessageID: "$review", UserText: "以后请简洁回答", AssistantText: "好的", TaskStatus: "completed", CreatedAt: time.Now()})
+			require.NoError(t, err)
+
+			err = svc.ReviewScope(ctx, scope)
+			if tc.budget {
+				require.ErrorIs(t, err, agent.ErrBudgetExhausted)
+			} else {
+				require.Error(t, err)
+			}
+			remaining, err := mem.UnreviewedProjections(ctx, scope, 10)
+			require.NoError(t, err)
+			require.Len(t, remaining, 1, "失败不能确认待复盘历史")
+			require.Equal(t, int64(9001), remaining[0].TaskID)
+			settings, err := mem.ScopeSettings(ctx, scope)
+			require.NoError(t, err)
+			require.Equal(t, tc.failedUsage, settings.TokenCount, "失败产生的费用仍必须累计")
+
+			recovered.Store(true)
+			require.NoError(t, svc.ReviewScope(ctx, scope))
+			entries, err := mem.List(ctx, identity)
+			require.NoError(t, err)
+			require.Len(t, entries, 1)
+			require.Equal(t, "用户喜欢简洁回答", entries[0].Content)
+			remaining, err = mem.UnreviewedProjections(ctx, scope, 10)
+			require.NoError(t, err)
+			require.Empty(t, remaining)
+		})
+	}
 }

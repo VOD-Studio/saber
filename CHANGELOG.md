@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- 后台记忆复盘仅在模型与工具循环成功结束后标记历史已处理；模型错误、超时、取消及轮数耗尽保留待复盘记录，后续扫描或重启可继续处理。失败产生的 token 用量仍计入配额，完成标记与用量写入错误不再被忽略。
 - Matrix 私聊自动回复与共享命令统一由聊天 adapter 根据当前房间成员状态设置可信 `Direct` 身份；私聊命令保存的个人记忆可用于后续自动回复，不会注入同一用户的群聊或其他用户私聊，成员状态查询失败时不授予个人空间读取权。
 - 任务结果投递不再无限重试：退避封顶 256 秒后原先会永久重试。现在新增 `agent.task_delivery_max_attempts`（默认 20，约 51 分钟持续故障）限制投递尝试次数，用尽后投递状态变为 `abandoned`，保留最后错误并写 ERROR 日志，不再被投递循环取到；尝试次数持久化，重启后继续累计，已持久化的投递分片不受影响。
 - 未启用 Matrix（如仅 violet）时，任务带文件产物会因 `matrixService` 为 nil 触发 panic，投递 goroutine 崩溃带走整个进程，且任务仍为 pending 导致重启后崩溃循环。现在文件交付经平台的 `chat.FileAdapter`，不依赖 `matrixService`；没有文件能力的平台降级为幂等文字提示并按成功处理（不无限重试），`deliverTaskFile` 对空发送器返回错误，任务投递 panic 会被 recover 并按退避重试，`read_file deliver=true` 仅在平台不支持文件发送时提前返回错误。

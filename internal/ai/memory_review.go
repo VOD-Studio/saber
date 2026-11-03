@@ -203,15 +203,16 @@ func (s *Service) ReviewScope(ctx context.Context, scope memory.Scope) error {
 
 	result, runErr := runtime.Run(execCtx, req, nil)
 
-	// 无论模型是否有提炼结果，标记该批任务已完成复盘，记录消耗的 token
-	_ = s.memory.MarkTasksReviewed(ctx, scope, taskIDs)
+	// 失败也保留已消耗的用量，但不能确认这批历史已完成复盘。
 	if result.Usage.TotalTokens > 0 {
-		_ = s.memory.RecordReviewUsage(ctx, scope, result.Usage.TotalTokens)
+		if err := s.memory.RecordReviewUsage(ctx, scope, result.Usage.TotalTokens); err != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("记录复盘用量失败: %w", err))
+		}
 	}
 
-	if runErr != nil && !errors.Is(runErr, agent.ErrBudgetExhausted) {
+	if runErr != nil {
 		slog.Warn("后台记忆复盘运行异常", "scope", scope.Key(), "error", runErr)
 		return runErr
 	}
-	return nil
+	return s.memory.MarkTasksReviewed(ctx, scope, taskIDs)
 }
