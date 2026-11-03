@@ -93,6 +93,9 @@ func New(service *ai.Service, token string, commands ...CommandDispatcher) http.
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/info", h.info)
+	// OpenAI 兼容接口不依赖任务数据库，由处理器自行确认模型能力。
+	mux.HandleFunc("GET /v1/models", h.models)
+	mux.HandleFunc("POST /v1/chat/completions", h.chatCompletions)
 	mux.HandleFunc("GET /v1/sessions", h.sessions)
 	mux.HandleFunc("GET /v1/sessions/{session}/tasks", h.history)
 	mux.HandleFunc("POST /v1/sessions/{session}/messages", h.submit)
@@ -110,7 +113,9 @@ func New(service *ai.Service, token string, commands ...CommandDispatcher) http.
 			return
 		}
 		// 本机命令入口由自己的分发器判定是否可用，ping/help 等命令不依赖 AI 与任务。
-		if r.URL.Path != "/v1/info" && !strings.HasSuffix(r.URL.Path, "/commands") && (service == nil || service.Tasks() == nil) {
+		// OpenAI 兼容接口只要求模型能力，不要求任务数据库。
+		openAI := r.URL.Path == "/v1/models" || r.URL.Path == "/v1/chat/completions"
+		if !openAI && r.URL.Path != "/v1/info" && !strings.HasSuffix(r.URL.Path, "/commands") && (service == nil || service.Tasks() == nil) {
 			http.Error(w, "请配置 ai.enabled 和模型后重启服务", http.StatusServiceUnavailable)
 			return
 		}
