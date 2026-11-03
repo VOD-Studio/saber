@@ -162,8 +162,9 @@ func TestDockerExecution(t *testing.T) {
 	}
 	cfg, identity := fixture(t)
 	cfg.Backend = "docker"
+	cfg.Grants[0].Tools = append(cfg.Grants[0].Tools, "read_output", "search_files", "glob_files", "process")
 	cfg.Image = image
-	cfg.TimeoutSeconds = 2
+	cfg.TimeoutSeconds = 30
 	e, err := New(cfg, nil, nil)
 	require.NoError(t, err)
 	require.NoError(t, e.Recover(context.Background()))
@@ -176,7 +177,10 @@ func TestDockerExecution(t *testing.T) {
 		t.Helper()
 		r, err := e.Run(ctx, tool, args)
 		require.NoError(t, err)
-		require.FileExists(t, r.LogPath)
+		if tool == "exec" {
+			require.FileExists(t, r.LogPath)
+			require.NotEmpty(t, r.OutputID)
+		}
 		return r
 	}
 	r := run("exec", map[string]any{"command": "test -z \"$MATRIX_ACCESS_TOKEN$OPENAI_API_KEY\" && test ! -S /var/run/docker.sock && test \"$PROJECT_FLAG\" = configured && printf isolated"})
@@ -188,6 +192,7 @@ func TestDockerExecution(t *testing.T) {
 	require.Contains(t, r.Summary, "has_net")
 	// 显式关闭网络时沙箱容器内无 eth0 网卡。
 	cfgDisabled := cfg
+	cfgDisabled.LogDir = t.TempDir()
 	disabled := false
 	cfgDisabled.Network = &disabled
 	eDisabled, err := New(cfgDisabled, nil, nil)
@@ -195,6 +200,7 @@ func TestDockerExecution(t *testing.T) {
 	rDisabled, err := eDisabled.Run(ctx, "exec", map[string]any{"command": "grep -q 'eth0' /proc/net/dev"})
 	require.NoError(t, err)
 	require.NotZero(t, rDisabled.ExitCode)
+	require.NoError(t, eDisabled.CloseTask(context.Background(), 42))
 	r = run("exec", map[string]any{"command": "printf failure; exit 7"})
 	require.Equal(t, 7, r.ExitCode)
 	require.Equal(t, "failure", r.Summary)
@@ -204,6 +210,27 @@ func TestDockerExecution(t *testing.T) {
 	require.Error(t, err)
 	r = run("apply_patch", map[string]any{"path": "answer.txt", "edits": []any{map[string]any{"old": "first", "new": "second"}}})
 	require.Zero(t, r.ExitCode)
+	// 任务级 /tmp 在命令之间保留，后台作业与文件工具可并行使用。
+	r = run("exec", map[string]any{"command": "printf marker > $TMPDIR/marker && cat $TMPDIR/marker"})
+	require.Equal(t, "marker", r.Summary)
+	r = run("exec", map[string]any{"command": "cat $TMPDIR/marker"})
+	require.Equal(t, "marker", r.Summary)
+	bg := run("process", map[string]any{"action": "start", "command": "echo bg-ready; sleep 30"})
+	processID, ok := bg.Data.(map[string]any)["id"].(string)
+	require.True(t, ok)
+	require.Equal(t, "running", bg.Data.(map[string]any)["status"])
+	require.Eventually(t, func() bool {
+		logs, logErr := e.Run(ctx, "process", map[string]any{"action": "logs", "id": processID})
+		if logErr != nil {
+			return false
+		}
+		text, _ := logs.Data.(map[string]any)["text"].(string)
+		return strings.Contains(text, "bg-ready")
+	}, 5*time.Second, 50*time.Millisecond)
+	killed := run("process", map[string]any{"action": "kill", "id": processID})
+	require.Equal(t, "exited", killed.Data.(map[string]any)["status"])
+	found := run("search_files", map[string]any{"pattern": "second", "file_glob": "**"})
+	require.NotEmpty(t, found.Data.(map[string]any)["matches"])
 	r = run("read_file", map[string]any{"path": "answer.txt", "deliver": true})
 	require.Equal(t, "second\n", r.Summary)
 	require.FileExists(t, r.Artifact)
@@ -218,7 +245,9 @@ func TestDockerExecution(t *testing.T) {
 	require.Len(t, artifacts, 1)
 	require.Equal(t, "answer.txt", artifacts[0].Name)
 	r = run("list_files", map[string]any{})
-	require.Contains(t, r.Summary, "answer.txt")
+	entries, ok := r.Data.(map[string]any)["entries"].([]map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "answer.txt", entries[0]["name"])
 	r = run("exec", map[string]any{"command": "ln -s /etc/passwd escape; ln -s /etc outside"})
 	require.Zero(t, r.ExitCode)
 	for _, path := range []string{"escape", "outside/passwd"} {
@@ -234,15 +263,20 @@ func TestDockerExecution(t *testing.T) {
 	require.NotZero(t, r.ExitCode)
 	// 超时终止整个容器，包括 shell 派生出的后台进程。
 	started := time.Now()
-	r, err = e.Run(ctx, "exec", map[string]any{"command": "sleep 60 & wait"})
+	timeoutCtx, timeoutCancel := context.WithTimeout(ctx, time.Second)
+	r, err = e.Run(timeoutCtx, "exec", map[string]any{"command": "sleep 60 & wait"})
+	timeoutCancel()
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.Less(t, time.Since(started), 15*time.Second)
 	cancelCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
-	go func() { _, err := e.Run(cancelCtx, "exec", map[string]any{"command": "sleep 60 & wait"}); done <- err }()
+	go func() {
+		_, err := e.Run(cancelCtx, "exec", map[string]any{"command": "echo started > started.txt; sleep 60 & wait"})
+		done <- err
+	}()
 	require.Eventually(t, func() bool {
-		out, err := docker(context.Background(), "ps", "-q", "--filter", "label=saber.executor="+e.owner).Output()
-		return err == nil && strings.TrimSpace(string(out)) != ""
+		_, statErr := os.Stat(filepath.Join(dir, "started.txt"))
+		return statErr == nil
 	}, 5*time.Second, 50*time.Millisecond)
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)

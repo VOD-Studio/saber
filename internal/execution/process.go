@@ -54,9 +54,12 @@ func (p *processRecord) running() bool {
 	return !p.exited
 }
 
-// stop 取消作业并等待清理；可重复调用。
+// stop 取消作业并等待清理；已结束作业直接视为已清理。
 func (p *processRecord) stop(ctx context.Context) error {
 	p.cancel()
+	if !p.running() {
+		return nil
+	}
 	if p.proc != nil {
 		if err := p.proc.Stop(ctx); err != nil {
 			return err

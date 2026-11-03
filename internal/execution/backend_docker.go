@@ -346,13 +346,16 @@ func (p *dockerProcess) result() error {
 
 // Stop 通过控制模式先 TERM 整组，最多 2 秒后 KILL；控制失败即销毁容器。
 func (p *dockerProcess) Stop(ctx context.Context) error {
+	select {
+	case <-p.done:
+		return nil
+	default:
+	}
 	p.mu.Lock()
 	pgid := p.pgid
 	p.mu.Unlock()
 	if pgid <= 0 {
-		if err := p.environment.control(0, 0); err != nil {
-			return err
-		}
+		// 尚无 started 帧，没有可安全发送信号的进程组。
 		return nil
 	}
 	if err := p.environment.control(pgid, 15); err != nil {

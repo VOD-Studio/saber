@@ -32,7 +32,11 @@ func (m *model) choices() (string, []choice) {
 		if m.menu == "commands" {
 			title = "命令"
 		}
-		items := []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}, {"/memory", "memory", "长期记忆 · 查看与管理"}, {"/skill", "skill", "技能经验 · 查看与管理"}, {"/sidebar", "sidebar", "收起或展开侧栏 · Ctrl+B"}, {"/tools", "tools", "展开工具详情 · Ctrl+T"}, {"F5", "reconnect", "刷新连接与会话"}, {"/quit", "quit", "离开界面 · 空输入时 Ctrl+C"}}
+		items := []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}}
+		if m.info.Capabilities["memory"].State == "available" {
+			items = append(items, choice{"/memory", "memory", "长期记忆 · 查看与管理"}, choice{"/skill", "skill", "技能经验 · 查看与管理"})
+		}
+		items = append(items, choice{"/sidebar", "sidebar", "收起或展开侧栏 · Ctrl+B"}, choice{"/tools", "tools", "展开工具详情 · Ctrl+T"}, choice{"F5", "reconnect", "刷新连接与会话"}, choice{"/quit", "quit", "离开界面 · 空输入时 Ctrl+C"})
 		seen := map[string]bool{}
 		for _, item := range items {
 			seen[item.value] = true

@@ -327,6 +327,19 @@ func (s *Service) taskOperation(ctx context.Context, identity chat.Identity, act
 		if t.DeliveryError != "" {
 			text += "\n投递错误：" + t.DeliveryError
 		}
+		if state, stateErr := s.tasks.RuntimeState(ctx, identity.Session, taskID); stateErr == nil && len(state.Plan) > 0 {
+			text += "\n计划："
+			for _, step := range state.Plan {
+				text += fmt.Sprintf("\n- [%s] %s", step.Status, step.Text)
+			}
+		}
+		if t.Result.Budget != nil {
+			budget := t.Result.Budget
+			text += fmt.Sprintf("\n轮次：%d/%d（软限 %d，追加 %d 次，用量 %d）", budget.RoundsUsed, budget.HardLimit, budget.SoftLimit, budget.Extensions, budget.AccountedTokens)
+			if budget.StopReason != "" {
+				text += "\n预算停止原因：" + budget.StopReason
+			}
+		}
 		if t.Result.Content != "" {
 			text += "\n结果：\n" + t.Result.Content
 		}

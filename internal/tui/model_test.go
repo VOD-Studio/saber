@@ -486,12 +486,22 @@ func TestModel_LocalCommandResults(t *testing.T) {
 	require.Len(t, m.turns, before)
 }
 
-// TestModel_MemoryMenuFillsInput 验证命令菜单中的长期记忆项预填指令。
 func TestModel_MemoryMenuFillsInput(t *testing.T) {
 	m := previewModel()
+	m.info.Capabilities = map[string]ai.Capability{"memory": {State: "available"}}
 	m.openMenu("commands")
 	m.filter.SetValue("/memory")
 	m.menuKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Empty(t, m.menu)
 	require.Equal(t, "/memory list", m.input.Value())
+}
+
+// TestModel_MemoryMenuHiddenWhenDisabled 验证关闭记忆后不把命令列为可用操作。
+func TestModel_MemoryMenuHiddenWhenDisabled(t *testing.T) {
+	m := previewModel()
+	m.info.Capabilities = map[string]ai.Capability{"memory": {State: "disabled"}}
+	_, items := m.choices()
+	for _, item := range items {
+		require.NotEqual(t, "memory", item.value)
+	}
 }

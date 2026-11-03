@@ -147,6 +147,9 @@ func (e *Executor) Run(ctx context.Context, tool string, args map[string]any) (r
 	if ctx.Err() != nil {
 		return result, ctx.Err()
 	}
+	if execCtx.Err() != nil {
+		return result, execCtx.Err()
+	}
 	if waitErr != nil {
 		return result, waitErr
 	}

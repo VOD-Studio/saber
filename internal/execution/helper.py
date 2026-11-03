@@ -26,7 +26,7 @@ if not isinstance(command, str) or not command:
     print(json.dumps({"type": "error", "message": "command is required"}))
     sys.exit(2)
 
-environment = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+environment = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp", "LANG": "C.UTF-8", "TMPDIR": "/tmp"}
 environment.update(request.get("env") or {})
 os.environ.clear()
 os.environ.update(environment)
