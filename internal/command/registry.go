@@ -39,8 +39,10 @@ type Definition struct {
 	Aliases    [][]string
 	Capability string
 	Authorize  func(chat.Identity) bool
-	Once       bool
-	Handle     Handler
+	// Hidden 的关闭提示仍可执行，但不进入 TUI/平台命令目录。
+	Hidden bool
+	Once   bool
+	Handle Handler
 }
 
 // Receipts 持久化有副作用命令的执行状态，重复投递只重试回执。
@@ -102,6 +104,9 @@ func (r *Registry) Register(def Definition) error {
 func (r *Registry) Describe(capabilities map[string]bool) []Descriptor {
 	result := make([]Descriptor, 0, len(r.definitions))
 	for _, def := range r.definitions {
+		if def.Hidden {
+			continue
+		}
 		if (def.Capability == "" || capabilities[def.Capability]) && catalogID(def.ID) && catalogPath(def.Path) {
 			result = append(result, def.Descriptor)
 		}

@@ -17,6 +17,7 @@ type Flags struct {
 	Verbose        bool
 	ShowVersion    bool
 	GenerateConfig bool
+	JSON           bool   // doctor 的 JSON 输出
 	OutputPath     string // generate-config 的输出路径
 }
 
@@ -30,8 +31,8 @@ func Parse() *Flags {
 // ParseArgs 使用独立 FlagSet 解析子命令，保留旧的全局参数写法。
 func ParseArgs(args []string) (*Flags, error) {
 	f := &Flags{Command: "serve"}
-	fs := flag.NewFlagSet("saber [serve|chat]", flag.ContinueOnError)
-	if len(args) > 0 && (args[0] == "serve" || args[0] == "chat") {
+	fs := flag.NewFlagSet("saber [serve|chat|doctor]", flag.ContinueOnError)
+	if len(args) > 0 && (args[0] == "serve" || args[0] == "chat" || args[0] == "doctor") {
 		f.Command = args[0]
 		args = args[1:]
 	}
@@ -44,6 +45,7 @@ func ParseArgs(args []string) (*Flags, error) {
 	fs.BoolVar(&f.Verbose, "v", false, "enable debug logging (shorthand)")
 	fs.BoolVar(&f.ShowVersion, "version", false, "show version")
 	fs.BoolVar(&f.GenerateConfig, "generate-config", false, "generate example config (output to stdout, use -o to write to file)")
+	fs.BoolVar(&f.JSON, "json", false, "doctor: output JSON checks")
 	fs.StringVar(&f.OutputPath, "o", "", "output file path (used with -generate-config)")
 
 	if err := fs.Parse(args); err != nil {
@@ -51,7 +53,7 @@ func ParseArgs(args []string) (*Flags, error) {
 	}
 	if fs.NArg() > 0 {
 		rest := fs.Args()
-		if rest[0] != "serve" && rest[0] != "chat" {
+		if rest[0] != "serve" && rest[0] != "chat" && rest[0] != "doctor" {
 			return f, fmt.Errorf("未知子命令: %s", rest[0])
 		}
 		f.Command = rest[0]
@@ -61,6 +63,9 @@ func ParseArgs(args []string) (*Flags, error) {
 		if fs.NArg() != 0 {
 			return f, fmt.Errorf("多余参数: %s", fs.Arg(0))
 		}
+	}
+	if f.JSON && f.Command != "doctor" {
+		return f, fmt.Errorf("--json 仅支持 doctor 子命令")
 	}
 	return f, nil
 }

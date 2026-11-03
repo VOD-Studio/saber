@@ -75,6 +75,11 @@ func Run(info matrix.BuildInfo) error {
 func run(parent context.Context, info matrix.BuildInfo) error {
 	state := &appState{info: info}
 
+	// doctor 必须在严格配置加载失败时也能输出结构化结果。
+	if flags, err := cli.ParseArgs(os.Args[1:]); err == nil && flags.Command == "doctor" || len(os.Args) > 1 && os.Args[1] == "doctor" {
+		return runDoctor(parent, os.Args[1:], os.Stdout)
+	}
+
 	if err := state.initConfig(os.Args[1:], os.Stdout); err != nil {
 		return err
 	}
@@ -175,13 +180,11 @@ func (s *appState) initConfig(args []string, stdout io.Writer) error {
 		return ExitSuccess()
 	}
 	// 配置文件可留在工作区作为指向私有状态目录的符号链接；运行状态须跟随真实配置路径保存。
-	if info, err := os.Lstat(s.flags.ConfigPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		resolved, err := filepath.EvalSymlinks(s.flags.ConfigPath)
-		if err != nil {
-			return fmt.Errorf("解析配置文件符号链接失败: %w", err)
-		}
-		s.flags.ConfigPath = resolved
+	resolved, err := resolveConfigPath(s.flags.ConfigPath)
+	if err != nil {
+		return fmt.Errorf("解析配置文件符号链接失败: %w", err)
 	}
+	s.flags.ConfigPath = resolved
 
 	if s.flags.Command == "chat" {
 		cfg, err := config.LoadOrDefault(s.flags.ConfigPath)
@@ -312,16 +315,7 @@ func (s *appState) initServices() error {
 	if err := s.cfg.AI.Validate(); err != nil {
 		return fmt.Errorf("AI配置验证失败: %w", err)
 	}
-	secrets := []string{s.cfg.Matrix.AccessToken, s.cfg.Matrix.Password}
-	for _, provider := range s.cfg.AI.Providers {
-		secrets = append(secrets, provider.APIKey)
-		for _, model := range provider.Models {
-			secrets = append(secrets, model.APIKey)
-		}
-	}
-	for _, model := range s.cfg.AI.Models {
-		secrets = append(secrets, model.APIKey)
-	}
+	protected, secrets := executionInputs(s.cfg, s.flags.ConfigPath)
 	for name, server := range s.cfg.MCP.Servers {
 		if err := execution.ValidateEnvironment(server.Env, secrets); err != nil {
 			return fmt.Errorf("MCP %s 环境验证失败: %w", name, err)
@@ -356,10 +350,6 @@ func (s *appState) initServices() error {
 		return fmt.Errorf("AI服务初始化失败: %w", err)
 	}
 	svc.aiService = aiService
-	protected := []string{s.cfg.Server.TokenPath(s.flags.ConfigPath), s.flags.ConfigPath, s.flags.ConfigPath + ".session", filepath.Join(configDir, "tasks.db"), filepath.Join(configDir, "persona.db"), filepath.Join(configDir, "memory.db")}
-	if s.cfg.Platforms.Matrix.Enabled {
-		protected = append(protected, s.cfg.Matrix.E2EESessionPath, s.cfg.Matrix.E2EESessionPath+".key", s.cfg.Matrix.PickleKeyPath)
-	}
 	if err := aiService.ConfigureExecution(s.cfg.Execution, protected, secrets); err != nil {
 		return fmt.Errorf("执行权限初始化失败: %w", err)
 	}

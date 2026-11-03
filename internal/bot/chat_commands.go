@@ -8,6 +8,7 @@ import (
 
 	"maunium.net/go/mautrix/id"
 	"rua.plus/saber/internal/agent"
+	"rua.plus/saber/internal/ai"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/command"
 	"rua.plus/saber/internal/matrix"
@@ -84,10 +85,28 @@ func (s *appState) buildCommands() error {
 			}
 			return reply(ctx, m, a, fmt.Sprintf("版本: %s\n提交: %s\n分支: %s\n构建时间: %s", s.info.Version, s.info.GitCommit, s.info.GitBranch, s.info.BuildTime))
 		}},
+		{"status", "status", "查看真实能力、后端与安全提示", func(ctx context.Context, m chat.Message, a chat.Adapter, raw string) error {
+			if strings.TrimSpace(raw) != "" {
+				return reply(ctx, m, a, "用法：/status")
+			}
+			return reply(ctx, m, a, s.statusReport(m))
+		}},
 	}
 	for _, def := range defs {
 		if err := add(def.id, []string{def.name}, def.description, "conversation", nil, nil, "", nil, def.handler); err != nil {
 			return err
+		}
+	}
+	if s.services.memoryService == nil {
+		disabled := func(feature string) command.Handler {
+			return func(ctx context.Context, m chat.Message, a chat.Adapter, _ string) error {
+				return reply(ctx, m, a, "需启用 memory.enabled 后使用"+feature+"。")
+			}
+		}
+		for _, feature := range []struct{ id, name string }{{"memory.disabled", "memory"}, {"skill.disabled", "skill"}} {
+			if err := r.Register(command.Definition{Descriptor: command.Descriptor{ID: feature.id, Path: []string{feature.name}, Description: "需启用 memory.enabled", Scope: "conversation"}, Hidden: true, Handle: disabled(feature.name)}); err != nil {
+				return err
+			}
 		}
 	}
 	if aiSvc := s.services.aiService; aiSvc != nil {
@@ -306,6 +325,43 @@ func (s *appState) buildCommands() error {
 		})
 	}
 	return nil
+}
+
+// statusReport 输出服务端真实能力与 local 后端风险，不读取其他用户会话。
+func (s *appState) statusReport(message chat.Message) string {
+	identity := chat.Identity{Session: message.Session, SenderID: message.SenderID, Direct: message.Direct}
+	capabilities := map[string]ai.Capability{}
+	if s.services.aiService != nil {
+		capabilities = s.services.aiService.Capabilities(context.Background(), identity)
+	} else {
+		for _, key := range []string{"tasks", "execution", "file_read", "file_search", "processes", "memory", "skills", "mcp", "context_compaction", "adaptive_budget"} {
+			capabilities[key] = ai.Capability{State: "disabled", Reason: "AI 服务未启用", Tools: []string{}}
+		}
+	}
+	lines := []string{fmt.Sprintf("版本 %s｜提交 %s｜分支 %s", s.info.Version, s.info.GitCommit, s.info.GitBranch)}
+	local := false
+	for _, key := range []string{"tasks", "execution", "file_read", "file_search", "processes", "memory", "skills", "mcp", "context_compaction", "adaptive_budget"} {
+		capability, ok := capabilities[key]
+		if !ok {
+			continue
+		}
+		line := key + ": " + capability.State
+		if capability.Backend != "" {
+			line += " (backend=" + capability.Backend + ", sandboxed=" + fmt.Sprint(capability.Sandboxed) + ")"
+			local = local || capability.Backend == "local" && !capability.Sandboxed
+		}
+		if capability.Reason != "" {
+			line += " — " + capability.Reason
+		}
+		if len(capability.Tools) > 0 {
+			line += "｜工具: " + strings.Join(capability.Tools, ", ")
+		}
+		lines = append(lines, line)
+	}
+	if local {
+		lines = append(lines, "风险：local 后端可读取 Saber 用户可访问的宿主文件与配置密钥；不要授予不可信群成员。")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // onceCommand 标记有副作用的命令，重复投递只重试回执，不重做写入。

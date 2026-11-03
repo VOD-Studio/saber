@@ -32,7 +32,24 @@ func (m *model) choices() (string, []choice) {
 		if m.menu == "commands" {
 			title = "命令"
 		}
-		return title, []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}, {"/memory", "memory", "长期记忆 · 查看与管理"}, {"/skill", "skill", "技能经验 · 查看与管理"}, {"/sidebar", "sidebar", "收起或展开侧栏 · Ctrl+B"}, {"/tools", "tools", "展开工具详情 · Ctrl+T"}, {"F5", "reconnect", "刷新连接与会话"}, {"/quit", "quit", "离开界面 · 空输入时 Ctrl+C"}}
+		items := []choice{{"/new", "new", "新建会话 · Ctrl+N"}, {"/sessions", "sessions", "切换历史 · Ctrl+O"}, {"/model", "models", "选择模型 · Ctrl+P"}, {"/reasoning", "reasoning", "思考等级 · Ctrl+R"}, {"/memory", "memory", "长期记忆 · 查看与管理"}, {"/skill", "skill", "技能经验 · 查看与管理"}, {"/sidebar", "sidebar", "收起或展开侧栏 · Ctrl+B"}, {"/tools", "tools", "展开工具详情 · Ctrl+T"}, {"F5", "reconnect", "刷新连接与会话"}, {"/quit", "quit", "离开界面 · 空输入时 Ctrl+C"}}
+		seen := map[string]bool{}
+		for _, item := range items {
+			seen[item.value] = true
+		}
+		// 服务端真实命令目录随 Info 更新，TUI 不再硬编码业务命令。
+		for _, descriptor := range m.info.Commands {
+			if len(descriptor.Path) == 0 {
+				continue
+			}
+			command := "/" + strings.Join(descriptor.Path, " ")
+			if seen[command] {
+				continue
+			}
+			seen[command] = true
+			items = append(items, choice{command, "run:" + strings.Join(descriptor.Path, " "), descriptor.Description})
+		}
+		return title, items
 	}
 }
 func (m *model) openMenu(menu string) tea.Cmd {
@@ -130,6 +147,10 @@ func (m *model) menuKey(msg tea.KeyPressMsg) tea.Cmd {
 				m.input.SetValue("/skill list")
 				return focus
 			default:
+				if strings.HasPrefix(selected.value, "run:") {
+					m.input.SetValue("/" + strings.TrimPrefix(selected.value, "run:") + " ")
+					return focus
+				}
 				return m.openMenu(selected.value)
 			}
 		}

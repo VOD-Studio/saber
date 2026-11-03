@@ -238,7 +238,7 @@ func (m *model) submit() tea.Cmd {
 
 // runCommand 把非界面内的指令交给服务端共享命令入口，回执以本地轮次展示。
 func (m *model) runCommand(text string) tea.Cmd {
-	if !m.connected || !m.info.Enabled {
+	if !m.connected {
 		m.notice = "需要 saber serve 运行后再执行命令。"
 		m.input.SetValue(text)
 		return nil
@@ -566,6 +566,20 @@ func (m *model) applyEvent(event task.Record) {
 				t.Tools[i] = event.Tool
 			}
 		}
+	case agent.ContextCompacted:
+		m.stage = "上下文已压缩"
+	case agent.TaskStateUpdated:
+		m.stage = "任务状态已更新"
+	case agent.BudgetExtended:
+		m.stage = "已追加执行预算"
+	case agent.BudgetStopped:
+		reason := "预算停止"
+		if event.Budget != nil && event.Budget.StopReason != "" {
+			reason += "：" + event.Budget.StopReason
+		}
+		m.stage = reason
+	case agent.EnvironmentCleanupFailed:
+		m.notice = "任务环境清理失败，工作区已锁定等待人工核查"
 	}
 	m.dirty = true
 }

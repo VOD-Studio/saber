@@ -411,18 +411,18 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 }
 
 // probeDocker 启动时验证活动 Docker 工作区依赖：CLI、daemon 与预装镜像。
-func probeDocker(cfg config.ExecutionConfig) error {
+func probeDocker(ctx context.Context, cfg config.ExecutionConfig) error {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return fmt.Errorf("docker CLI is required for backend docker: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	infoCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := docker(ctx, "info").Run(); err != nil {
+	if err := docker(infoCtx, "info").Run(); err != nil {
 		return fmt.Errorf("docker daemon is not reachable for backend docker: %w", err)
 	}
-	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := docker(ctx, "image", "inspect", cfg.Image).Run(); err != nil {
+	imageCtx, imageCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer imageCancel()
+	if err := docker(imageCtx, "image", "inspect", cfg.Image).Run(); err != nil {
 		return fmt.Errorf("execution image %q is not installed: %w", cfg.Image, err)
 	}
 	return nil

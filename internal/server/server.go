@@ -19,13 +19,16 @@ import (
 	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/ai"
 	"rua.plus/saber/internal/chat"
+	"rua.plus/saber/internal/command"
 	"rua.plus/saber/internal/task"
 )
 
-// Info 提供不含密钥的运行状态和模型目录。
+// Info 提供不含密钥的运行状态、能力与命令目录。
 type Info struct {
-	Enabled bool           `json:"enabled"`
-	Models  []ai.ChatModel `json:"models"`
+	Enabled      bool                     `json:"enabled"`
+	Models       []ai.ChatModel           `json:"models"`
+	Capabilities map[string]ai.Capability `json:"capabilities"`
+	Commands     []command.Descriptor     `json:"commands"`
 }
 
 // Turn 是供界面展示的任务快照，不包含系统提示和原始模型协议。
@@ -43,6 +46,8 @@ type Turn struct {
 	Tokens    int                `json:"tokens"`
 	Duration  time.Duration      `json:"duration"`
 	CreatedAt time.Time          `json:"created_at"`
+	State     *agent.TaskState   `json:"state,omitempty"`
+	Budget    *agent.BudgetStats `json:"budget,omitempty"`
 }
 
 // Message 包含客户端生成的幂等键和本轮选择，不接受客户端指定的执行身份。
@@ -68,6 +73,7 @@ type CommandResult struct {
 // 身份由服务端令牌与操作系统用户确定，不接受请求体中的发送者或房间。
 type CommandDispatcher interface {
 	Dispatch(ctx context.Context, session chat.Session, senderID, id, text string) (reply string, handled bool, err error)
+	Describe() []command.Descriptor
 }
 
 type handler struct {
@@ -129,7 +135,7 @@ func (h *handler) view(t task.Task) Turn {
 			}
 		}
 	}
-	result := Turn{ID: t.ID, Session: t.Message.Session.Conversation, RequestID: t.Message.ID, Input: t.Message.Text, Content: t.Result.Content, Status: t.Status, Error: t.Error, Model: t.Request.Model, Effort: effort, Tokens: t.Result.Usage.TotalTokens, Duration: t.Result.Duration, CreatedAt: t.CreatedAt}
+	result := Turn{ID: t.ID, Session: t.Message.Session.Conversation, RequestID: t.Message.ID, Input: t.Message.Text, Content: t.Result.Content, Status: t.Status, Error: t.Error, Model: t.Request.Model, Effort: effort, Tokens: t.Result.Usage.TotalTokens, Duration: t.Result.Duration, CreatedAt: t.CreatedAt, State: t.Result.State, Budget: t.Result.Budget}
 	for _, round := range t.Result.Rounds {
 		result.Tools = append(result.Tools, round.Tools...)
 	}
@@ -141,11 +147,19 @@ func respond(w http.ResponseWriter, value any) {
 		return
 	}
 }
-func (h *handler) info(w http.ResponseWriter, _ *http.Request) {
-	info := Info{Models: []ai.ChatModel{}}
+func (h *handler) info(w http.ResponseWriter, r *http.Request) {
+	info := Info{Models: []ai.ChatModel{}, Capabilities: map[string]ai.Capability{}, Commands: []command.Descriptor{}}
 	if h.service != nil {
 		info.Enabled = h.service.Tasks() != nil
 		info.Models = h.service.ChatModels()
+		// 本机诊断会话只用于能力查询，不伪装成已有用户会话。
+		diagnostic := chat.Identity{Session: chat.Session{Platform: "terminal", Account: "saber", Conversation: "status"}, SenderID: strconv.Itoa(os.Getuid())}
+		info.Capabilities = h.service.Capabilities(r.Context(), diagnostic)
+	} else {
+		info.Capabilities = ai.DisabledCapabilities("AI 服务未启用")
+	}
+	if h.commands != nil {
+		info.Commands = h.commands.Describe()
 	}
 	respond(w, info)
 }

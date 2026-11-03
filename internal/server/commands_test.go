@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,18 +12,22 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"rua.plus/saber/internal/chat"
+	"rua.plus/saber/internal/command"
 )
 
 // stubCommands 记录本机指令分发，返回预设回执。
 type stubCommands struct {
-	got    chat.Session
-	sender string
-	id     string
-	text   string
-	reply  string
-	handle bool
-	err    error
+	got      chat.Session
+	sender   string
+	id       string
+	text     string
+	reply    string
+	handle   bool
+	err      error
+	commands []command.Descriptor
 }
+
+func (s *stubCommands) Describe() []command.Descriptor { return s.commands }
 
 func (s *stubCommands) Dispatch(_ context.Context, session chat.Session, senderID, id, text string) (string, bool, error) {
 	s.got, s.sender, s.id, s.text = session, senderID, id, text
@@ -37,6 +42,24 @@ func commandsCall(t *testing.T, handler http.Handler, path, body string) *httpte
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, req)
 	return recorder
+}
+
+func TestServer_InfoCapabilitiesAndCommands(t *testing.T) {
+	stub := &stubCommands{commands: []command.Descriptor{{ID: "status", Path: []string{"status"}, Description: "真实能力"}}}
+	h := New(nil, "secret", stub)
+	req := httptest.NewRequest("GET", "/v1/info", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	recorder := httptest.NewRecorder()
+	h.ServeHTTP(recorder, req)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var info Info
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &info))
+	require.Len(t, info.Commands, 1)
+	require.Equal(t, "status", info.Commands[0].ID)
+	require.Equal(t, "disabled", info.Capabilities["execution"].State)
+	require.False(t, info.Capabilities["execution"].Sandboxed)
+	require.Len(t, info.Capabilities, 10)
+	require.NotContains(t, recorder.Body.String(), "secret", "info must not echo the server token")
 }
 
 func TestServer_CommandDispatch(t *testing.T) {

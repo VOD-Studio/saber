@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- P0 单 Agent 长任务能力：持久任务状态（原始指令、计划、发现、产物、未决问题）与运行内上下文压缩；压缩按完整模型批次提交检查点，失败不删除历史；续接从检查点水位恢复。`agent.max_rounds` 默认 40，新增 `agent.budget` 自动评估追加轮数并以 `max_total_tokens` 封顶。
+- 执行能力补全：新增 `backend: local|docker`（local 默认，开启执行时必须显式选择）、任务级持久环境、后台 `process` 工具与取消清理；分页 `read_file`、`search_files`、`glob_files`、`read_output` 及不可猜测输出句柄。输出/命令超过 16 MiB、取消或超时会终止整组子进程；清理失败锁定工作区并跨重启阻断。
+- 真实能力与诊断：`/status`、`GET /v1/info` 的 `capabilities/commands`、TUI 服务端命令目录、`saber doctor [-c PATH] [--json]` 只读检查；配置生成器与文档补充 local/docker、预算、压缩、工具授权与 local 隔离限制。
 - 通用任务文件交付：新增可选端口 `chat.FileAdapter`（`UploadFile` + `SendUploadedFile`），`!task logs` 与 `read_file deliver=true` 产物不再绑定 Matrix，任何实现该端口的平台都能收到文件；Matrix 已实现。Violet 的 Bot API 目前没有通用文件消息，暂不实现，任务产物降级为一条文字提示。
 
 ### Fixed

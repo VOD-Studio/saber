@@ -33,11 +33,13 @@ func (m *Manager) RegisterDelivery(platform string, send SendFunc) error {
 
 // Record 是可公开给聊天入口的持久化增量，不暴露原始模型响应及加密推理。
 type Record struct {
-	ID    int64            `json:"id"`
-	Kind  agent.EventKind  `json:"kind"`
-	Round int              `json:"round"`
-	Text  string           `json:"text,omitempty"`
-	Tool  agent.ToolRecord `json:"tool,omitempty"`
+	ID     int64              `json:"id"`
+	Kind   agent.EventKind    `json:"kind"`
+	Round  int                `json:"round"`
+	Text   string             `json:"text,omitempty"`
+	Tool   agent.ToolRecord   `json:"tool,omitempty"`
+	State  *agent.TaskState   `json:"state,omitempty"`
+	Budget *agent.BudgetStats `json:"budget,omitempty"`
 }
 
 // ReadEvents 按游标读取至多 256 条事件；慢速订阅者可以断开后继续读取。
@@ -61,12 +63,15 @@ func (m *Manager) ReadEvents(ctx context.Context, session chat.Session, taskID, 
 			Round    int
 			Text     string
 			Tool     agent.ToolRecord
+			State    *agent.TaskState
+			Budget   *agent.BudgetStats
 			Response struct{ Content string }
 		}
 		if err = json.Unmarshal(data, &event); err != nil {
 			return nil, err
 		}
 		record.Kind, record.Round, record.Text, record.Tool = event.Kind, event.Round, event.Text, event.Tool
+		record.State, record.Budget = event.State, event.Budget
 		if event.Kind == agent.ModelCompleted {
 			record.Text = event.Response.Content
 		}

@@ -56,13 +56,22 @@ agent:
   stream: true
   task_receipt_enabled: false
   task_delivery_max_attempts: 20
-  max_rounds: 5
+  max_rounds: 40
   timeout_seconds: 600
   max_tool_output_bytes: 32768
+  budget:
+    enabled: true
+    initial_rounds: 0 # 0 = min(5, max_rounds)
+    extension_rounds: 5
+    max_total_tokens: 200000
   context:
     enabled: true
     max_messages: 50
     max_input_tokens: 32768
+    compaction:
+      enabled: true
+      trigger_ratio: 0.8
+      target_ratio: 0.5
   retry:
     enabled: true
     max_retries: 3
@@ -83,15 +92,15 @@ agent:
 
 `task_delivery_max_attempts` 是任务结果投递的最大尝试次数（含首次，默认 20，必须为正数，省略或 0 使用默认值）。失败按 1、2、4…秒退避，封顶 256 秒：20 次约容忍 51 分钟的持续投递故障；用尽后任务的投递状态变为 `abandoned` 并写 ERROR 日志，不再自动重试，结果仍保存在 `tasks.db`。
 
-`max_rounds` 包含最终回答；`timeout_seconds` 覆盖整次任务的模型请求、重试等待与工具执行。`execution.timeout_seconds` 单独限制一次执行工具调用。
+`max_rounds` 是硬上限，包含最终回答；默认 40。`timeout_seconds` 覆盖整次任务的模型请求、重试等待与工具执行，不会被预算追加动态延长。`execution.timeout_seconds` 单独限制一次前台执行工具调用。
 
-重试只重试当前模型请求，不重放已执行的工具。`retry.enabled: false` 关闭同模型重试；备用模型由单独的 `fallback_enabled` 控制，开启时必须填写 `fallback_models`。熔断状态在任务之间保留。
+`budget.enabled` 开启自适应轮数：到达 `initial_rounds`（0 表示 `min(5, max_rounds)`）后，程序先做确定性否决（取消/截止、用量不足、三次同名同参数且实质输出相同），再用主模型做一次无工具评估；只有程序决定才按 `extension_rounds` 追加，封顶 `max_rounds`。`max_total_tokens` 是任务级保守用量上限，覆盖主请求、重试、摘要和评估；`admit` 在真实 HTTP 请求前收紧输出预算，无 usage 时按输入/输出字节估算。关闭自适应时仍按 `max_rounds` 固定执行并遵守用量上限。
 
-上下文在每次模型请求前应用预算，包含新增工具结果。旧历史按完整用户轮次移除，保留系统提示和当前轮，工具调用与结果、Responses 推理数据一起保留或移除。`enabled: false` 表示新消息不继承前序聊天历史，当前任务内的工具循环仍保留。
+`max_rounds > 100` 会提示成本风险，默认 40 不告警。
 
-`max_input_tokens` 使用序列化输入的字节数保守估算，包含工具定义和保留的推理数据，并非提供商 tokenizer 的精确计数。`max_messages` 包含系统提示、用户、助手及工具消息。当前轮本身超过预算时明确报错，不静默截断。大型图片、工具 schema 或较长的加密推理记录可能需要更高预算。
+上下文在每次模型请求前按渲染后的输入计算预算。任务请求的原始用户指令逐字保留为 user 资料；工作状态与滚动摘要作为 assistant 工作资料注入发送副本，不写回数据库。超过软触发比例（`trigger_ratio`，按 `max_input_tokens`）或 `max_messages` 时，按完整模型批次压缩已完成历史：assistant 工具调用、全部匹配结果与 ResponsesHistory 不拆分；保留最近两个完整批次与最新用户消息。摘要失败、不减体积或保留区仍超硬限时明确失败，不提交检查点、不删除原始轨迹。`enabled: false` 表示新任务不继承前序任务历史/状态，当前任务内的工具循环与压缩不受影响。
 
-这些限制只裁剪发给模型的上下文，不删除 `tasks.db` 中的消息、任务、事件和结果。当前没有历史自动过期/删除功能，也不再暴露旧的 `expiry_minutes`、`inactive_room_hours`。
+`max_input_tokens` 使用序列化 input 的字节数保守估算，包含工具定义和保留的推理数据，并非提供商 tokenizer 的精确计数。`max_messages` 包含系统提示、用户、助手及工具消息。这些限制只影响发给模型的上下文，不删除 `tasks.db` 中的消息、任务、事件和结果。
 
 ## 服务端和可选能力
 
@@ -110,7 +119,15 @@ mcp:
   enabled: false
 execution:
   enabled: false
-  # network: true # 沙箱联网权限；默认开启，设为 false 时断网隔离
+  backend: local # 开启时必须显式选择 local 或 docker
+  # image: "python:3.13-slim" # 仅 docker，需预先安装
+  # network: true # 仅 docker 生效
+  # workspaces:
+  #   project:
+  #     path: "/srv/workspaces/project"
+  #     backend: docker
+  # grants:
+  #   - {platform: matrix, account: "@bot:example", room: "!room:example", users: ["@alice:example"], workspace: project, tools: [exec, read_output, read_file, search_files, glob_files, process, write_file, apply_patch]}
 commands:
   admins: []
   session_writers: []
@@ -122,6 +139,21 @@ shutdown:
 令牌和任务数据库位于配置文件目录，令牌首次启动自动创建，权限为 `0600`。不同服务实例必须使用独立的数据目录和监听端口。
 
 MCP 默认关闭，不加载内置或外部服务器。开启后还必须通过 `execution` 配置当前身份的工作区、工具列表、`mcp_requirements` 和所需能力。只把 `mcp.enabled` 改为 true 不代表工具已授权；本地 TUI 也不自动获得权限。具体配置见 [执行与 MCP 授权](execution.md)。
+
+## 长期记忆
+
+```yaml
+memory:
+  enabled: false # 默认关闭；关闭时 /memory 与 /skill 明确提示需启用，工具不注册
+  auto_learn: true # 记忆启用后按轮次自动复盘；关闭则只保留显式写入
+  review_interval: 5 # 每多少个已完成轮次触发一次复盘（0 使用默认 5）
+  max_chars: 2200
+  inject_max_bytes: 8192
+```
+
+个人空间与群空间分别隔离；注入的记忆与技能目录作为运行时资料只进入本次发送副本，不写入任务请求或摘要输入。`saber doctor` 会报告记忆开关与配额、数据库存在性与权限，不创建数据库。
+
+`/status` 命令始终可用（AI 关闭时也能查询关闭原因），输出各能力组的真实状态、`backend`/`sandboxed` 与 local 风险提示；`GET /v1/info` 同时返回 `capabilities` 与随服务端注册表更新的 `commands`，TUI 菜单据此生成服务端命令项。
 
 `commands.admins` 单独授权全局 `ai switch` 和共享人格 `new/del`；`commands.session_writers` 授权精确会话内的 `ai clear` 与人格 `set/clear`。两者均按 `platform`、`account`、完整用户 ID 匹配；会话写入还要求 `room` 和 `thread`（省略表示主会话），不接受通配符，也不继承 `execution.task_admins`。例如：
 

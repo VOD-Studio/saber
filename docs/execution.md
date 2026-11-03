@@ -1,74 +1,70 @@
 # 自主工具与执行权限
 
-第一版提供 `exec`、`read_file`、`list_files`、`write_file`、`apply_patch`。模型可连续调用工具，使用退出码和错误信息修正下一步操作；已授权成员不需要逐条确认。权限来自管理员的 YAML 配置，聊天、网页、文件、模型工具参数和 MCP 工具描述都不能修改授权。
+执行工具默认关闭，关闭时聊天、任务、计划与记忆不受影响。开启后必须先显式选择后端：
 
-默认不开放执行权限，也不自动授权已有 MCP 工具。未授权成员可以继续进行无工具的聊天。
+- `local`（默认）：命令以 Saber 宿主用户身份运行，无容器隔离；适合单机可信环境。
+- `docker`：每个任务一个预装 Python 3 的容器，工作区挂载到 `/workspace`；适合需要文件系统边界或断网的场景。可在 `workspaces.<name>.backend` 覆盖全局后端。
 
-## 宿主二进制部署
+升级时必须显式写 `backend`：`execution.enabled: true` 且活动工作区的 `workspace.backend` 与 `execution.backend` 都为空时，启动会拒绝并提示 `execution backend must be explicit when enabling execution`。已有 Docker 部署补 `backend: docker`，新部署生成配置默认 `backend: local`。
 
-本轮支持的执行器部署方式是：Saber 二进制和 Docker CLI 运行在同一宿主用户下，连接本机 Docker daemon；任务工作目录也是该 daemon 可以直接挂载的宿主路径。Linux Docker Engine 与 macOS Docker Desktop 均应先在实际运行 Saber 的用户会话中验证连接。不要使用远端 daemon：本程序检查的是本机路径，远端同名路径不能保证是同一个工作区。
+## 工具
 
-现有 `Dockerfile` 的 Distroless 运行镜像只适用于 `execution.enabled: false`，缺少 Docker CLI 和工作区路径映射。仅挂载 Docker socket 不能补齐部署条件。本轮采用宿主二进制方案，不提供嵌套容器部署。
+模型可连续调用以下工具，不需要逐条确认：
 
-在仓库中构建并安装到当前非 root 用户的目录：
+- `exec {command}`：在当前工作区运行 shell 命令；非零退出作为可纠正的工具错误返回，不自动重跑。
+- `process {action,...}`：`start|list|status|wait|logs|kill` 管理本任务后台作业；每任务最多 8 个运行中作业，作业 ID 为 `p_<32hex>`，只能由当前任务访问。
+- `read_file {path, offset?, limit?, byte_offset?, deliver?}`：分页读取文本；`offset` 是 0-based 行号，`limit` 为 1..1000（默认 200），单页正文最多 4096 字节。超长行用返回的 `next_byte_offset` 续读；二进制或非法 UTF-8 会被拒绝。`deliver=true` 改为保存完整文件快照并交付，不能与分页参数同时使用。
+- `list_files {path?}`：列出直属条目，展示链接名称但不跟随。
+- `write_file {path, content}`、`apply_patch {path, edits:[{old,new}]}`：父目录必须存在；补丁要求每处 `old` 唯一匹配后才写回，单文件上限 16 MiB。
+- `search_files {pattern, path?, file_glob?, case_sensitive?, offset?, limit?, include_hidden?}`：Go RE2 正则搜索文件内容，返回 `path`、1-based `line` 与命中文本；默认跳过隐藏项和 `.git`。
+- `glob_files {pattern, path?, offset?, limit?, include_hidden?}`：按路径段匹配 `* ? []` 与 `**`（匹配零个或多个路径段）。
+- `read_output {output_id, offset?, limit?}`：按原始字节游标回读任何工具或后台作业的输出归档，`limit` 为 4..4096。
 
-```sh
-make build
-install -d -m 700 "$HOME/saber/bin" "$HOME/saber/state" "$HOME/saber-work/project"
-install -m 755 bin/saber "$HOME/saber/bin/saber"
-# 首次部署生成配置；已有配置直接编辑，不覆盖现有凭据。
-"$HOME/saber/bin/saber" -generate-config -o "$HOME/saber/state/config.yaml"
-chmod 600 "$HOME/saber/state/config.yaml"
+搜索与 glob 都按字典序深度优先遍历，最多 100000 项、32 层；内容搜索跳过首 8 KiB 含 NUL 或超过 4 MiB 的文件，累计读取上限 64 MiB。触达硬限时返回 `truncated:true`、`eof:false`、`next_offset:null`，应缩小 `path` 或 `file_glob`。搜索/glob 的 `data` 编码后不超过 8 KiB。
 
-docker info
-docker pull python:3.13-slim
-docker image inspect python:3.13-slim
-```
+所有文件工具共用 Go 实现，两个后端语义一致。工作区路径通过 `os.OpenRoot` 钉住，逐组件拒绝链接；Unix 上以 `O_NOFOLLOW|O_NONBLOCK` 打开后校验普通文件，避免符号链接、FIFO 与末组件替换。`local` 后端不会对整个工作区做挂载节点扫描；Docker 后端在打开执行环境前和每次新命令前检查挂载中的 IPC/设备节点。
 
-编辑生成的配置：启用 `ai.enabled` 和 `platforms.matrix.enabled`，填写真实模型与 Matrix 账号；按下方示例增加 `execution`。把 `log_dir` 设置为当前用户目录下 `saber/state/execution` 的**绝对路径**，把工作区 `path` 设置为 `saber-work/project` 的绝对路径。将账号、测试群 ID、成员 ID 换成真实值，不要把 YAML 中的 `$HOME` 当成会自动展开的变量。E2EE 的数据库及密钥路径应放在私有 `saber/state` 中，不能放进工作区。运行用户必须可读写工作区并使用 Docker。
+## 输出、回读与取消
 
-```sh
-cd "$HOME/saber/state"
-exec "$HOME/saber/bin/saber" -c "$HOME/saber/state/config.yaml"
-```
+每次调用分配不可猜测的 `output_id`（`t<taskID>-<32hex>`），完整输出写在 `<log_dir>/task-<taskID>/output-<32hex>.log`，目录 `0700`、文件 `0600`。模型只看到有界 `summary` 与句柄；日志超过 16 MiB 时保留已写内容并终止对应进程。`read_output` 的 `offset` 必须落在 UTF-8 字符边界；运行中的日志读到当前末尾返回 `eof:false` 和 `caught_up:true`，writer 关闭后到末尾才 `eof:true`。
 
-保持同一配置目录、工作目录和执行日志目录；一个任务数据库只运行一个 Saber 进程。进程启动时执行 Docker 连接及残留容器清理检查，失败会明确拒绝启动执行器。升级前停止旧进程，替换二进制后再启动；同时备份私有状态目录中的任务数据库、WAL/SHM（如存在）、Matrix 会话/E2EE 密钥和执行日志。
+`read_output` 只接受当前任务或祖先任务的句柄，并校验调用者为源任务发起人或本群任务管理员；不能凭同房间猜句柄读取其他人的日志。终态任务与合法续接任务仍可回读。
 
-默认启动为常驻服务，与标准输入和 Matrix 是否启用无关。Linux 如需持续运行，可保存下面的用户服务为 `~/.config/systemd/user/saber.service`，再执行 `systemctl --user daemon-reload && systemctl --user enable --now saber`。服务使用的 PATH 和 Docker 连接必须与前台验证一致；Docker Desktop 等自定义 CLI 安装路径需补入 PATH。前台进程需先退出。
+`process` 的 `logs` 复用同一套字节分页。`wait` 默认 10 秒、上限 30 秒，超时只返回 `running`，不会杀进程；`kill` 幂等。成功查询固定 `exit_code: 0`，启动/协议/权限错误为 `-1` 并带 `error`。
 
-```ini
-[Unit]
-Description=Saber Matrix Agent
+前台 `exec` 使用 `execution.timeout_seconds`；环境打开与后台作业使用完整任务 context，不继承单次工具超时。取消、超时或输出超限会向整组进程 TERM，最多 2 秒后 KILL，并等待输出收集结束。
 
-[Service]
-WorkingDirectory=%h/saber/state
-ExecStart=%h/saber/bin/saber -c %h/saber/state/config.yaml
-Environment=PATH=/usr/local/bin:/usr/bin:/bin
-UMask=0077
-Restart=on-failure
-RestartSec=5
-TimeoutStopSec=45
+## 环境与清理
 
-[Install]
-WantedBy=default.target
-```
+每个持久化任务首次需要执行时才创建环境：
 
-上线前在专用测试群依次验收：交办生成文件 → 回复回执补充要求 → 回复回执取消运行中的任务 → 下载失败任务日志 → 创建一次性计划并等待无人发消息时汇报 → 停止、重启进程后查询旧任务和续接 → 开启 E2EE 验证附件解密。用 `!task status` 检查执行与投递状态，用 `!schedule status` 检查下次执行及触发记录。真实模型、Matrix 群和 E2EE 需要单独完成在线验收；本地模拟测试通过不代表该步骤已完成。
+- `local`：任务级私有 `TMPDIR`、工作区 cwd 与已校验的 `workspaces.<name>.env`；只额外保留宿主 `PATH`、`HOME`、`LANG`、`LC_ALL`，不复制机器人 API/token 环境。每条命令使用独立进程组，`cd/export` 不跨命令保留，但 `$TMPDIR` 中的文件与后台作业可复用。
+- `docker`：每个任务 create/start 一次容器，PID 1 用 Python 长期 sleep 保活；命令通过 `docker exec` 的 NDJSON supervisor 执行。容器只读根、非 root、cap-drop、no-new-privileges、128 pids、512 MiB/1 CPU、工作区唯一 bind mount，不挂 Docker socket 或凭据；`/tmp` 为 256 MiB 的 `rw,nosuid,nodev` tmpfs（允许 `go test` 生成临时可执行文件），网络为 bridge 或显式 `network:false` 时的 none；`--pull=never`，不自动下载镜像。
+
+首次 create/start/exec 前先原子写入 `<log_dir>/task-<id>/environment.json`，清理成功后才标为 `closed`。清理失败会保留任务为 `running`、锁定目录、写入 `quarantine` 标记并公开 `environment_cleanup_failed`；重启后该目录继续阻止领取排队任务，需管理员核查后手动标记 closed。Docker 残留按 owner 标签在启动时清理；local 重启不会按缓存 PID 猜杀，见 `saber doctor` 的旧环境记录提示。
+
+`task.Options.Finalize` 在保存终态前清理环境，清理失败不宣布完成/取消。服务停止时在任务队列退出后再兜底关闭执行器，总清理上限 15 秒。
+
+## local 隔离限制
+
+`local` 不是安全沙箱：命令可读取 Saber 用户可访问的配置密钥、任务/记忆数据库和其他工作区；程序层个人/群隔离不构成 OS 隔离。没有恶意 daemon 防护、断网或资源配额；主动 `setsid`/daemon 逃逸无法强制约束；Saber 被 SIGKILL 后也不能保证清理所有 local 孤儿进程。取消验收只覆盖 Saber 持有并管理的普通命令与派生进程。不要把 `local` 授权发给不可信群成员；需要强隔离或断网时使用 `backend: docker`。
+
+`local` 支持 Darwin/Linux/FreeBSD/OpenBSD 并使用 `/bin/sh`；其他平台保持二进制可编译，活动 local 工作区含 `exec`/`process` 授权时明确报错 `local execution is unsupported on this platform; configure backend: docker`。`network: false` 对 local 不生效，配置时会拒绝启动（`local backend cannot enforce network isolation`）。
 
 ## 配置
-
-Docker daemon 必须可用。管理员预先安装包含 `/usr/bin/env`、Python 3 和 `/bin/sh` 的可信镜像，例如 `docker pull python:3.13-slim`；程序使用 `--pull=never`，不自动拉取模型指定的镜像。开发工具链应预装在镜像中，生产环境建议使用固定镜像 digest。
 
 ```yaml
 execution:
   enabled: true
-  # network: true # 沙箱联网权限；默认开启，设为 false 时断网隔离
-  image: "python:3.13-slim"
+  backend: local # 或 docker；活动工作区必须显式选择
+  # image: "python:3.13-slim" # 仅 docker，需预先安装
+  # network: false # 仅 docker；默认开启
   log_dir: "/srv/saber-private/execution"
   timeout_seconds: 60
   workspaces:
     project:
       path: "/srv/workspaces/project"
+      # backend: docker # 可选，覆盖全局
       env:
         LANG: "C.UTF-8"
   task_admins:
@@ -80,47 +76,27 @@ execution:
     - platform: "matrix"
       account: "@saber:example.org"
       room: "!room:example.org"
-      users: ["@alice:example.org", "@bob:example.org"]
+      users: ["@alice:example.org"]
       workspace: "project"
-      tools: ["exec", "read_file", "list_files", "write_file", "apply_patch"]
+      tools: ["exec", "read_output", "read_file", "list_files", "write_file", "apply_patch", "search_files", "glob_files", "process"]
       capabilities: []
   mcp_requirements: {}
 ```
 
-`task_admins` 只授予指定群内的任务取消、任务日志读取和计划暂停/删除权限，不授予工作区或工具权限；未配置时仍只有发起人可管理。它不自动信任 Matrix 显示名或群权力等级，修改配置并重启后生效。管理员不能改变计划负责人、工作区或继承负责人的执行权限。
+`task_admins` 只授予同群任务取消、日志读取与计划暂停/删除，不授予执行工具。工作区必须是现有绝对路径，不得包含 Saber 配置、任务/人格/记忆数据库或执行日志；不同工作区不可嵌套。启动时会克隆并冻结授权，恢复任务时重新核对目录与工具权限。
 
-工作区必须是现有绝对路径，同群同成员只绑定一个工作区，不支持聊天参数任意切换目录。不同工作区不可嵌套，避免通过父子目录绕过任务串行。启动时会拒绝包含 Saber 配置、任务数据库、人格数据库或日志目录的工作区；启用 Matrix 时还会保护其会话与 E2EE 密钥。不要把其他服务的凭据文件放进工作区。权限变更由管理员修改配置并重启，恢复排队任务时重新核对目录和工具权限。
-
-`grants` 中可将 `room` 设为 `"*"` 授权该平台账号下所有会话，将 `users` 设为 `["*"]` 授权所有现有及未来成员。平台和账号必须填写精确值；精确会话和成员授权优先于通配授权。此配置允许匹配的成员在整个工作区运行命令并修改文件，应只用于明确允许全员操作的工作区。`task_admins` 始终要求精确会话和成员 ID。
-
-若工作区就是 Saber 源码仓库，应将运行配置、令牌和 `tasks.db` 等状态放到仓库外。仓库内的 `config.yaml` 可以是指向私有配置文件的符号链接；Saber 会按符号链接的真实路径保存令牌、任务数据库和会话状态。
-
-容器使用宿主当前非 root UID/GID，Saber 以 root 启动时改为 `65534:65534`。管理员需提前给该用户工作区写权限。环境变量只取 `workspaces.<name>.env`，不接受模型传入额外变量；拒绝 Saber 的 Matrix token、模型密钥值以及保留的凭据变量名。按需配置工作区专用凭据，不复制机器人的运行环境。
-
-## 隔离与权限边界
-
-- 每次工具调用创建独立容器；只将指定工作目录挂载到 `/workspace`，禁用递归挂载，不挂载 Docker socket、Saber 配置或日志目录。挂载前检查工作区，不允许夹带 Unix socket、FIFO 或设备节点，避免绕过网络限制连接宿主服务。
-- 沙箱默认开启网络（bridge 模式），允许网络请求与 DNS 解析；可在配置中设置 `network: false`（或 `network_enabled: false`）开启固定断网（none 模式）。只读根文件系统、非 root 用户、移除全部 capabilities、禁止提权；限制 128 个进程、512 MiB 内存和 1 CPU，并提供 64 MiB 的临时 `/tmp`。进程环境从空环境开始构造。
-- 工作区文件在各次调用之间保留；容器进程、临时文件和 shell 环境不跨调用保留。`exec` 拥有整个工作区内的读写能力，不能通过只隐藏 `write_file` 把 shell 变成只读。
-- 文件工具只接受相对路径，拒绝 `..`、绝对路径、符号链接和非普通文件；`list_files` 可列举目录和链接名称，但不跟随链接。容器中的命令可以读镜像自身文件，不能据此访问未挂载的宿主目录。
-- 取消或超时会强制删除本次容器，结束全部子进程。清理失败会封锁该工作区的后续工具调用，需检查 Docker 并重启；启动时先按执行器专属标签清理残留容器，再恢复排队任务。一个任务数据库和日志目录只能由一个 Saber 进程使用。
-
-Docker 仍需要可信的宿主和 daemon；容器不是独立虚拟机。参数依据 [Docker 容器运行说明](https://docs.docker.com/engine/containers/run/) 和 [bind mount 说明](https://docs.docker.com/engine/storage/bind-mounts/) 设置。
+Docker 部署还要求 Saber 与 Docker CLI/daemon 在同一宿主用户会话中，镜像预装 `/usr/bin/env`、Python 3 与 `/bin/sh`。生产环境建议固定镜像 digest。现有 Distroless 运行镜像只适用于 `execution.enabled: false`。
 
 ## MCP 与外部能力
 
-所有 MCP 实际调用都经过 `Manager.CallTool` 的同一权限检查，工具列表也按同一策略筛选。默认拒绝未知工具、未授权成员、账号/群不符、工作区不符和缺少能力的调用；猜工具名、伪造 `user_id` 参数或保留旧请求快照都不能绕过。
-
-MCP 服务器是由管理员配置的外部能力，不会自动被上述本地容器隔离。管理员必须按工具实际最大权限声明要求，不使用服务器自报的 `readOnly`、描述或模型对命令目的的判断作为授权依据。每个 MCP 工具都需要 `external`，发布、部署、访问其他目录时再分别要求 `publish`、`deploy`、`cross_directory`。例如：
+所有 MCP 实际调用都经过同一权限检查，默认拒绝未知工具、未授权成员、账号/群不符和缺少能力的调用。每个 MCP 工具都需要 `external`；发布、部署、跨目录分别要求 `publish`、`deploy`、`cross_directory`，不信任服务端自报的只读描述。
 
 ```yaml
 execution:
-  # 其余 image/workspaces 等字段同上
   mcp_requirements:
     "mcp:release:publish": ["publish"]
     "mcp:production:deploy": ["deploy"]
     "mcp:archive:read": ["cross_directory"]
-    "mcp:web_fetch:web_fetch": []
   grants:
     - platform: "matrix"
       account: "@saber:example.org"
@@ -131,31 +107,10 @@ execution:
       capabilities: ["external", "publish"]
 ```
 
-这个授权允许指定发布工具，但不允许部署或访问其他目录。具备通用远程命令、网络请求或代理执行能力的 MCP 服务应按全部可实现的外部副作用授权，不能把它声明成受限的只读工具。本地 `exec` 默认具备网络访问（可通过配置 `execution.network: false` 显式开启断网隔离）；外部发布/部署仍建议通过单独配置和授权的 MCP 工具完成。stdio MCP 仍要求原有命令白名单，其子进程只得到 `PATH` 和显式 `env`，不再继承机器人环境。
+stdio MCP 仍要求原有命令白名单，其子进程只得到 `PATH` 和显式 `env`。
 
-## 输出与交付
+## 诊断
 
-工具结果包含 `exit_code`、前 8 KiB 的 `summary`、完整输出的 `log_path`，失败时附加 `error`。命令的非零退出作为工具失败反馈模型，不自动重跑命令。单次工具输入上限 4 MiB、输出上限 16 MiB；超出输出上限会终止容器，保留停止前已归档输出。单次超时默认 60 秒，总任务仍受 `agent.timeout_seconds` 与 `agent.max_rounds` 限制。
+`saber doctor [-c PATH] [--json]` 只读检查配置、模型、agent/context/budget、命令权限、工作区与私有文件权限、SQLite 快照、local 平台与 `/bin/sh`，以及仅对实际使用的 Docker 工作区执行 `docker info`、镜像检查与残留容器列举。它不监听端口、不创建 token/目录/数据库、不清理容器、不发模型请求；普通模式输出 `ok|warning|error code message`，`--json` 输出 `{checks, ok}`。退出码：0 无错误、1 存在配置/依赖错误、2 非法参数。
 
-`write_file` 创建/覆盖完整文件；`apply_patch` 接收 `{path, edits: [{old, new}]}`，先验证每处旧文本唯一匹配，再写回。它是单文件精确替换格式，不接受 unified diff。
-
-生成文件后调用 `read_file` 并设置 `deliver: true`。执行器在工作区外保存不可变快照；任务完成后经平台的文件发送能力（`chat.FileAdapter`）交付，Matrix 以 `m.file` 回复原消息并保留话题；没有文件能力的平台（当前是 Violet）不会发送文件，改发一条「任务产生了 N 个文件，当前平台无法发送」提示，且 `read_file deliver=true` 会被提前拒绝。上传内容始终加密，解密信息通过消息事件传递；E2EE 房间由 Matrix 客户端加密事件。每个文件使用稳定事务 ID，上传最多 2 分钟、单条消息发送最多 30 秒，多附件不共享总超时。数据库逐项保存上传 URI、加密元数据和消息 ID；重试及重启复用已上传内容并跳过已发送项，不再执行命令。若服务端接受上传后连接中断、尚未获得 URI，该次上传仍可能留下孤立媒体。交付前再次检查原成员的文件读取权限。授权已撤销时保留待投递状态供管理员处理。
-
-`!task logs <ID>` 向本群交付已结束任务的完整执行记录 JSON 和全部命令输出文件，不受聊天摘要截断影响；发起人及任务管理员可用，失败、超时、取消和中断任务同样支持。单文件沿用 16 MiB 上传上限，超限明确报错而不静默截断。
-
-完整日志及快照保存在 `<log_dir>/task-<ID>/`，权限为私有，不能被执行容器修改。备份/迁移任务数据库时应同时迁移日志目录；重建数据库时使用新的日志目录，以免重用编号。日志不自动删除，按部署方的保留规则归档清理。
-
-## 验收
-
-```sh
-go test -tags goolm ./internal/execution ./internal/task ./internal/ai ./internal/mcp/...
-
-# 用预先安装的可信 Python 镜像运行真实容器验收
-SABER_EXECUTION_TEST_IMAGE=python:3.13-slim \
-  go test -race -tags goolm ./internal/execution ./internal/ai \
-  -run 'TestDockerExecution|TestTaskAutonomousDockerWorkflow'
-
-make fmt-check lint test-cover-check build
-```
-
-真实容器测试覆盖：凭据不继承、文件越界/符号链接拒绝、失败后继续修改、完整日志、快照交付、超时/取消清理。群聊验收使用本地模拟 Matrix 与模型，验证单次交办驱动多条命令、文件内容修正、加密附件、投递失败不重跑以及 `!task cancel` 清理容器。生产 homeserver 和模型仍需部署验收。
+`/status` 命令与 `GET /v1/info` 的 `capabilities` 使用同一真实能力判断：`available|disabled|unauthorized|unavailable`，并显式给出 `backend` 与 `sandboxed`。本机 `info` 只代表固定的 `terminal/saber/status` 诊断会话，具体 TUI 会话授权仍以 `/status` 为准。

@@ -296,7 +296,7 @@ func New(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) 
 	if cfg.Enabled {
 		for name := range e.activeWorkspaces() {
 			if backend, backendErr := cfg.BackendFor(name); backendErr == nil && backend == "docker" {
-				if err = probeDocker(cfg); err != nil {
+				if err = probeDocker(context.Background(), cfg); err != nil {
 					return nil, err
 				}
 				break
@@ -404,6 +404,60 @@ func (e *Executor) Check(ctx context.Context, tool string) error {
 // CheckMCP 是所有 MCP 实际调用共用的权限入口。
 func (e *Executor) CheckMCP(ctx context.Context, server, tool string) error {
 	return e.Check(ctx, "mcp:"+server+":"+tool)
+}
+
+// AllowedTools 返回当前身份在程序层获准的工具名；不要求任务目录。
+func (e *Executor) AllowedTools(identity chat.Identity) []string {
+	grant, ok := e.grant(identity)
+	if !e.cfg.Enabled || !ok {
+		return nil
+	}
+	tools := make([]string, 0, len(grant.Tools))
+	for _, tool := range grant.Tools {
+		if LocalTool(tool) {
+			tools = append(tools, tool)
+			continue
+		}
+		required, declared := e.cfg.MCPRequirements[tool]
+		if !declared {
+			continue
+		}
+		allowed := true
+		for _, capability := range append(slices.Clone(required), "external") {
+			if !slices.Contains(grant.Capabilities, capability) {
+				allowed = false
+				break
+			}
+		}
+		if allowed {
+			tools = append(tools, tool)
+		}
+	}
+	slices.Sort(tools)
+	return tools
+}
+
+// IdentityBackend 返回当前身份有效后端及是否处于沙箱。
+func (e *Executor) IdentityBackend(identity chat.Identity) (string, bool, error) {
+	grant, ok := e.grant(identity)
+	if !e.cfg.Enabled || !ok {
+		return "", false, errors.New("该成员尚未获得本群工作区授权")
+	}
+	backend, err := e.cfg.BackendFor(grant.Workspace)
+	if err != nil {
+		return "", false, err
+	}
+	return backend, backend == "docker", nil
+}
+
+// WorkspaceBlocked 报告当前身份工作区是否因清理失败被隔离。
+func (e *Executor) WorkspaceBlocked(identity chat.Identity) bool {
+	grant, ok := e.grant(identity)
+	if !ok {
+		return false
+	}
+	_, blocked := e.blocked.Load(e.cfg.Workspaces[grant.Workspace].Path)
+	return blocked
 }
 
 // Timeout 返回工具的程序配置上限。

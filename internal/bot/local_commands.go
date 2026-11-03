@@ -48,7 +48,20 @@ func (l localCommands) Dispatch(ctx context.Context, session chat.Session, sende
 	return adapter.text, handled, err
 }
 
+// Describe 返回本机终端真实可执行的命令目录。
+func (l localCommands) Describe() []command.Descriptor {
+	if l.registry == nil {
+		return nil
+	}
+	caps := map[string]bool{}
+	if l.capabilities != nil {
+		caps = l.capabilities("terminal")
+	}
+	return l.registry.Describe(caps)
+}
+
 // 确保本机命令分发实现服务端接口。
 var _ interface {
 	Dispatch(context.Context, chat.Session, string, string, string) (string, bool, error)
+	Describe() []command.Descriptor
 } = localCommands{}
