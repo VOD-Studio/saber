@@ -99,6 +99,7 @@ func (s *Service) EnableTasks(path string) error {
 	}, nil, task.Options{
 		Context:             s.contextPolicy(),
 		DeliveryMaxAttempts: s.config.Agent.TaskDeliveryMaxAttempts,
+		MaxConcurrent:       s.config.Agent.MaxConcurrentTasks,
 		Schedule:            s.authorizeSchedule,
 		Manage:              func(identity chat.Identity) bool { return s.executor != nil && s.executor.IsTaskAdmin(identity) },
 		Finalize: func(ctx context.Context, taskID int64) error {

@@ -107,6 +107,7 @@ type AgentConfig struct {
 	StreamEnabled           bool                 `yaml:"stream"`                     // 是否启用流式响应
 	TaskReceiptEnabled      bool                 `yaml:"task_receipt_enabled"`       // 是否在任务入库后发送接收回执
 	TaskDeliveryMaxAttempts int                  `yaml:"task_delivery_max_attempts"` // 任务结果投递最大尝试次数（含首次），零值用默认 20
+	MaxConcurrentTasks      int                  `yaml:"max_concurrent_tasks"`       // 同时执行的任务数上限，零值用默认 4
 	Retry                   RetryConfig          `yaml:"retry"`                      // 重试配置
 	CircuitBreaker          CircuitBreakerConfig `yaml:"circuit_breaker"`            // 熔断器配置
 }
@@ -315,6 +316,12 @@ func DefaultAIConfig() AIConfig {
 // 退避封顶 256 秒，20 次约容忍 51 分钟的持续投递故障。
 const DefaultTaskDeliveryMaxAttempts = 20
 
+// DefaultMaxConcurrentTasks 是同时执行任务数的默认上限，与 task.DefaultMaxConcurrent 保持一致。
+const DefaultMaxConcurrentTasks = 4
+
+// MaxConcurrentTasksLimit 是同时执行任务数的配置上限，与 task.MaxConcurrentLimit 保持一致。
+const MaxConcurrentTasksLimit = 64
+
 // DefaultAgentConfig 返回通用任务默认策略。
 func DefaultAgentConfig() AgentConfig {
 	return AgentConfig{
@@ -323,6 +330,7 @@ func DefaultAgentConfig() AgentConfig {
 		StreamEnabled:           true,
 		TaskReceiptEnabled:      false,
 		TaskDeliveryMaxAttempts: DefaultTaskDeliveryMaxAttempts,
+		MaxConcurrentTasks:      DefaultMaxConcurrentTasks,
 		Retry:                   DefaultRetryConfig(),
 		ToolCallingConfig:       DefaultToolCallingConfig(),
 		CircuitBreaker:          DefaultCircuitBreakerConfig(),
@@ -597,6 +605,12 @@ func (a *AgentConfig) Validate() error {
 	}
 	if a.TaskDeliveryMaxAttempts < 0 {
 		return fmt.Errorf("task_delivery_max_attempts must be positive")
+	}
+	if a.MaxConcurrentTasks == 0 {
+		a.MaxConcurrentTasks = DefaultMaxConcurrentTasks
+	}
+	if a.MaxConcurrentTasks < 1 || a.MaxConcurrentTasks > MaxConcurrentTasksLimit {
+		return fmt.Errorf("agent.max_concurrent_tasks 必须在 1 到 %d 之间", MaxConcurrentTasksLimit)
 	}
 	if a.Context.MaxMessages < 1 || a.Context.MaxTokens < 1 {
 		return fmt.Errorf("context max_messages and max_input_tokens must be positive")
@@ -982,6 +996,7 @@ agent:
   stream: true # 模型传输开关，所有接入共同遵守
   task_receipt_enabled: false # 默认不发送「已接收，任务 #...」；结果仍正常投递
   task_delivery_max_attempts: 20 # 结果投递最大尝试次数（含首次）；退避封顶 256 秒，20 次约 51 分钟，用尽后放弃自动重试
+  max_concurrent_tasks: 4 # 同时执行的任务数上限（1..64）；同一工作目录仍然串行
   max_rounds: 40 # 硬上限，包含最终回答
   timeout_seconds: 600 # 整次任务，包含请求、重试等待与工具执行
   max_tool_output_bytes: 32768

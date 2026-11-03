@@ -56,6 +56,7 @@ agent:
   stream: true
   task_receipt_enabled: false
   task_delivery_max_attempts: 20
+  max_concurrent_tasks: 4
   max_rounds: 40
   timeout_seconds: 600
   max_tool_output_bytes: 32768
@@ -91,6 +92,8 @@ agent:
 `task_receipt_enabled` 默认关闭，控制聊天平台在任务入库后是否发送「已接收，任务 #…」。关闭后任务仍会运行并投递最终结果；设为 `true` 可恢复接收回执。TUI 自己展示任务状态，不发送这条聊天回执。
 
 `task_delivery_max_attempts` 是任务结果投递的最大尝试次数（含首次，默认 20，必须为正数，省略或 0 使用默认值）。失败按 1、2、4…秒退避，封顶 256 秒：20 次约容忍 51 分钟的持续投递故障；用尽后任务的投递状态变为 `abandoned` 并写 ERROR 日志，不再自动重试，结果仍保存在 `tasks.db`。
+
+`max_concurrent_tasks` 是同时执行的任务数上限（默认 4，范围 1 到 64；省略或 0 使用默认值）。同一工作目录仍然互斥，因此只有目标目录不同的任务才能真正并行到该上限；超出范围时启动失败并提示 `agent.max_concurrent_tasks 必须在 1 到 64 之间`。
 
 `max_rounds` 是硬上限，包含最终回答；默认 40。`timeout_seconds` 覆盖整次任务的模型请求、重试等待与工具执行，不会被预算追加动态延长。`execution.timeout_seconds` 单独限制一次前台执行工具调用。
 

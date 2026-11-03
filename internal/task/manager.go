@@ -19,6 +19,21 @@ type RunFunc func(context.Context, agent.Request, func(agent.Event)) (agent.Resu
 // SendFunc 只发送已保存的结果；各上传和发送步骤须独立限时并使用稳定平台幂等键。
 type SendFunc func(context.Context, Task) (string, error)
 
+const (
+	// DefaultMaxConcurrent 是未配置时同时执行的任务数上限。
+	DefaultMaxConcurrent = 4
+	// MaxConcurrentLimit 是并发任务数的硬上限，避免误配置把工作区互斥放大成资源耗尽。
+	MaxConcurrentLimit = 64
+)
+
+// normalizeMaxConcurrent 把配置值收敛到 1..MaxConcurrentLimit；零值取默认值。
+func normalizeMaxConcurrent(n int) int {
+	if n == 0 {
+		return DefaultMaxConcurrent
+	}
+	return min(max(n, 1), MaxConcurrentLimit)
+}
+
 // Options 在启动工作线程前提供权限和上下文预算。
 type Options struct {
 	Schedule     ScheduleAuthorize
@@ -32,6 +47,9 @@ type Options struct {
 	// DeliveryMaxAttempts 是结果投递的最大尝试次数（含首次），用尽后任务的投递状态变为 abandoned；
 	// 零值使用 DefaultDeliveryMaxAttempts。
 	DeliveryMaxAttempts int
+	// MaxConcurrent 是同时执行的任务数上限；零值使用 DefaultMaxConcurrent，超出范围时收敛到 1..MaxConcurrentLimit。
+	// 工作目录互斥仍然生效：不同目录的任务才能并行到这个上限。
+	MaxConcurrent int
 }
 
 // Manager 管理单个机器人进程的队列；同一数据库只允许一个 Manager 实例。
@@ -57,6 +75,8 @@ type Manager struct {
 	blocked       func() []string
 	// deliveryMaxAttempts 是结果投递的最大尝试次数，恒为正数。
 	deliveryMaxAttempts int
+	// maxConcurrent 是同时执行的任务数，恒在 1..MaxConcurrentLimit。
+	maxConcurrent int
 }
 
 // Open 打开数据库，标记中断任务，并启动队列和结果投递。
@@ -71,10 +91,12 @@ func Open(path string, run RunFunc, send SendFunc, options ...Options) (*Manager
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{store: s, run: run, deliveries: make(map[string]SendFunc), ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), done: make(chan struct{}), active: make(map[int64]context.CancelFunc)}
 	m.deliveryMaxAttempts = DefaultDeliveryMaxAttempts
+	m.maxConcurrent = DefaultMaxConcurrent
 	if len(options) > 0 {
 		if options[0].DeliveryMaxAttempts > 0 {
 			m.deliveryMaxAttempts = options[0].DeliveryMaxAttempts
 		}
+		m.maxConcurrent = normalizeMaxConcurrent(options[0].MaxConcurrent)
 		m.authorize = options[0].Schedule
 		m.manage = options[0].Manage
 		m.contextPolicy = options[0].Context
@@ -259,7 +281,7 @@ func (m *Manager) dispatch() {
 	if m.blocked != nil {
 		blocked = m.blocked()
 	}
-	for len(m.active) < 4 && m.ctx.Err() == nil {
+	for len(m.active) < m.maxConcurrent && m.ctx.Err() == nil {
 		t, err := m.store.claim(m.ctx, blocked)
 		if errors.Is(err, sql.ErrNoRows) {
 			return
