@@ -365,6 +365,15 @@ S8 还需要一台真实 Violet 实例（管理端 `/admin/chat-bots` 注册 bot
 
 Matrix 实现见 `internal/platform/matrix/rooms.go` 的 `Rooms`：它包装 `matrix.RoomService`，把房间快照收敛成 `chat.ConversationInfo`（未命名房间的名称回退为房间 ID，`rooms_test.go` 的字段漂移测试强制新字段要么映射要么显式丢弃）；`ai` 侧拿不到元数据时用 `degradedConversation` 降级为普通群聊，不阻断决策。装配见 `internal/bot/bot.go` 的 `initProactiveManager`。
 
+### 主动投递的持久化语义
+
+仅 `ai.ProactiveManager.SendMessage` 这条路径（决策引擎与静默/定时触发），且需要主动聊天配置开启持久化并给出 `state_path`；新成员欢迎走独立的发送方法，不进入该队列。
+
+- 待发队列写入 `<state_path>.outbox.json`（`0600`，条目为 `{id, room, text, notice, attempts, created_at}`，临时文件 + fsync + rename 原子替换）。条目在调用 `SendText`/`SendNotice` 之前落盘，发送成功后删除，失败则保留并累计 `attempts`；写不进队列时不发送。
+- 投递是至少一次（at-least-once）：进程在「平台已发送成功、条目尚未删除」之间崩溃，重启后会重发同一条消息，因此这个窗口内可能出现一次重复投递；反过来，条目在发送前已经落盘，所以不会因为崩溃丢失尚未发出的消息。
+- 启动时（状态加载之后、进入 tick 循环之前）按 `created_at` 顺序补发遗留条目，每条只尝试一次；失败条目留在队列里等下次启动，不在 tick 循环内重试，避免对持续失败的上游反复打点。`attempts` 达到 5 的条目保留为死信，不再自动重试，也不会被静默丢弃。
+- 主动聊天状态（`state_path`）在状态变更后最多每 30 秒落盘一次，并在每个静默/定时 tick 结束与 `Stop` 时强制保存；不再依赖优雅关闭才持久化。
+
 已知残留（不影响端口使用，列入后续阶段）：
 
 - `ai` 内部仍以 mautrix `id.RoomID` 作状态/频控/缓存键，`ProactiveManager` 对 Matrix 事件侧暴露的方法也仍收 `id.RoomID`，接入第二平台时需把状态键收敛为 `chat.Session`（与同步循环、事件处理器搬迁同批做）。

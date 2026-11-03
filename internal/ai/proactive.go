@@ -29,6 +29,11 @@ type ProactiveManager struct {
 	decisionEngine *DecisionEngine
 	globalAIConfig *config.AIConfig
 	decisionCache  *DecisionCache
+	// outbox 在持久化开启时记录待发的主动消息，保证崩溃后还能补发。
+	outbox *proactiveOutbox
+	// stateSaveMu 串行化状态落盘，lastStateSave 用来把高频变更合并成每 30 秒一次。
+	stateSaveMu   sync.Mutex
+	lastStateSave time.Time
 
 	stopChan chan struct{}
 	wg       sync.WaitGroup
@@ -109,6 +114,16 @@ func NewProactiveManager(
 	// 创建决策缓存（默认 TTL 5 分钟）
 	decisionCache := NewDecisionCache(5 * time.Minute)
 
+	// 开启持久化时同时打开待发队列：队列与状态文件同目录，文件损坏时拒绝启动，
+	// 避免把上一进程遗留的待发消息当成空队列丢掉。
+	var outbox *proactiveOutbox
+	if cfg.PersistState && cfg.StatePath != "" {
+		outbox, err = newProactiveOutbox(cfg.StatePath + outboxSuffix)
+		if err != nil {
+			return nil, fmt.Errorf("打开主动消息待发队列失败：%w", err)
+		}
+	}
+
 	manager := &ProactiveManager{
 		config:         cfg,
 		aiService:      aiService,
@@ -118,6 +133,7 @@ func NewProactiveManager(
 		decisionEngine: decisionEngine,
 		globalAIConfig: globalAIConfig,
 		decisionCache:  decisionCache,
+		outbox:         outbox,
 		stopChan:       make(chan struct{}),
 	}
 
@@ -158,6 +174,12 @@ func (m *ProactiveManager) Start(ctx context.Context) {
 		}
 	}
 
+	// 上一进程遗留的待发消息在进入 tick 循环前按创建顺序各补发一次；
+	// 失败条目留在队列里等下次启动，不在 tick 里反复重试。
+	if m.outbox != nil {
+		m.retryOutbox(ctx)
+	}
+
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
@@ -179,15 +201,8 @@ func (m *ProactiveManager) Stop() {
 	close(m.stopChan)
 	m.wg.Wait()
 
-	// 如果启用了状态持久化，保存状态
-	if m.config.PersistState && m.config.StatePath != "" {
-		if err := m.stateTracker.Save(m.config.StatePath); err != nil {
-			// 保存失败不影响关闭流程，仅记录错误
-			slog.Error("保存主动聊天状态失败", "path", m.config.StatePath, "error", err)
-		} else {
-			slog.Info("已保存主动聊天状态", "path", m.config.StatePath)
-		}
-	}
+	// 停止时强制保存一次，补齐节流窗口内还没写出的状态。
+	m.flushState()
 
 	slog.Debug("主动聊天管理器已停止")
 }
@@ -236,8 +251,11 @@ func (m *ProactiveManager) runBackgroundTasks(ctx context.Context) {
 			return
 		case <-silenceChan:
 			m.handleSilenceTrigger(ctx)
+			// 每个 tick 结束强制落盘一次，避免只靠节流窗口兜底。
+			m.flushState()
 		case <-scheduleTicker.C:
 			m.handleScheduleTrigger(ctx)
+			m.flushState()
 		case <-done:
 			return
 		}
@@ -613,6 +631,8 @@ func (m *ProactiveManager) sendWelcomeMessage(ctx context.Context, roomID id.Roo
 // SendMessage 向指定房间发送主动消息。
 //
 // 该方法用于发送 AI 生成的主动聊天消息，支持文本和通知两种消息类型。
+// 开启持久化时先入队再发送：入队失败就不发送，发送失败则保留条目等待下次启动补发，
+// 因此投递是至少一次语义，崩溃后可能重复一条已发送的消息但不会丢消息。
 // 发送成功后会自动更新状态跟踪器中的消息计数和时间戳。
 //
 // 参数:
@@ -632,6 +652,16 @@ func (m *ProactiveManager) SendMessage(ctx context.Context, roomID id.RoomID, me
 
 	logger.Debug("准备发送主动消息")
 
+	// 先落盘再发送：写不进队列就不发送，避免出现无法追溯的投递。
+	var entry outboxEntry
+	if m.outbox != nil {
+		var err error
+		entry, err = m.outbox.enqueue(roomID.String(), message, isNotice)
+		if err != nil {
+			return fmt.Errorf("记录待发主动消息失败：%w", err)
+		}
+	}
+
 	// 根据消息类型选择发送方法
 	var eventID string
 	var err error
@@ -642,14 +672,103 @@ func (m *ProactiveManager) SendMessage(ctx context.Context, roomID id.RoomID, me
 	}
 
 	if err != nil {
+		if m.outbox != nil {
+			if bumpErr := m.outbox.bump(entry.ID); bumpErr != nil {
+				logger.Error("保存主动消息失败次数失败", "error", bumpErr)
+			}
+		}
 		return fmt.Errorf("发送主动消息到房间 %s 失败：%w", roomID, err)
+	}
+
+	if m.outbox != nil {
+		if removeErr := m.outbox.remove(entry.ID); removeErr != nil {
+			// 条目仍在文件里，重启后会重发；至少一次语义下这是重复而不是丢失。
+			logger.Error("删除已发送的主动消息条目失败，重启后可能重复投递", "error", removeErr)
+		}
 	}
 
 	// 发送成功后更新状态跟踪器
 	m.stateTracker.RecordProactiveMessage(roomID)
+	m.markStateDirty()
 
 	logger.Info("主动消息发送成功", "event_id", eventID)
 	return nil
+}
+
+// retryOutbox 在启动时按创建顺序补发遗留条目，每条只尝试一次。
+//
+// 达到 maxOutboxAttempts 的条目保留为死信，不再自动重试；本循环不在 tick 里运行，
+// 避免对持续失败的上游反复打点。发送成功会同步计入主动消息状态。
+func (m *ProactiveManager) retryOutbox(ctx context.Context) {
+	for _, entry := range m.outbox.snapshot() {
+		if entry.Attempts >= maxOutboxAttempts {
+			slog.Warn("主动消息重试次数用尽，保留为死信",
+				"id", entry.ID, "room_id", entry.Room, "attempts", entry.Attempts)
+			continue
+		}
+		if err := m.deliverOutboxEntry(ctx, entry); err != nil {
+			slog.Warn("补发主动消息失败，保留在待发队列",
+				"id", entry.ID, "room_id", entry.Room, "attempts", entry.Attempts+1, "error", err)
+		}
+	}
+}
+
+// deliverOutboxEntry 发送一条遗留条目：成功后删除并计入主动消息状态，失败只累计次数。
+func (m *ProactiveManager) deliverOutboxEntry(ctx context.Context, entry outboxEntry) error {
+	var eventID string
+	var err error
+	if entry.Notice {
+		eventID, err = m.rooms.SendNotice(ctx, entry.Room, entry.Text)
+	} else {
+		eventID, err = m.rooms.SendText(ctx, entry.Room, entry.Text)
+	}
+	if err != nil {
+		if bumpErr := m.outbox.bump(entry.ID); bumpErr != nil {
+			slog.Error("保存主动消息重试次数失败", "id", entry.ID, "error", bumpErr)
+		}
+		return err
+	}
+	if removeErr := m.outbox.remove(entry.ID); removeErr != nil {
+		slog.Error("删除已补发的主动消息条目失败，重启后可能重复投递", "id", entry.ID, "error", removeErr)
+	}
+	m.stateTracker.RecordProactiveMessage(id.RoomID(entry.Room))
+	m.markStateDirty()
+	slog.Info("补发主动消息成功", "event_id", eventID, "room_id", entry.Room)
+	return nil
+}
+
+// stateSaveInterval 把高频状态变更合并到最多每 30 秒落盘一次。
+const stateSaveInterval = 30 * time.Second
+
+// markStateDirty 记录一次状态变更：只在节流窗口外落盘，避免每条消息都写文件。
+func (m *ProactiveManager) markStateDirty() {
+	if !m.config.PersistState || m.config.StatePath == "" {
+		return
+	}
+	m.stateSaveMu.Lock()
+	defer m.stateSaveMu.Unlock()
+	if time.Since(m.lastStateSave) < stateSaveInterval {
+		return
+	}
+	m.saveStateLocked()
+}
+
+// flushState 强制保存一次状态，用于每个 tick 结束与 Stop；不受节流窗口限制。
+func (m *ProactiveManager) flushState() {
+	if !m.config.PersistState || m.config.StatePath == "" {
+		return
+	}
+	m.stateSaveMu.Lock()
+	defer m.stateSaveMu.Unlock()
+	m.saveStateLocked()
+}
+
+// saveStateLocked 在持有 stateSaveMu 时落盘，失败只记录错误，不阻断调用方。
+func (m *ProactiveManager) saveStateLocked() {
+	m.lastStateSave = time.Now()
+	if err := m.stateTracker.Save(m.config.StatePath); err != nil {
+		slog.Error("保存主动聊天状态失败", "path", m.config.StatePath, "error", err)
+	}
 }
 
 // RecordUserMessage 记录用户发送的消息。
@@ -664,6 +783,7 @@ func (m *ProactiveManager) RecordUserMessage(roomID id.RoomID) {
 		return
 	}
 	m.stateTracker.RecordUserMessage(roomID)
+	m.markStateDirty()
 }
 
 // TriggerCoordinator 协调所有主动聊天触发器。
