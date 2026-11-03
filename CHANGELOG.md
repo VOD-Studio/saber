@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 技能文件化：新增 `memory.skills.dirs`（只读外部技能目录，最多 8 个绝对路径）与 `memory.skills.export_dir`（导出目录，空值禁用导出），按 agentskills.io 布局读取 `<dir>/<name>/SKILL.md`。`name` 必须与目录名一致、`description` 必填，单文件上限 256 KiB，兼容 BOM 与 CRLF；启动只扫描不写库，只有显式 `/skill import` 才导入当前空间（同名同内容跳过，同名不同内容更新），群空间无写权限时转为待确认建议。新增 `/skill files`、`/skill import [--dir …]`、`/skill export <名称> [--dir …]`（文件 0600、目录 0700，拒绝 `..` 穿越）。命令分发未命中时，正文首词为 `/技能名` 且当前空间存在同名技能则进入同一条任务链路，技能正文作为运行时指令（上限 8 KiB 且不超过输入预算八分之一），`//技能名` 为转义写法。默认不配置目录、不导出，升级无需迁移。
+- 定时计划新增 `cron "<分 时 日 月 周>" <时区>` 规则（5 段、必须整段引号包裹，周日 0/7），以及 `!schedule edit <ID>`（按新规则重算并恢复 active）、`!schedule run <ID>`（立即生成普通任务、不推进 `next_run`，同一毫秒幂等，上次任务未结束时 `skipped`）与 `resume`。每条计划可带 `model=<provider.model>` 冻结单次模型，并保存 IANA 时区按墙钟推进；省略 `model=` 时沿用原模型，未知模型在落库前报错。
+- 新增 Telegram、Discord 与 Slack 接入端（`platforms.telegram|discord|slack`，默认关闭）。Telegram 使用 `getUpdates` 长轮询（`poll_timeout_seconds` 默认 30），Discord 使用 Gateway WebSocket + REST（必须在开发者后台开启 `MESSAGE_CONTENT` 特权 intent），Slack 使用 Socket Mode（需 `bot_token` 与 `app_token` 两个 token）。三者都支持私聊自动回复、群聊被 `@`/回复触发、`edit_interval_ms` 流式编辑与 `http_timeout_seconds`；启用时凭据必填，未启用不校验。
+- OpenAI 兼容 API：新增 `GET /v1/models` 与 `POST /v1/chat/completions`（含 SSE 流式），沿用服务端 Bearer 令牌与模型注册表 `提供商.模型` 命名。该入口是非任务、不持久化的：不写入任务数据库、不读取聊天历史、不启用工具调用；AI 关闭或模型未配置时返回 OpenAI 风格 `503` JSON（`code: ai_disabled`）。需要后台任务与工具时仍走 `/v1/sessions/*`。
+- 新增 `saber acp` 编辑器接入（Agent Client Protocol，NDJSON/JSON-RPC 2.0 over stdio）。ACP 进程只做协议转换，把提示转发给已运行的 `saber serve`，模型、任务与工具仍由服务进程管理；使用前必须先启动 serve 并生成 `server.token_file`，启动时会探测 `/v1/models`，连接失败或令牌被拒直接以非零码退出。支持 `-c/--config` 与 `--server`（仅回环地址）。
+- 持久任务新增上下文约定文件：运行前在授权工作目录向上查找 `AGENTS.md`、`CLAUDE.md`、`.cursorrules`、`CONTRIBUTING.md`、`.github/copilot-instructions.md`，最多 8 个、单文件 64 KiB、合计 128 KiB，以 `<file path="…">` 追加到运行时资料且不写回持久化请求；用户消息中的 `@path` / `@"path with space"` 在任务入库前展开（最多 8 个、单文件 32 KiB、合计 64 KiB），越界、目录、符号链接、二进制与非法 UTF-8 跳过，无有效路径（如邮箱）保持原文。
+- 执行工具新增编辑前快照与回滚：`write_file` / `apply_patch` 写回前保存原文件（含「文件不存在」），新增 `snapshot {action: list|rollback}`；`list` 返回本任务最近 50 条摘要，`rollback` 按 `snapshot_id` 或路径恢复，覆盖前会先为当前内容再存一份并返回 `pre_rollback_snapshot_id`。快照位于任务日志目录、权限 0700/0600，不新增权限，随任务删除而失效。
+- 历史回忆新增 LLM 摘要：`saber_history` 检索命中后按本次授权记录生成不超过 600 字的中文摘要（输入上限 12 KiB），结果按「空间 + 查询指纹 + 最新记录 ID」缓存 10 分钟；模型不可用、超时或返回空时降级为仅返回原文，不影响检索。新增用户画像：从当前空间已保存记忆派生（最多 50 条、输入 8 KiB、输出 800 字），存 `memory_profiles` 并按条目版本判定新鲜度，后台按空间去重刷新；`/memory profile` 查看画像与新鲜度，`/memory profile refresh`（本人私聊或本群记忆管理员）立即重建。
+
 - 定时计划支持纯聊天模式：`!schedule` 与 `saber_schedule` 创建时按当前授权收集工具，不含执行或 MCP 工具的计划以 `requires_execution=0` 冻结，不再申请工作区；运行时只用启动目录并把工具重新裁剪为聊天工具，创建后获得授权也不会升级。新增 `delivery: origin|silent`（命令入口可用目标末尾 `--silent`），`silent` 不向聊天发送、结果只落库，可用 `!task status/logs` 查询。计划运行会注入创建来源的记忆与技能快照（私聊只注入个人、群聊只注入本群）。`schedules` 表新增 `requires_execution`、`delivery` 列，旧库打开时幂等迁移，旧计划仍要求执行授权。
 - 子代理：新增内置 `delegate` 工具（`agent.subagents`，默认开启）。顶层任务可把独立子目标交给子 Runtime 并行处理；子代理深度固定为 1、不继承聊天历史，`tools` 只能是父工具集的子集；同一轮多个委派按 `max_parallel` 并行，工具仍按工作区租约串行，子代理用量上推父任务账本。委派起止写入 `tasks.db` 的 `task_subagents`，并产生 `subagent_started`/`subagent_finished` 事件，SSE、TUI 与 `!task logs` 可见。
 - 运行中转向：新增 `!task redirect <ID> <文本>` 与「重定向任务 #ID …」自然语言入口（权限同 `cancel`）。补充要求排队到目标任务：运行中的任务在下一轮模型请求前注入，排队中的任务在开始执行时注入；单任务未生效上限 8 条。转向文本持久化在 `task_steering`（打开数据库时幂等建表），消费与标记在同一事务内完成，重启不会重复注入；被注入内容以 `steered` 事件进入 SSE、TUI 与 `!task logs`。
@@ -16,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 命令分发在注册表未命中时不再直接按普通聊天处理：首词为 `/技能名` 且当前可信空间存在同名技能时，转为一次技能任务；`//` 前缀保留为普通文本转义。帮助与命令目录仍只列出真实注册命令。
+- 记忆快照在原有条目之外追加当前空间画像（独立字节预算，放不下页眉页脚时不注入）；画像与记忆条目版本不一致时只触发一次后台刷新，不阻塞本次回复。历史摘要默认复用 `memory.review_model`，未配置时使用 `ai.default_model`。
+- 本机服务对 `/v1/models` 与 `/v1/chat/completions` 单独放行：即使任务服务未装配，这两个端点仍可返回模型列表或明确的 `ai_disabled` 错误；其余 `/v1/*` 仍要求任务服务可用。
 - 平台接入端接管聊天入口生命周期：`platform.Platform.Start/Stop` 成为 Matrix 同步/投递与本机终端监听的唯一入口，`bot.Run` 不再手动启动 sync 与 HTTP 服务；关闭时先停止入站，再等待任务与端口释放。`platforms.terminal.enabled` 默认 `true`；设为 `false` 后不创建本机令牌、不监听端口，`saber chat`/TUI 会明确连接失败，常驻服务与只读检查仍可用。Matrix 与 Violet 仍默认关闭。
 - `agent.context.max_input_tokens` 与房间历史截断改用真正的 token 近似（4 个 UTF-8 字节折算 1 token），不再把序列化 JSON 的字节数直接当 token：此前 `max_input_tokens: 32768` 实际只相当于约 8k token，压缩触发得比配置值早约 4 倍。按字节调过参的部署应把该值除以约 4（例如改为 `8192`）以保持原有触发时机；`max_input_tokens` 现在逐字段统计消息正文、工具定义与保留的推理数据。
 - 支持不设输出上限：全局 `ai.max_tokens: 0` 时主请求、评估与摘要请求都省略 `max_output_tokens`/`max_tokens`，交由模型或上游默认，避免推理模型的思考 token 被固定上限截断；任务仍按实际用量记账，超过 `agent.budget.max_total_tokens` 后拒绝后续请求。模型级 `max_tokens: 0` 仍表示继承全局。
@@ -24,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `ai.enabled: false` 时 `memory.enabled: true` 的部署此前仍拿不到记忆服务：初始化在 AI 分支之后才打开数据库，`/memory` 与 `/skill` 只能回复「需启用 memory.enabled」。现在记忆库与 `ai.Service` 在 AI 关闭时也会装配，`/skill files`、`/skill import`、`/skill export` 与只读记忆命令无需模型即可使用；模型请求仍由 `IsEnabled` 拒绝并返回明确错误。
 - 没有执行授权的用户此前只能在 `!schedule` 命令里创建纯聊天计划：模型与自然语言入口看不到 `saber_schedule`，因为工具只在 `execution.Workspace` 成功后才追加。现在只要任务服务可用且存在可信身份就暴露该工具；创建计划时是否申请执行授权仍由冻结的工具集合决定，不改变无授权用户的执行能力。
 - 软限评估只看到工作状态和已完成轮次的工具结果：模型没有用 `saber_task_state` 记录计划时，第 5 轮（默认软限）就会被判成「无计划、无发现，仅有环境探测结果」而终止，即使它刚请求了下一步工具调用；任务链的原始用户指令也从未进入评估输入。现在评估输入包含逐字原始指令（按 2048 字节保留最近的）、最近轮次的助手文本，以及当前轮刚请求、尚未执行的工具调用（`BudgetProgress.Recent` 的最后一项），提示词同时说明「工作状态为空不等于没有进展」。
 - 预算账本此前混用两种单位：预留按序列化字节扣减 `max_total_tokens`，记账在提供商返回 usage 时又按真实 token 累加，同一个整数里既有字节又有 token，长任务会在不可预期的位置提前耗尽。现在账本只保留 token 单位，预留与记账共用同一估算器；实际消耗超过预留时完整计入，只让后续请求失败。嵌套运行（子代理）不再替换 ctx 中的父账本，而是保留自己的上限并把每笔消耗上推父账本，父账本余额同时限制子运行的准入——此前每个子运行都有独立的 `max_total_tokens`，总开销随子运行数量成倍放大且父任务完全看不到。`BudgetStats` 新增 `main_usage`/`aux_usage` 拆分，`Result.Usage` 只表示主请求用量，任务状态里的「用量」补上 token 单位。
@@ -31,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- 新增接入端与导出路径按最小暴露处理：Discord 出站固定 `allowed_mentions.parse: []`，模型输出中的 `@everyone`/角色提及不会变成真实 ping；技能导出使用 0600 文件与 0700 目录，名称与目标路径校验并拒绝 `..` 穿越；ACP 的 `--server` 只接受回环地址，令牌仅从 `server.token_file` 读取且不写入 stdout；OpenAI 兼容端点沿用 Bearer 令牌并拒绝带 `Origin` 的浏览器跨源请求。
 - `execution.command_guard` 新增 `ask`：命中危险命令规则时不再直接拒绝，而是登记一次性审批请求，返回规则名与审批码（不回显命令正文），由同一机器人账号下该工作区的有效授权成员或本群 `task_admins` 执行 `!approve <码>`/`!deny <码>`。审批只存内存，Saber 重启后全部失效；默认有效期 600 秒（`execution.approval_ttl_seconds`，60..3600），同时最多保留 32 条待审批请求（`execution.approval_max_pending`，1..256）。批准绑定工具、命令、身份与工作区目录的指纹，只能消费一次。默认值仍为 `block`。
 - 只接受真正被检查的授权：`capabilities` 里的 `publish`、`deploy`、`cross_directory` 从未有对应检查，现在启动时直接报 `capability "publish" is not enforced by this build (only external is supported)`，不再让配置看起来像已生效的保护；`room: "*"` 或成员 `"*"` 的通配授权只允许配在 `docker` 后端，`local` 下发通配会在启动时被拒绝并提示 `local execution is not a sandbox`。
 
