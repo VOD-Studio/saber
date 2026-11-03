@@ -200,9 +200,3 @@ func TestShutdown_WithServices(t *testing.T) {
 
 	<-done
 }
-
-// TestAutoJoinRooms_WithRooms 测试带房间列表的自动加入。
-// 注意：autoJoinRooms 需要 client，为 nil 时会 panic
-func TestAutoJoinRooms_WithRooms(t *testing.T) {
-	t.Skip("requires client which needs real Matrix client")
-}

@@ -72,62 +72,6 @@ func TestInitMemeService_EmptyAPIKey(t *testing.T) {
 	}
 }
 
-// TestAutoJoinRooms_SingleRoom 测试单个房间自动加入。
-func TestAutoJoinRooms_SingleRoom(t *testing.T) {
-	state := &appState{
-		cfg: &config.Config{
-			Matrix: config.MatrixConfig{
-				AutoJoinRooms: []string{"!test:matrix.org"},
-			},
-		},
-		services: &services{
-			// client 为 nil，会阻止实际加入
-		},
-	}
-
-	// 由于缺少 client，不会实际执行加入操作
-	// 主要测试不会 panic
-	state.autoJoinRooms()
-}
-
-// TestAutoJoinRooms_MultipleRooms 测试多个房间自动加入。
-func TestAutoJoinRooms_MultipleRooms(t *testing.T) {
-	state := &appState{
-		cfg: &config.Config{
-			Matrix: config.MatrixConfig{
-				AutoJoinRooms: []string{
-					"!room1:matrix.org",
-					"!room2:matrix.org",
-					"!room3:matrix.org",
-				},
-			},
-		},
-		services: &services{
-			// client 为 nil
-		},
-	}
-
-	state.autoJoinRooms()
-}
-
-// TestAutoJoinRooms_NilClient 测试 nil 客户端。
-func TestAutoJoinRooms_NilClient(t *testing.T) {
-	state := &appState{
-		cfg: &config.Config{
-			Matrix: config.MatrixConfig{
-				AutoJoinRooms: []string{"!test:matrix.org"},
-			},
-		},
-		services: &services{
-			client: nil,
-		},
-	}
-
-	// nil client 现在会优雅处理，不会 panic
-	state.autoJoinRooms()
-	// 测试通过，因为没有 panic 且错误被正确处理
-}
-
 // TestInitCrypto_E2EEEnabled 测试 E2EE 启用。
 func TestInitCrypto_E2EEEnabled(t *testing.T) {
 	state := &appState{

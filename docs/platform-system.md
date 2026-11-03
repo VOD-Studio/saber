@@ -9,12 +9,19 @@ Saber 已有平台无关的消息处理核心（`chat`、`conversation`、`agent
 ```
 bot.go
  ├─ initConfig
- ├─ if platforms.matrix.enabled → initMatrixClient (sync, event handlers, e2ee)
- ├─ initServices (ai.Service 构造时注入 matrixService + mediaService)
- ├─ setupEventHandlers (mautrix syncer 注册)
- ├─ startSync (Matrix sync goroutine)
- └─ server.Serve (HTTP server, 始终运行)
+ ├─ if platforms.matrix.enabled → initMatrixClient（登录 + E2EE 初始化，不含 sync）
+ ├─ if platforms.terminal.enabled → 预绑定监听（端口冲突在副作用之前失败）
+ ├─ initServices
+ │   ├─ ai.Service + 任务/人格/meme/MCP
+ │   └─ Registry：terminal → violet → matrix（注册顺序即启动顺序）
+ ├─ for p := range reg.Enabled() → p.Start(ctx, handleChat)
+ │   ├─ terminal.Start：创建令牌、在后台 serve /v1/*，Stop 关闭监听并等待
+ │   └─ matrix.Start：注册 EventHandler/presence/自动进房，后台跑 StartSyncWithReconnect
+ └─ shutdown → reg.Stop()（取消同步、关闭 HTTP、关闭 AI/MCP/记忆）
 ```
+
+`run()` 不再自己注册事件、起 sync 或 serve HTTP：这三件事分别由 `matrix` 与
+`terminal` 平台在 `Start`/`Stop` 内完成，`bot` 只按注册表顺序转发生命周期。
 
 `ai.Service` 中的 Matrix 耦合：
 
@@ -38,8 +45,9 @@ bot.go
  │   └─ ...（Discord / Slack / Telegram）
  ├─ for p := range reg.Enabled()
  │     p.Start(ctx, aiService.HandleChat) ← 入站：平台→handler
- ├─ server.Serve(ctx, ...)                ← HTTP server 始终运行
- └─ shutdown: reg.Stop() + server.Close()
+ │       ├─ terminal：自建 HTTP 监听并 serve
+ │       └─ matrix：注册事件 + 后台 sync
+ └─ shutdown: reg.Stop()（terminal 关监听、matrix 取消同步）
 ```
 
 ## 改造步骤
@@ -87,58 +95,66 @@ func (r *Registry) Enabled(cfg *config.Config) []Platform
 
 ### 3. Matrix 适配器改造
 
-现有 `matrix.ChatAdapter` 已经实现了 `chat.Adapter`。改造为 `Platform` 实现：
+现有 `matrix.ChatAdapter` 已经实现了 `chat.Adapter`。平台接管会话生命周期，
+登录与 E2EE 仍留在装配层（需要口令、pickle key 等凭据），装配完把依赖注入平台：
 
 ```go
 // internal/platform/matrix/matrix.go
-
-type MatrixPlatform struct {
-    cfg        *config.Config
-    client     *matrix.MatrixClient
-    adapter    *matrix.ChatAdapter
-    handler    chat.Handler
-    cancel     context.CancelFunc
+type Platform struct {
+    session Session              // 会话运行面：Register/Online/AutoJoin/Sync
+    events  *matrix.EventHandler // 已装配的入站处理器
+    cancel  context.CancelFunc
+    done    chan struct{}
 }
 
-func (m *MatrixPlatform) Name() string { return "matrix" }
+func New(cfg *config.Config, commands *matrix.CommandService, media *matrix.MediaService, opts ...Option) *Platform
 
-func (m *MatrixPlatform) Start(ctx context.Context, handler chat.Handler) error {
-    m.handler = handler
-    m.adapter = matrix.NewChatAdapter(
-        matrix.NewCommandService(m.client, ...),
-        matrix.NewMediaService(m.client, ...),
-        m.cfg.Matrix.Media,
-        m.cfg.Matrix.StreamEdit.Enabled,
-        handler,
-    )
-    // 现有 sync + event handler 注册逻辑
-    go m.client.StartSyncWithReconnect(ctx, ...)
+func (p *Platform) Start(ctx context.Context, handler chat.Handler) error {
+    // 幂等：已在运行时直接返回；Register 失败则中止
+    p.session.Register(p.events)   // syncer.OnSync / OnEventType(message|member)
+    p.session.Online()             // presence 失败只告警
+    p.session.AutoJoin()
+    go p.session.Sync(runCtx)      // presence.StartSyncWithReconnect
 }
 
-func (m *MatrixPlatform) Stop() { m.cancel() }
+func (p *Platform) Stop() { p.cancel(); <-p.done }  // 幂等
 ```
+
+`Session` 让同步与事件注册可替换，`lifecycle_test.go` 用替身验证「Start 只注册并启动
+一次同步、重复 Start/Stop 安全、Stop 取消并等待退出」；真实实现
+`mautrixSession`（`session.go`）包住 `MatrixClient` 与 `PresenceService`。
+
+`bot` 侧只保留装配：`initMatrixClient`（登录、会话保存、E2EE）→ `newMatrixPlatform`
+注入 `NewSession(client, autoJoinRooms)` 与 `newEventHandler()`（含主动聊天管理器）。
 
 ### 4. Terminal 适配器
 
-现有 HTTP server (`internal/server`) 即 terminal 平台入口。包装为 `Platform`：
+`internal/platform/terminal` 把 `internal/server` 的 HTTP 入口包装成平台：
 
 ```go
 // internal/platform/terminal/terminal.go
+func New(listen, tokenPath string, service *ai.Service,
+    commands func() server.CommandDispatcher, opts ...Option) *Platform
 
-type TerminalPlatform struct {
-    cfg *config.Config
-}
-
-func (t *TerminalPlatform) Name() string { return "terminal" }
-
-func (t *TerminalPlatform) Start(ctx context.Context, handler chat.Handler) error {
-    // 无需主动连接——HTTP server 已在 bot.go 中启动
-    // server.New 内部的 session() 会在收到请求时调用 handler
+func (p *Platform) Start(ctx context.Context, handler chat.Handler) error {
+    token, err := server.Token(p.tokenPath, true) // 令牌只在真正启动时生成
+    listener := p.prebound                        // 否则 net.Listen(p.listen)
+    go server.Serve(runCtx, srv, listener)        // 不阻塞 Start
     return nil
 }
 
-func (t *TerminalPlatform) Stop() {}
+func (p *Platform) Stop() { p.cancel(); srv.Close(); <-p.done }  // 幂等
 ```
+
+设计要点：
+
+- `platforms.terminal.enabled=false` 时平台不注册、`run()` 不预绑定监听、不生成令牌：
+  `saber chat` 拿不到令牌会明确报错「请先运行 saber serve」，而不是静默连一个不存在的服务。
+- 命令分发器用 `func() server.CommandDispatcher` 延迟解析：命令注册表在平台登记之后才装配完成。
+- `WithListener` 允许 `run()` 在初始化服务之前先占住端口，让端口冲突早于 `tasks.db`
+  等副作用失败；终端平台接管该监听并在 `Stop` 时关闭。
+- 本机入站的回复路径是 `ai.Service` + 共享命令注册表，因此 `Start` 的 `chat.Handler`
+  参数仅为满足接口，HTTP 请求不经过它。
 
 ### 5. `bot.go` 重构
 
@@ -159,15 +175,17 @@ func run(ctx context.Context, info BuildInfo) error {
 
     for _, p := range reg.Enabled() {
         if err := p.Start(ctx, aiService.HandleChat); err != nil {
-            slog.Warn("平台启动失败", "platform", p.Name(), "error", err)
+            // 终端入口起不来视为致命错误：进程没有本机入口就没有意义
+            return err
         }
     }
-
-    token, _ := server.Token(...)
-    srv := server.New(aiService, token)
-    return server.Serve(ctx, srv, listener)
-}
+    <-ctx.Done()
+    return nil // 平台在 shutdown 里统一 Stop
 ```
+
+注意：平台的 `SetCommands` 目录快照在 `buildCommands()` 结束时按 `Enabled()` 推送，
+所以注册必须发生在 `buildCommands()` 之前；`terminal` 用延迟解析的命令分发器绕开
+「命令注册表晚于平台登记」的循环依赖。
 
 ### 6. 配置结构
 
@@ -290,6 +308,13 @@ go test -tags goolm ./internal/ai -run TestService_HandleChat_MemoryWithoutMatri
 # 平台注册与启动
 go test -tags goolm ./internal/platform
 
+# Matrix 平台生命周期：Start 只启动一次 sync、Stop 取消并等待、重复调用安全
+go test -tags goolm ./internal/platform/matrix -run Lifecycle
+
+# 终端平台：Start 监听可用、Stop 后连接关闭、关闭开关时 bot 不监听
+go test -tags goolm ./internal/platform/terminal
+go test -tags goolm ./internal/bot -run TestRun_Terminal
+
 # 关掉 Matrix 也能注册并启动 violet（含 run() 起停）
 go test -tags goolm ./internal/bot -run Violet
 
@@ -314,7 +339,7 @@ S8 还需要一台真实 Violet 实例（管理端 `/admin/chat-bots` 注册 bot
 2. 实现 `chat.Adapter`（出站：`Send`/`Edit`/`SetTyping`/`Capabilities`）。`chat.Reply.Text` 用 Markdown 书写，富文本渲染由 adapter 自己决定；`Reply.TransactionID` 非空时必须当作幂等键使用，任务重发才不会刷两遍屏
 3. 实现 `Platform.Start`（入站：订阅事件流 / 注册 webhook / sync loop）。把平台消息规范化成 `chat.Message` 后调用共享 handler：`ControlText` 只在平台有「引用回退包装」时给出，否则留 nil
 4. 在 `config.yaml` 的 `platforms.<name>` 下添加配置，并在 `config.Config.PlatformEnabled` 登记该平台的开关——注册表只认这个映射，未登记的平台即使注册了也不会启动
-5. 在 `internal/bot/bot.go` 的 `initServices` 里 `s.registerPlatform(<name>platform.New(s.cfg), aiService)`。注册点必须留在 Matrix 专属装配（人格、`!ai` 命令、主动聊天、meme）的提前 return 之前，否则关掉 Matrix 就什么都注册不了
+5. 在 `internal/bot/bot.go` 的 `initServices` 里 `s.registerPlatform(<name>platform.New(s.cfg), aiService)`。注册点必须在 `buildCommands()` 之前（它在末尾按 `Enabled()` 推送命令目录），并且连接生命周期放在平台自己的 `Start`/`Stop` 内，`run()` 只转发注册表的启动与停止
 6. 如需接收任务与定时计划结果：实现可选端口 `platform.TaskDelivery`（`DeliveryAdapter() chat.Adapter`），`registerPlatform` 会据此注册投递器；不实现就只接即时消息
 7. 如需 `!ai`/`!task` 等聊天命令：实现 `ai.ChatEntrypoint` 并 `aiService.SetChatEntrypoint(...)`。当前它是**单例 setter 且签名带 mautrix `id.UserID`/`id.RoomID`**，同一进程只能挂一个平台（现在是 Matrix）；第二平台要挂命令入口，得先把这个端口改成平台无关并按平台名注册
 8. 如需主动聊天：实现 `ai.ProactiveRooms`（见下文）并在 `initProactiveManager` 注入。没有 notice 语义的平台要么把 `SendNotice` 降级成普通文本，要么像 Violet 一样干脆不接
@@ -325,9 +350,9 @@ S8 还需要一台真实 Violet 实例（管理端 `/admin/chat-bots` 注册 bot
 |---|---|---|
 | S1 `platform` 接口与注册表 | 已完成 | `internal/platform/platform.go` |
 | S2 解耦 `ai.Service` | 基本完成 | 函数式选项 `WithMatrix`/`WithMCP`；`PromptProvider` 用 `chat.Session`；`chat.Message.ControlText` 承接引用回退剥离；`handleAICommand`、`!task`/`!schedule` 与 `!ai` 子命令回执均经 `ChatEntrypoint`；主动聊天经 `ai.ProactiveRooms`；`ai` 内已无 `matrix.NewChatAdapter`，也不再调用 Matrix 普通消息发送；旧 `ResponseHandler`/`StreamEditor` 死代码已删除 |
-| S3 Matrix 平台接入端 | 进行中 | `internal/platform/matrix` 已持有账号、出站/投递 adapter、会话与事件定位、主动聊天房间端口（`Rooms`），并注册任务投递；同步循环与事件处理器注册仍在 `internal/bot` |
-| S4 Terminal 平台 | 未开始 | HTTP server 仍在 `bot.go` 直接 serve |
-| S5 `bot.go` 按配置启动平台 | 已完成 | `run()` 经 `Registry.Enabled()` 启动并统一 `Stop`；注册表按 `platforms.<name>` 决定启停，注册点不再被 Matrix 的提前 return 挡死，已注册 matrix + violet |
+| S3 Matrix 平台接入端 | 已完成 | `internal/platform/matrix`：账号与出站/投递 adapter、主动聊天房间端口（`Rooms`）、`Session` 运行面（`session.go` 真实实现 + `lifecycle_test.go` 替身）；`Start` 内注册事件、上报 presence、自动进房并跑 `StartSyncWithReconnect`，`Stop` 取消并等待；`bot` 只保留登录与 E2EE 装配 |
+| S4 Terminal 平台 | 已完成 | `internal/platform/terminal`：`Start` 创建令牌并在后台 serve `internal/server`，`Stop` 关闭监听并等待；支持复用 `run()` 预绑定的监听；关闭开关时不注册、不监听、不生成令牌 |
+| S5 `bot.go` 按配置启动平台 | 已完成 | `run()` 经 `Registry.Enabled()` 按注册顺序（terminal → violet → matrix）启动并统一 `Stop`；`run()` 内不再有事件注册、sync 或 HTTP serve |
 | S6 配置结构迁移 | 部分 | 新增 `platforms:` 节与 `Config.PlatformEnabled`，`platforms.terminal.enabled`、`platforms.matrix.enabled`、`platforms.violet.*` 已迁入；Matrix 明细仍在顶层 `matrix:` 节（见上文「配置结构」注） |
 | S7 Violet 适配器 | 已完成 | `internal/platform/violet`：SSE 订阅 + 断线按消息历史补拉 + 提及剥离 + 自回声过滤 + 幂等发送 + 编辑节流；单测覆盖 86.7% |
 | S8 联调验证 | 未开始 | 需要一台开好 Bot 凭据的真实 Violet 实例（`/admin/chat-bots` 注册），验证见文末「验收」 |
@@ -384,4 +409,6 @@ Violet 接入带出来的缺口（属有意取舍，不是待修的 bug）：
 - `ai.ChatEntrypoint` 是单例 setter 且签名带 mautrix 类型，命令入口目前由 Matrix 独占。Violet 因此只走 `HandleChat`：`!ai <内容>` 剥前缀当提问，`!task`/`!schedule`/上下文命令在本平台被跳过。要消掉这条，需要把端口改成平台无关 + 按平台名注册多个入口。
 - 任务产出的文件在 Violet 上降级为文字提示：文件交付已是通用的 `chat.FileAdapter` 端口，但 Violet Bot API 目前只开放图片上传（`POST /chat/bot/media`，限 png/jpeg/gif/webp）且没有文件消息类型，`violet.Adapter` 因此不实现该端口；Violet 开放通用文件消息后，实现 `UploadFile`/`SendUploadedFile` 即可，无需改 `ai`。
 - 主动聊天不接 Violet：`ai.ProactiveRooms.SendNotice` 没有对等语义（Violet 聊天没有低优先级通知类型），房间元数据一侧的 `kind`/成员数虽然够用，接进来也得先决定 notice 怎么降级。
-- Matrix 的同步循环与事件处理器注册仍在 `internal/bot`，Violet 的连接生命周期则在平台接入端内部——两边对称之前，`Platform.Start` 的语义仍不统一（S3 未收尾的部分）。
+- 已对称化：Matrix 的同步循环与事件处理器注册、Violet 的 SSE 连接、Terminal 的
+  HTTP 监听都在各自平台的 `Start` 内，`Stop` 负责取消并等待退出；`bot` 不再持有任何
+  平台连接生命周期。

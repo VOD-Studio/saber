@@ -54,6 +54,7 @@ func TestServer_SharedServicesWithoutMatrix(t *testing.T) {
 
 // TestInitServices_PlatformRegistryWithoutAI 验证关闭 AI 时平台注册表仍就绪：
 // run() 会在 initServices 后直接遍历 Enabled()，注册表为 nil 时会 panic。
+// 默认配置只剩本机终端入口，它由注册表统一启动。
 func TestInitServices_PlatformRegistryWithoutAI(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.AI.Enabled = false
@@ -62,7 +63,9 @@ func TestInitServices_PlatformRegistryWithoutAI(t *testing.T) {
 
 	require.NoError(t, state.initServices())
 	require.NotNil(t, state.services.platforms)
-	require.Empty(t, state.services.platforms.Enabled(cfg))
+	enabled := state.services.platforms.Enabled(cfg)
+	require.Len(t, enabled, 1)
+	require.Equal(t, "terminal", enabled[0].Name())
 	state.shutdown(func() {})
 }
 

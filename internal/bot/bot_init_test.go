@@ -100,12 +100,6 @@ func TestServices_Struct(t *testing.T) {
 	if svc.commandService != nil {
 		t.Error("commandService should be nil initially")
 	}
-	if svc.eventHandler != nil {
-		t.Error("eventHandler should be nil initially")
-	}
-	if svc.presence != nil {
-		t.Error("presence should be nil initially")
-	}
 	if svc.mediaService != nil {
 		t.Error("mediaService should be nil initially")
 	}
@@ -651,8 +645,6 @@ func TestServicesAssignment(t *testing.T) {
 		{"mcpManager", "mcpManager", func() bool { return svc.mcpManager == nil }},
 		{"proactiveManager", "proactiveManager", func() bool { return svc.proactiveManager == nil }},
 		{"commandService", "commandService", func() bool { return svc.commandService == nil }},
-		{"eventHandler", "eventHandler", func() bool { return svc.eventHandler == nil }},
-		{"presence", "presence", func() bool { return svc.presence == nil }},
 		{"mediaService", "mediaService", func() bool { return svc.mediaService == nil }},
 		{"client", "client", func() bool { return svc.client == nil }},
 	}

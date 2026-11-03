@@ -47,23 +47,6 @@ func TestShutdown_Timeout(t *testing.T) {
 	}
 }
 
-// TestAutoJoinRooms_EmptyList 测试空房间列表。
-func TestAutoJoinRooms_EmptyList(t *testing.T) {
-	cfg := &config.Config{
-		Matrix: config.MatrixConfig{
-			AutoJoinRooms: []string{}, // 空列表
-		},
-	}
-
-	state := &appState{
-		cfg:      cfg,
-		services: &services{},
-	}
-
-	// autoJoinRooms 不应该 panic
-	state.autoJoinRooms()
-}
-
 // TestSetupSignalHandler_ContextCancellation 测试信号处理器。
 func TestSetupSignalHandler_ContextCancellation(t *testing.T) {
 	state := &appState{
@@ -103,12 +86,6 @@ func TestServices_NilSafety(t *testing.T) {
 	}
 	if svc.commandService != nil {
 		t.Error("commandService should be nil")
-	}
-	if svc.eventHandler != nil {
-		t.Error("eventHandler should be nil")
-	}
-	if svc.presence != nil {
-		t.Error("presence should be nil")
 	}
 	if svc.mediaService != nil {
 		t.Error("mediaService should be nil")

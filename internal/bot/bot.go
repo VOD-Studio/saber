@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -18,8 +17,6 @@ import (
 	"time"
 
 	"github.com/lmittmann/tint"
-	"maunium.net/go/mautrix"
-	"maunium.net/go/mautrix/event"
 
 	"rua.plus/saber/internal/ai"
 	"rua.plus/saber/internal/cli"
@@ -33,6 +30,7 @@ import (
 	"rua.plus/saber/internal/persona"
 	"rua.plus/saber/internal/platform"
 	platformmatrix "rua.plus/saber/internal/platform/matrix"
+	terminalplatform "rua.plus/saber/internal/platform/terminal"
 	violetplatform "rua.plus/saber/internal/platform/violet"
 	"rua.plus/saber/internal/server"
 	"rua.plus/saber/internal/tui"
@@ -45,8 +43,6 @@ type services struct {
 	proactiveManager *ai.ProactiveManager
 	commandService   *matrix.CommandService
 	commandRegistry  *command.Registry
-	eventHandler     *matrix.EventHandler
-	presence         *matrix.PresenceService
 	mediaService     *matrix.MediaService
 	memeService      *meme.Service
 	personaService   *persona.Service
@@ -62,7 +58,12 @@ type appState struct {
 	flags    *cli.Flags
 	info     matrix.BuildInfo
 	services *services
+	// listener 是 run() 在初始化服务前占住的终端监听；由 terminal 平台在 Start 时接管。
+	listener net.Listener
 }
+
+// terminalPlatformName 是本机 HTTP 入口的平台标识，与配置键一致。
+const terminalPlatformName = "terminal"
 
 // Run 初始化并运行机器人。
 //
@@ -102,19 +103,25 @@ func run(parent context.Context, info matrix.BuildInfo) error {
 	if err := state.cfg.Server.Validate(); err != nil {
 		return err
 	}
-	listener, err := net.Listen("tcp", state.cfg.Server.Listen)
-	if err != nil {
-		return fmt.Errorf("无法启动服务（可能已运行）: %w", err)
-	}
-	defer func() {
-		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			slog.Warn("关闭监听失败", "error", err)
-		}
-	}()
 	ctx, cancel := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	state.services = &services{}
 	defer state.shutdown(cancel)
+
+	// 终端入口在初始化服务之前占住端口：端口冲突要早于数据库等副作用失败。
+	// 关闭 terminal 平台时既不监听端口，也不生成令牌文件。
+	if state.cfg.Platforms.Terminal.Enabled {
+		listener, err := net.Listen("tcp", state.cfg.Server.Listen)
+		if err != nil {
+			return fmt.Errorf("无法启动服务（可能已运行）: %w", err)
+		}
+		state.listener = listener
+		defer func() {
+			if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+				slog.Warn("关闭监听失败", "error", err)
+			}
+		}()
+	}
 	if state.cfg.Platforms.Matrix.Enabled {
 		svc, err := state.initMatrixClient()
 		if err != nil {
@@ -125,23 +132,24 @@ func run(parent context.Context, info matrix.BuildInfo) error {
 	if err := state.initServices(); err != nil {
 		return err
 	}
-	// 先让平台接上共享聊天入口，再开始投递事件，避免入站消息找不到处理链路。
+	// 平台按注册顺序启动：terminal 起本机 HTTP 监听，Matrix 注册事件并跑同步循环，
+	// 这里不再有第二份事件注册或同步启动。
 	for _, p := range state.services.platforms.Enabled(state.cfg) {
 		if err := p.Start(ctx, state.handleChat); err != nil {
+			if p.Name() == terminalPlatformName {
+				// 本机入口是进程的主要用途，起不来直接退出，避免静默变成一个不响应 saber chat 的进程。
+				return fmt.Errorf("终端平台启动失败: %w", err)
+			}
 			slog.Warn("平台启动失败", "platform", p.Name(), "error", err)
 		}
 	}
-	if state.services.client != nil {
-		state.setupEventHandlers()
-		state.startSync(ctx)
+	// 主动聊天跟随进程生命周期，与平台同步一起关闭。
+	if state.services.proactiveManager != nil {
+		state.services.proactiveManager.Start(ctx)
 	}
-	token, err := server.Token(state.cfg.Server.TokenPath(state.flags.ConfigPath), true)
-	if err != nil {
-		return err
-	}
-	slog.Info("Saber 服务已就绪", "listen", state.cfg.Server.Listen, "chat", "saber chat")
-	handler := server.New(state.services.aiService, token, localCommands{registry: state.services.commandRegistry, capabilities: state.commandCapabilities})
-	return server.Serve(ctx, &http.Server{Addr: state.cfg.Server.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second}, listener)
+	slog.Info("Saber 已启动", "platforms", len(state.services.platforms.Enabled(state.cfg)), "chat", "saber chat")
+	<-ctx.Done()
+	return nil
 }
 
 // initConfig 处理配置初始化。
@@ -298,8 +306,9 @@ func (s *appState) initServices() error {
 	}
 
 	if !s.cfg.AI.Enabled {
+		s.registerTerminalPlatform()
 		if svc.client != nil {
-			svc.platforms.Register(platformmatrix.New(s.cfg, svc.commandService, nil))
+			svc.platforms.Register(s.newMatrixPlatform())
 		}
 		if s.cfg.Platforms.Violet.Enabled {
 			if err := s.cfg.Platforms.Violet.Validate(); err != nil {
@@ -363,16 +372,11 @@ func (s *appState) initServices() error {
 	}
 	s.initPersonaService()
 	s.initMemeService()
-	// Matrix 与 Violet 共享命令入口，各自保留平台投递器。
-	if svc.client != nil {
-		matrixPlatform := platformmatrix.New(s.cfg, svc.commandService, svc.mediaService)
-		if err := s.registerPlatform(matrixPlatform, aiService); err != nil {
-			return err
-		}
-	}
+
+	// 本机终端入口先登记：注册顺序即启动顺序，本地 HTTP 端口最先就绪。
+	s.registerTerminalPlatform()
 
 	// Violet 在私聊或被寻址的群聊中使用同一命令入口。
-	// 注册必须留在下面 Matrix 专属装配的提前 return 之前：否则关掉 Matrix 就什么都注册不了。
 	if s.cfg.Platforms.Violet.Enabled {
 		if err := s.cfg.Platforms.Violet.Validate(); err != nil {
 			return fmt.Errorf("violet 平台配置无效: %w", err)
@@ -382,22 +386,69 @@ func (s *appState) initServices() error {
 		}
 	}
 
-	// Matrix 自动回复与主动聊天仅在启用 Matrix 时装配。
-	if svc.client == nil {
-		return s.buildCommands()
-	}
-
-	s.registerAICommands()
-
-	if s.cfg.Matrix.Proactive.Enabled {
-		mgr, err := s.initProactiveManager()
-		if err != nil {
+	// Matrix 自动回复、主动聊天与事件处理器只在启用 Matrix 时装配。
+	if svc.client != nil {
+		s.registerAICommands()
+		if s.cfg.Matrix.Proactive.Enabled {
+			mgr, err := s.initProactiveManager()
+			if err != nil {
+				return err
+			}
+			svc.proactiveManager = mgr
+		}
+		if err := s.registerPlatform(s.newMatrixPlatform(), aiService); err != nil {
 			return err
 		}
-		svc.proactiveManager = mgr
 	}
 
 	return s.buildCommands()
+}
+
+// registerTerminalPlatform 把本机 HTTP 入口登记为平台。
+//
+// 关闭 platforms.terminal.enabled 时既不注册也不监听，也不生成令牌文件，saber chat
+// 会因缺少令牌或连不上而明确失败，而不是悄悄连上一个本不存在的服务。
+func (s *appState) registerTerminalPlatform() {
+	if !s.cfg.Platforms.Terminal.Enabled {
+		slog.Warn("本机终端入口已关闭", "hint", "platforms.terminal.enabled=false，saber chat 将无法连接")
+		return
+	}
+	// 命令注册表在 buildCommands 之后才存在，因此用闭包延迟解析。
+	commands := func() server.CommandDispatcher {
+		return localCommands{registry: s.services.commandRegistry, capabilities: s.commandCapabilities}
+	}
+	s.services.platforms.Register(terminalplatform.New(
+		s.cfg.Server.Listen,
+		s.cfg.Server.TokenPath(s.flags.ConfigPath),
+		s.services.aiService,
+		commands,
+		terminalplatform.WithListener(s.listener),
+	))
+}
+
+// newMatrixPlatform 组装 Matrix 接入端。
+//
+// 登录与 E2EE 已在 initMatrixClient/initCrypto 完成；这里注入同步会话与事件处理器，
+// 由平台在 Start 时注册事件并启动同步循环，装配层不再自己起一份。
+func (s *appState) newMatrixPlatform() *platformmatrix.Platform {
+	svc := s.services
+	return platformmatrix.New(s.cfg, svc.commandService, svc.mediaService,
+		platformmatrix.WithSession(platformmatrix.NewSession(svc.client, s.cfg.Matrix.AutoJoinRooms)),
+		platformmatrix.WithEventHandler(s.newEventHandler()),
+	)
+}
+
+// newEventHandler 创建 Matrix 事件处理器，并接入已装配的主动聊天管理器。
+func (s *appState) newEventHandler() *matrix.EventHandler {
+	maxConcurrent := s.cfg.Matrix.MaxConcurrentEvents
+	if maxConcurrent <= 0 {
+		maxConcurrent = 10
+	}
+	handler := matrix.NewEventHandler(s.services.commandService, maxConcurrent)
+	if s.services.proactiveManager != nil {
+		handler.SetProactiveManager(s.services.proactiveManager)
+	}
+	return handler
 }
 
 // registerPlatform 接入一个聊天平台：能收任务结果的先注册投递器，然后进注册表等待 Start。
@@ -541,91 +592,11 @@ func (s *appState) initProactiveManager() (*ai.ProactiveManager, error) {
 	return mgr, nil
 }
 
-// setupEventHandlers 设置事件处理器。
-func (s *appState) setupEventHandlers() {
-	svc := s.services
-
-	// 使用配置的并发数创建 EventHandler
-	maxConcurrent := s.cfg.Matrix.MaxConcurrentEvents
-	if maxConcurrent <= 0 {
-		maxConcurrent = 10 // 默认值
-	}
-
-	eventHandler := matrix.NewEventHandler(svc.commandService, maxConcurrent)
-
-	if svc.proactiveManager != nil {
-		eventHandler.SetProactiveManager(svc.proactiveManager)
-	}
-
-	mautrixClient := svc.client.GetClient()
-	if syncer, ok := mautrixClient.Syncer.(*mautrix.DefaultSyncer); ok {
-		syncer.OnSync(mautrixClient.DontProcessOldEvents)
-		syncer.OnEventType(event.EventMessage, eventHandler.OnMessage)
-		syncer.OnEventType(event.StateMember, eventHandler.OnMember)
-	} else {
-		slog.Warn("Client syncer is not DefaultSyncer, event handling may not work")
-	}
-
-	svc.eventHandler = eventHandler
-	svc.presence = matrix.NewPresenceService(mautrixClient)
-
-	if err := svc.presence.SetPresence("online", "Saber Bot is running"); err != nil {
-		slog.Warn("Failed to set presence", "error", err)
-	}
-
-	s.autoJoinRooms()
-	slog.Info("事件处理器初始化完成", "max_concurrent_events", maxConcurrent)
-}
-
-// autoJoinRooms 自动加入配置的房间。
-func (s *appState) autoJoinRooms() {
-	if len(s.cfg.Matrix.AutoJoinRooms) == 0 {
-		return
-	}
-
-	rooms := matrix.NewRoomService(s.services.client)
-	for _, roomID := range s.cfg.Matrix.AutoJoinRooms {
-		slog.Info("Joining room", "room", roomID)
-		if _, err := rooms.JoinRoom(context.Background(), roomID); err != nil {
-			slog.Warn("Failed to join room", "room", roomID, "error", err)
-		}
-	}
-}
-
 // setupSignalHandler 设置信号处理器。
 //
 // 返回 context 和 cancel 函数。
 func (s *appState) setupSignalHandler() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-}
-
-// startSync 启动 Matrix 同步。
-func (s *appState) startSync(ctx context.Context) {
-	svc := s.services
-
-	go func() {
-		reconnectCfg := matrix.DefaultReconnectConfig()
-		slog.Info("Starting Matrix sync with auto-reconnect",
-			"max_retries", reconnectCfg.MaxRetries,
-			"initial_delay", reconnectCfg.InitialDelay,
-			"max_delay", reconnectCfg.MaxDelay)
-
-		if err := svc.presence.StartSyncWithReconnect(ctx, reconnectCfg); err != nil {
-			if err != context.Canceled {
-				slog.Error("Sync failed", "error", err)
-			}
-		}
-	}()
-
-	if svc.proactiveManager != nil {
-		svc.proactiveManager.Start(ctx)
-	}
-
-	slog.Info("Saber Bot is running",
-		"version", s.info.Version,
-		"git", s.info.GitCommit,
-		"branch", s.info.GitBranch)
-	slog.Info("Press Ctrl+C to exit.")
 }
 
 // waitForShutdown 等待关闭信号并执行优雅关闭。
