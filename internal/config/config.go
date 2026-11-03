@@ -1047,8 +1047,10 @@ execution:
   backend: local # local 直接使用宿主用户权限；docker 使用预装镜像隔离
   # image: python:3.13-slim # backend: docker 时使用，需预先安装
   # network: true # 仅 docker 生效；local 不支持断网隔离
-  command_guard: block # 危险命令绊线：block 默认拦截，off 关闭全部检查（只防误操作，不是沙箱）
+  command_guard: block # 危险命令绊线：block 默认拦截，ask 改为群内一次性审批，off 关闭全部检查（只防误操作，不是沙箱）
   # command_guard_deny: [] # 可选：追加字面量子串，最多 64 条、每条 1..256 字节
+  approval_ttl_seconds: 600 # ask 模式审批码有效期（60..3600 秒）；审批只存内存，重启失效
+  approval_max_pending: 32 # 同时保留的待审批请求上限（1..256）；超限拒绝新请求
   # workspaces:
   #   project:
   #     path: /absolute/path/to/project

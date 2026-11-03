@@ -1,0 +1,95 @@
+# 默认启动常驻服务：saber；另开终端执行 saber chat。
+server:
+  listen: "127.0.0.1:8320"
+  token_file: ".saber-token" # 首次启动自动创建，相对于配置文件目录
+
+ai:
+  enabled: false # 配置提供商及 default_model 后开启
+  providers: {}
+  # providers:
+  #   podlink-responses:
+  #     type: openai
+  #     api: openai-responses
+  #     base_url: "http://127.0.0.1:8317/v1"
+  #     api_key: ""
+  #     models:
+  #       gpt-5.6-sol:
+  #         model: gpt-5.6-sol
+  #         reasoning_effort: high # 按模型支持情况设置；省略则用上游默认
+  default_model: "" # 例如 podlink-responses.gpt-5.6-sol
+  media_model: "" # 带图片消息使用的多模态模型，留空则走 default_model
+  max_tokens: 8192 # 每次生成预算；0 表示不发送输出上限；模型配置可覆盖
+  temperature: 0.7 # Responses 仅在 reasoning_effort: none 时发送
+  request_timeout_seconds: 120 # 单次请求总时限，包含流式读取
+
+agent:
+  stream: true # 模型传输开关，所有接入共同遵守
+  task_receipt_enabled: false # 默认不发送「已接收，任务 #...」；结果仍正常投递
+  task_delivery_max_attempts: 20 # 结果投递最大尝试次数（含首次）；退避封顶 256 秒，20 次约 51 分钟，用尽后放弃自动重试
+  max_concurrent_tasks: 4 # 同时执行的任务数上限（1..64）；同一工作目录仍然串行
+  max_rounds: 40 # 硬上限，包含最终回答
+  timeout_seconds: 600 # 整次任务，包含请求、重试等待与工具执行
+  max_tool_output_bytes: 32768
+  budget: # 自适应轮数与用量封顶
+    enabled: true
+    initial_rounds: 0 # 0 = min(5, max_rounds)
+    extension_rounds: 5 # 每次评估通过后追加
+    max_total_tokens: 200000 # 全任务保守用量上限，包含摘要与评估；0 表示不设上限
+  subagents: # 内置 delegate 工具：顶层任务可把独立子目标交给子代理并行完成
+    enabled: true # 默认开启；显式 false 可从顶层工具集中移除 delegate
+    max_rounds: 12 # 单个子代理的轮数上限，范围 1..40
+    max_parallel: 4 # 同一轮并发子代理数，范围 1..16
+    max_total_tokens: 0 # 子代理独立用量上限；0 表示只受父任务账本约束
+  context:
+    enabled: true
+    max_messages: 50
+    max_input_tokens: 32768 # 保守估算输入预算，不删除数据库历史
+    compaction: # 运行内压缩，仅对持久化任务生效
+      enabled: true
+      trigger_ratio: 0.8
+      target_ratio: 0.5
+  retry:
+    enabled: true
+    max_retries: 3
+    initial_delay_ms: 1000
+    max_delay_ms: 30000
+    backoff_factor: 2
+    fallback_enabled: false
+    fallback_models: []
+
+# 可选接入与执行能力；详细配置见 docs/configuration.md、docs/execution.md。
+platforms:
+  terminal:
+    enabled: true # 本机 HTTP 聊天入口（saber chat / TUI）
+  matrix:
+    enabled: false # Matrix 聊天入口，账号等明细在顶层 matrix: 配置
+  violet:
+    enabled: false # Violet Bot API 接入，凭据在 Violet 管理端签发
+mcp:
+  enabled: false # 开启后仍须 execution 中的身份及工具授权
+execution:
+  enabled: false # 关闭时仍可正常聊天；开启前必须显式选择 backend
+  backend: local # local 直接使用宿主用户权限；docker 使用预装镜像隔离
+  # image: python:3.13-slim # backend: docker 时使用，需预先安装
+  # network: true # 仅 docker 生效；local 不支持断网隔离
+  command_guard: block # 危险命令绊线：block 默认拦截，ask 改为群内一次性审批，off 关闭全部检查（只防误操作，不是沙箱）
+  # command_guard_deny: [] # 可选：追加字面量子串，最多 64 条、每条 1..256 字节
+  approval_ttl_seconds: 600 # ask 模式审批码有效期（60..3600 秒）；审批只存内存，重启失效
+  approval_max_pending: 32 # 同时保留的待审批请求上限（1..256）；超限拒绝新请求
+  # workspaces:
+  #   project:
+  #     path: /absolute/path/to/project
+  #     backend: docker # 可选，覆盖全局 backend
+  #     env: {PROJECT_FLAG: "value"}
+  # grants:
+  #   - {platform: matrix, account: "@bot:example", room: "!room:example", users: ["@alice:example"], workspace: project, tools: [exec, read_file, search_files, glob_files, process, read_output]}
+commands:
+  admins: [] # 全局模型切换、共享人格创建和删除；按 platform/account/users 精确配置
+  session_writers: [] # 当前会话上下文和人格修改；按 platform/account/room/users 精确配置
+  legacy_persona_account: "" # 确认旧 room_personas 全属此 Matrix bot 时填其完整用户 ID，空值保留待核查
+memory:
+  enabled: false # 长期记忆；启用后按用户与群作用域隔离保存，默认关闭
+  max_chars: 2200 # 每个空间的存储上限（Unicode 字符）
+  inject_max_bytes: 8192 # 单次注入字节上限，同时不超过总输入预算的四分之一
+shutdown:
+  timeout_seconds: 30

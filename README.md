@@ -29,6 +29,9 @@
 - **回复延续对话**: 回复机器人的消息时自动继续对话
 - **主动聊天**: AI 驱动的主动消息，支持静默检测、定时触发、新成员欢迎
 - **人格管理**: 支持为不同房间设置不同的机器人人格，包括内置人格和自定义人格
+- **子代理并行**: 顶层任务可用内置 `delegate` 工具把独立子目标交给子代理并行完成（`agent.subagents`，默认开启）
+- **运行中转向**: `!task redirect` 或自然语言补充可在运行中任务的下一轮之前注入，不必取消重开
+- **危险命令审批**: `execution.command_guard: ask` 把绊线命中改为一次性审批码，由授权成员 `!approve` / `!deny`
 
 ### 娱乐功能
 
@@ -651,6 +654,7 @@ saber/
       memory/                      # 无网络聊天 adapter
     command/                       # 统一命令注册、解析、执行与目录
     platform/                      # 可插拔平台接入端接口与注册表
+      terminal/                    # 本机 HTTP 聊天入口生命周期（saber chat / TUI 后端）
       matrix/                      # Matrix 平台接入端：消息适配与任务投递
       violet/                      # Violet Bot API、SSE 与命令目录发布
     conversation/                  # 平台无关的历史、串行调度与回复交付

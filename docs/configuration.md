@@ -65,6 +65,11 @@ agent:
     initial_rounds: 0 # 0 = min(5, max_rounds)
     extension_rounds: 5
     max_total_tokens: 200000 # 0 表示不设上限
+  subagents: # 内置 delegate 工具：顶层任务并行拆分独立子目标
+    enabled: true # 默认开启；显式 false 从顶层工具集移除 delegate
+    max_rounds: 12 # 单个子代理轮数上限，1..40
+    max_parallel: 4 # 同一轮并发子代理数，1..16
+    max_total_tokens: 0 # 子代理独立上限；0 表示只受父任务账本约束
   context:
     enabled: true
     max_messages: 50
@@ -101,6 +106,8 @@ agent:
 
 `max_rounds > 100` 会提示成本风险，默认 40 不告警。
 
+`agent.subagents` 控制内置 `delegate` 工具：默认开启；顶层任务只有在本次已有至少一个可用工具时才会拿到 `delegate`（单独委派不带来新能力），子代理不能递归、深度固定为 1，`tools` 只能是父请求工具集的子集。`max_parallel` 限定同一轮并发子代理数（默认 4，1..16），工具执行仍按工作区租约串行，不会与父任务的 `exec`/`process` 并发操作同一环境。`max_total_tokens: 0`（默认）表示子代理只受父任务账本约束，实际消耗全部上推到父账本；填正值只收紧单个子代理。`enabled: false` 只从顶层工具集移除 `delegate`，不影响已持久化的任务。
+
 上下文在每次模型请求前按渲染后的输入计算预算。任务请求的原始用户指令逐字保留为 user 资料；工作状态与滚动摘要作为 assistant 工作资料注入发送副本，不写回数据库。超过软触发比例（`trigger_ratio`，按 `max_input_tokens`）或 `max_messages` 时，按完整模型批次压缩已完成历史：assistant 工具调用、全部匹配结果与 ResponsesHistory 不拆分；保留最近两个完整批次与最新用户消息。摘要失败、不减体积或保留区仍超硬限时明确失败，不提交检查点、不删除原始轨迹。`enabled: false` 表示新任务不继承前序任务历史/状态，当前任务内的工具循环与压缩不受影响。
 
 `max_input_tokens` 与渲染后输入的 token 估算比较：4 个 UTF-8 字节折算 1 token，并逐字段统计消息正文、工具定义与保留的推理数据，不是提供商 tokenizer 的精确计数。旧版本把同一字段当作序列化字节数使用，按字节调参的部署应把数值除以约 4（例如 `32768` 改为 `8192`）以保持原来的触发时机。`max_messages` 包含系统提示、用户、助手及工具消息。这些限制只影响发给模型的上下文，不删除 `tasks.db` 中的消息、任务、事件和结果。
@@ -125,6 +132,10 @@ execution:
   backend: local # 开启时必须显式选择 local 或 docker
   # image: "python:3.13-slim" # 仅 docker，需预先安装
   # network: true # 仅 docker 生效
+  command_guard: block # block（默认）拦截；ask 改为本群一次性审批；off 关闭全部检查
+  # command_guard_deny: [] # 可选：追加最多 64 条字面量子串
+  approval_ttl_seconds: 600 # ask 模式审批码有效期，60..3600；审批只存内存，重启失效
+  approval_max_pending: 32 # 同时保留的待审批请求上限，1..256；超限拒绝新请求
   # workspaces:
   #   project:
   #     path: "/srv/workspaces/project"
@@ -141,7 +152,7 @@ shutdown:
 
 令牌和任务数据库位于配置文件目录，令牌首次启动自动创建，权限为 `0600`。不同服务实例必须使用独立的数据目录和监听端口。
 
-MCP 默认关闭，不加载内置或外部服务器。开启后还必须通过 `execution` 配置当前身份的工作区、工具列表、`mcp_requirements` 和所需能力。只把 `mcp.enabled` 改为 true 不代表工具已授权；本地 TUI 也不自动获得权限。本构建只实施 `external` 能力：`publish`、`deploy`、`cross_directory` 会在启动时被拒绝，`local` 后端也不接受 `room: "*"` 或成员 `"*"` 的通配授权。执行工具另有危险命令绊线：`execution.command_guard` 默认 `block`（`off` 关闭全部检查），`execution.command_guard_deny` 默认空，用于追加最多 64 条字面量子串；它拦截 `exec` 与 `process start`，但只防误操作，不是沙箱边界。具体配置见 [执行与 MCP 授权](execution.md)。
+MCP 默认关闭，不加载内置或外部服务器。开启后还必须通过 `execution` 配置当前身份的工作区、工具列表、`mcp_requirements` 和所需能力。只把 `mcp.enabled` 改为 true 不代表工具已授权；本地 TUI 也不自动获得权限。本构建只实施 `external` 能力：`publish`、`deploy`、`cross_directory` 会在启动时被拒绝，`local` 后端也不接受 `room: "*"` 或成员 `"*"` 的通配授权。执行工具另有危险命令绊线：`execution.command_guard` 默认 `block`（`off` 关闭全部检查），`ask` 时命中规则不再直接拒绝，而是返回一次性审批码，由同一机器人账号下该工作区的有效授权成员或本群 `task_admins` 执行 `!approve <码>`（拒绝用 `!deny <码>`）。审批码有效期由 `execution.approval_ttl_seconds` 控制（默认 600，60..3600 秒），内存中最多保留 `execution.approval_max_pending` 条待审批请求（默认 32，1..256）；审批状态只存内存，Saber 重启后全部失效，每次批准只能消费一次。`execution.command_guard_deny` 默认空，用于追加最多 64 条字面量子串；绊线拦截 `exec` 与 `process start`，但只防误操作，不是沙箱边界。具体配置见 [执行与 MCP 授权](execution.md)。
 
 ## 长期记忆
 
@@ -248,7 +259,7 @@ platforms:
     http_timeout_seconds: 15
 ```
 
-- `terminal.enabled` 控制本机 HTTP 聊天入口。它不依赖任何外部平台，因此默认开启；Matrix 与 Violet 默认关闭，需要显式启用。
+- `terminal.enabled` 控制本机 HTTP 聊天入口。它不依赖任何外部平台，因此默认开启；设为 `false` 后不创建本机令牌、不监听端口，`saber chat` 与 TUI 无法连接（会明确报错）；其他平台接入、CLI 与 `doctor` 等本地检查不受影响。Matrix 与 Violet 默认关闭，需要显式启用。
 - Violet 的 `endpoint` 与 `bot_token` 在 `enabled: true` 时为必填项，协议必须是 `http(s)://`。凭据在 Violet 管理端 `/admin/chat-bots`（权限点 `chat:bot-manage`）注册签发，可反复回看明文；配置文件仍按 `0600` 保存，不要提交进仓库。
 - `account` 参与会话与历史的存储键，改动它等于换一份历史、限流额度也重新计。多实例接同一个站点时应当显式区分。
 - 触发规则：私聊由 `direct_chat_auto_reply` 控制，群聊由 `group_chat_mention_reply` 控制且必须被 `@` 到（Violet 服务端本来就只把被点名的群聊消息推给 bot，Saber 再判一次）。正文里的 `@(username:uuid)` 会降级成 `@username` 再交给模型；只 @ 一句没有内容不会触发回答。
