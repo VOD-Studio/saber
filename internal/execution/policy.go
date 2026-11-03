@@ -40,6 +40,8 @@ type Executor struct {
 	// processes 按任务保存后台作业，已结束作业保留状态与日志引用。
 	processMu sync.Mutex
 	processes map[int64]map[string]*processRecord
+	// guard 是危险命令绊线；CommandGuard 为 off 时为 nil。
+	guard *commandGuard
 }
 
 type scope struct {
@@ -92,6 +94,22 @@ func ValidateConfig(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets
 	}
 	if cfg.TimeoutSeconds < 1 || cfg.TimeoutSeconds > 3600 {
 		return cfg, errors.New("execution timeout must be 1..3600 seconds")
+	}
+	switch cfg.CommandGuard {
+	case "":
+		cfg.CommandGuard = "block"
+	case "block", "off":
+	default:
+		return cfg, errors.New("execution.command_guard must be block or off")
+	}
+	if len(cfg.CommandGuardDeny) > maxGuardRules {
+		return cfg, fmt.Errorf("execution.command_guard_deny allows at most %d rules", maxGuardRules)
+	}
+	cfg.CommandGuardDeny = slices.Clone(cfg.CommandGuardDeny)
+	for _, rule := range cfg.CommandGuardDeny {
+		if len(rule) == 0 || len(rule) > maxGuardRuleLength {
+			return cfg, fmt.Errorf("execution.command_guard_deny rules must be 1..%d bytes", maxGuardRuleLength)
+		}
 	}
 	cfg.Workspaces = maps.Clone(cfg.Workspaces)
 	cfg.Grants = slices.Clone(cfg.Grants)
@@ -287,6 +305,8 @@ func New(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) 
 		backends:  make(map[string]backend),
 		envs:      make(map[int64]*envEntry),
 		processes: make(map[int64]map[string]*processRecord),
+		// 规则在 ValidateConfig 校验后只编译这一次。
+		guard: newCommandGuard(cfg),
 	}
 	for _, admin := range cfg.TaskAdmins {
 		for _, user := range admin.Users {

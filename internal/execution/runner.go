@@ -85,6 +85,12 @@ func (e *Executor) Run(ctx context.Context, tool string, args map[string]any) (r
 	if err = e.Check(ctx, tool); err != nil {
 		return result, err
 	}
+	// 危险命令在打开任何执行环境之前拦截。
+	if tool == "exec" {
+		if err = e.ensureCommandAllowed(args); err != nil {
+			return result, err
+		}
+	}
 	if !LocalTool(tool) {
 		return result, errors.New("not a local tool")
 	}

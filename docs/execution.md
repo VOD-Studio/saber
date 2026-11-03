@@ -24,6 +24,12 @@
 
 所有文件工具共用 Go 实现，两个后端语义一致。工作区路径通过 `os.OpenRoot` 钉住，逐组件拒绝链接；Unix 上以 `O_NOFOLLOW|O_NONBLOCK` 打开后校验普通文件，避免符号链接、FIFO 与末组件替换。`local` 后端不会对整个工作区做挂载节点扫描；Docker 后端在打开执行环境前和每次新命令前检查挂载中的 IPC/设备节点。
 
+## 危险命令绊线
+
+`exec` 与 `process start` 在启动命令前按 `execution.command_guard` 检查命令文本：默认 `block`，命中规则时返回普通工具错误 `命令被安全策略拒绝（命中规则 "<规则>"），未执行`，不回显命令正文或环境变量；`off` 关闭全部检查（含自定义规则）。内置规则（大小写不敏感子串）：`/var/run/docker.sock`、`--privileged`、`--cap-add`、`--pid=host`、`--net=host`、`--userns=host`、`--security-opt`、`/etc/shadow`、`/etc/sudoers`、`/.ssh/`、`/.aws/`、`.git-credentials`、`.netrc`、`:(){`，以及匹配 `rm -rf /` 一类根目录删除的正则（`rm -rf /tmp/x` 不命中）。`execution.command_guard_deny` 可追加最多 64 条 1..256 字节的字面量子串。
+
+这是防止误操作的绊线，不是沙箱边界：命令经 `sh -c` 执行，引号、变量展开、命令替换或编码都能绕过字符串匹配；`local` 后端本身也不构成隔离。需要真实边界时使用 `backend: docker`，并保持 `room` 与成员授权精确。
+
 ## 输出、回读与取消
 
 每次调用分配不可猜测的 `output_id`（`t<taskID>-<32hex>`），完整输出写在 `<log_dir>/task-<taskID>/output-<32hex>.log`，目录 `0700`、文件 `0600`。模型只看到有界 `summary` 与句柄；日志超过 16 MiB 时保留已写内容并终止对应进程。`read_output` 的 `offset` 必须落在 UTF-8 字符边界；运行中的日志读到当前末尾返回 `eof:false` 和 `caught_up:true`，writer 关闭后到末尾才 `eof:true`。
@@ -61,6 +67,8 @@ execution:
   # network: false # 仅 docker；默认开启
   log_dir: "/srv/saber-private/execution"
   timeout_seconds: 60
+  command_guard: block # block（默认）拦截危险命令；off 关闭全部检查，包括自定义规则
+  # command_guard_deny: ["terraform destroy"] # 追加字面量子串，最多 64 条、每条 1..256 字节
   workspaces:
     project:
       path: "/srv/workspaces/project"

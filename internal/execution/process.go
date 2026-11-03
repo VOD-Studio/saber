@@ -227,6 +227,10 @@ func (e *Executor) startProcess(ctx context.Context, args map[string]any, run sc
 	if !ok {
 		return result, errors.New("process requires a workspace grant")
 	}
+	// 后台作业与前台 exec 共用同一份绊线规则。
+	if err := e.ensureCommandAllowed(args); err != nil {
+		return result, err
+	}
 	e.processMu.Lock()
 	running := 0
 	for _, record := range e.processes[run.id] {

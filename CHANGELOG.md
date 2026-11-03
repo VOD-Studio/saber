@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 执行工具新增危险命令绊线 `execution.command_guard`（默认 `block`，`off` 关闭）：`exec` 与 `process start` 在打开环境前按大小写不敏感的字面量规则拦截读取凭据、容器提权参数与根目录删除一类命令，命中时返回 `命令被安全策略拒绝（命中规则 "<规则>"），未执行`，不回显命令正文；`execution.command_guard_deny` 可追加最多 64 条自定义子串。它是防误操作的绊线，不是沙箱边界。
+
 ### Changed
 
 - `agent.context.max_input_tokens` 与房间历史截断改用真正的 token 近似（4 个 UTF-8 字节折算 1 token），不再把序列化 JSON 的字节数直接当 token：此前 `max_input_tokens: 32768` 实际只相当于约 8k token，压缩触发得比配置值早约 4 倍。按字节调过参的部署应把该值除以约 4（例如改为 `8192`）以保持原有触发时机；`max_input_tokens` 现在逐字段统计消息正文、工具定义与保留的推理数据。
