@@ -293,6 +293,7 @@ func (s *appState) buildCommands() error {
 				{"reject", "拒绝当前空间待确认建议", []command.Argument{{Name: "id", Type: "integer", Required: true}}, writer},
 				{"pause", "暂停当前空间记忆自动学习", nil, writer},
 				{"resume", "恢复当前空间记忆自动学习", nil, writer},
+				{"profile", "查看当前空间画像；profile refresh 立即重建", nil, nil},
 			} {
 				action := sub.name
 				if err := add("memory."+action, []string{"memory", action}, sub.description, "conversation", sub.args, nil, "", sub.authorize,
@@ -304,7 +305,7 @@ func (s *appState) buildCommands() error {
 			}
 			if err := add("memory.help", []string{"memory"}, "记忆命令用法", "conversation", nil, nil, "", nil,
 				func(ctx context.Context, m chat.Message, a chat.Adapter, _ string) error {
-					return reply(ctx, m, a, "用法：/memory list/status/add/edit/forget/pending/approve/reject/pause/resume")
+					return reply(ctx, m, a, "用法：/memory list/status/profile/add/edit/forget/pending/approve/reject/pause/resume")
 				}); err != nil {
 				return err
 			}
