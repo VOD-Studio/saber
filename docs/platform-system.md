@@ -280,6 +280,73 @@ agent.Runtime → task_events（完整增量与执行记录）
 任务终态入库 → 幂等 Send() 取回同一消息 ID → Edit() 提交 completed/failed；失败重试
 ```
 
+## Telegram 接入（`internal/platform/telegram`）
+
+Telegram 走 Bot API 长轮询（`getUpdates`），不需要公网地址、证书或 webhook 注册，部署在 NAT 后面即可用。出站用 `sendMessage` / `editMessageText` / `sendChatAction`，adapter 声明 `Edit/Typing/Reply`，没有图片与文件能力。
+
+```yaml
+platforms:
+  telegram:
+    enabled: false
+    bot_token: "123456:ABC-DEF..."   # BotFather 签发
+    api_base: "https://api.telegram.org"  # 自建反代或测试假 API
+    account: telegram                # 参与历史键，留空即 telegram
+    direct_chat_auto_reply: true
+    group_chat_mention_reply: true
+    edit_interval_ms: 200
+    http_timeout_seconds: 15
+    poll_timeout_seconds: 30
+```
+
+- **入站**：只处理 `message` 更新，`edited_message`/`channel_post` 与无正文消息跳过；`from.is_bot` 与 `getMe` 得到的自身 ID 一并过滤。私聊按 `direct_chat_auto_reply`；群组/超级群要求 `@botusername` 或回复 bot 的消息（`group_chat_mention_reply`），频道消息一律跳过。提及按实体（含 `text_mention`）与文本兜底识别，剥离后交给共享 Handler；`/cmd@bot` 剥离后仍能被命令分发器识别。
+- **会话**：`Conversation = chat_id`，`Thread = message_thread_id`（论坛话题），回复带 `reply_parameters`。
+- **限制**：正文按 4000 字符截断（平台上限 4096）；发送使用纯文本，不解析 MarkdownV2（避免转义失败导致整条消息被拒）；Telegram 没有幂等发送键，任务重试可能重复发一条；编辑与上一帧相同时按成功处理。
+
+## Discord 接入（`internal/platform/discord`）
+
+出站走 REST（`POST/PATCH /channels/{id}/messages`），入站走 Gateway WebSocket（`/gateway/bot` 取地址，Identify/Heartbeat/READY/MESSAGE_CREATE）。adapter 声明 `Edit/Typing/Reply`。
+
+```yaml
+platforms:
+  discord:
+    enabled: false
+    bot_token: "..."                 # 开发者后台 Bot → Reset Token
+    api_base: "https://discord.com/api/v10"
+    account: discord
+    direct_chat_auto_reply: true
+    group_chat_mention_reply: true
+    edit_interval_ms: 200
+    http_timeout_seconds: 15
+```
+
+- **开发者后台**：必须为 bot 打开 **Message Content Intent**（`MESSAGE_CONTENT`，特权 intent），否则频道与私聊的 `content` 是空串，接入端只会看到附件消息并跳过。Bot 还需 `bot` scope 与发送消息/读消息历史的权限；邀请到服务器后要给它目标频道的 View Channel / Send Messages / Read Message History。
+- **入站**：跳过 `author.bot`、自身 ID、类型非 0/19 的系统事件与空正文（纯附件消息当前不支持）；私聊（无 `guild_id`）按 `direct_chat_auto_reply`，服务器频道要求 `<@bot>` 提及或回复 bot 的消息。发送统一带 `allowed_mentions.parse=[]`，模型正文里的 `@everyone` 不会变成真实 ping。
+- **会话**：`Conversation = channel_id`（Discord 线程本身就是独立频道，因此 `Thread` 留空）；回复带 `message_reference`。
+- **限制**：正文按 1900 字符截断（平台上限 2000）；Gateway 断线按 1s..60s 指数退避重连并重新 Identify（不实现 Resume，断线期间的事件不补发）；`TransactionID` 哈希成 25 字符 `nonce` 并 `enforce_nonce`，任务重试在 Discord 的去重窗口内不会重复发送。
+
+## Slack 接入（`internal/platform/slack`）
+
+入站走 Socket Mode（`apps.connections.open` 换取 WebSocket，事件先 ack `envelope_id` 再处理），出站走 Web API（`chat.postMessage` / `chat.update`）。adapter 声明 `Edit/Reply`，`SetTyping` 是空操作。
+
+```yaml
+platforms:
+  slack:
+    enabled: false
+    bot_token: "xoxb-..."            # Bot User OAuth Token
+    app_token: "xapp-..."            # App-Level Token，需 connections:write
+    api_base: "https://slack.com/api"
+    account: slack
+    direct_chat_auto_reply: true
+    group_chat_mention_reply: true
+    edit_interval_ms: 200
+    http_timeout_seconds: 15
+```
+
+- **Slack 应用配置**：开启 **Socket Mode**；App-Level Token 需要 `connections:write`；Bot Token 至少需要 `chat:write`、`channels:history`、`groups:history`、`im:history`、`mpim:history`、`app_mentions:read`；Event Subscriptions 订阅 `message.im`、`message.channels`、`message.groups`、`message.mpim`。Socket Mode 不需要公网 Request URL。
+- **入站**：跳过带 `subtype`（含 `message_changed`/`message_deleted`/`bot_message`）、`bot_id`、自身 `user_id`、`edited` 与空正文的事件；私聊（`channel_type=im`，或频道 ID 以 `D` 开头）按 `direct_chat_auto_reply`，频道要求 `<@bot>` 提及或在线程里回复 bot 的消息（接入端记录自己发出的 ts 判断线程父消息）。
+- **会话**：`Conversation = channel`，`Thread = thread_ts`；顶层消息的回复会以该消息为父开线程，任务投递沿用同一会话与线程。
+- **限制**：正文按 39000 字符截断（平台上限约 40000）；发送前转义 `&`/`<`/`>`，避免正文里的 `<@U...>`、`<!everyone>` 被解析成提及或链接（代价是 `<http://...|text>` 形式的 Slack 链接会显示成字面量）；Slack 没有幂等发送键，任务重试可能重复发一条；Socket Mode 连接断开由服务端 `disconnect` 或读错误触发，按 1s..60s 指数退避重连。
+
 ## 实施顺序
 
 | 阶段 | 内容 | 依赖 |

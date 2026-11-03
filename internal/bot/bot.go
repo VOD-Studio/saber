@@ -29,7 +29,10 @@ import (
 	"rua.plus/saber/internal/memory"
 	"rua.plus/saber/internal/persona"
 	"rua.plus/saber/internal/platform"
+	discordplatform "rua.plus/saber/internal/platform/discord"
 	platformmatrix "rua.plus/saber/internal/platform/matrix"
+	slackplatform "rua.plus/saber/internal/platform/slack"
+	telegramplatform "rua.plus/saber/internal/platform/telegram"
 	terminalplatform "rua.plus/saber/internal/platform/terminal"
 	violetplatform "rua.plus/saber/internal/platform/violet"
 	"rua.plus/saber/internal/server"
@@ -316,6 +319,25 @@ func (s *appState) initServices() error {
 			}
 			svc.platforms.Register(violetplatform.New(s.cfg))
 		}
+		// 其余消息平台只登记：没有 AI 时它们仅保持连接可用，不产生回复。
+		if s.cfg.Platforms.Telegram.Enabled {
+			if err := s.cfg.Platforms.Telegram.Validate(); err != nil {
+				return fmt.Errorf("telegram 平台配置无效: %w", err)
+			}
+			svc.platforms.Register(telegramplatform.New(s.cfg))
+		}
+		if s.cfg.Platforms.Discord.Enabled {
+			if err := s.cfg.Platforms.Discord.Validate(); err != nil {
+				return fmt.Errorf("discord 平台配置无效: %w", err)
+			}
+			svc.platforms.Register(discordplatform.New(s.cfg))
+		}
+		if s.cfg.Platforms.Slack.Enabled {
+			if err := s.cfg.Platforms.Slack.Validate(); err != nil {
+				return fmt.Errorf("slack 平台配置无效: %w", err)
+			}
+			svc.platforms.Register(slackplatform.New(s.cfg))
+		}
 		return s.buildCommands()
 	}
 
@@ -384,6 +406,32 @@ func (s *appState) initServices() error {
 			return fmt.Errorf("violet 平台配置无效: %w", err)
 		}
 		if err := s.registerPlatform(violetplatform.New(s.cfg), aiService); err != nil {
+			return err
+		}
+	}
+
+	// Telegram/Discord/Slack 与 Violet 同层：都走共享 Handler 与任务投递适配器。
+	if s.cfg.Platforms.Telegram.Enabled {
+		if err := s.cfg.Platforms.Telegram.Validate(); err != nil {
+			return fmt.Errorf("telegram 平台配置无效: %w", err)
+		}
+		if err := s.registerPlatform(telegramplatform.New(s.cfg), aiService); err != nil {
+			return err
+		}
+	}
+	if s.cfg.Platforms.Discord.Enabled {
+		if err := s.cfg.Platforms.Discord.Validate(); err != nil {
+			return fmt.Errorf("discord 平台配置无效: %w", err)
+		}
+		if err := s.registerPlatform(discordplatform.New(s.cfg), aiService); err != nil {
+			return err
+		}
+	}
+	if s.cfg.Platforms.Slack.Enabled {
+		if err := s.cfg.Platforms.Slack.Validate(); err != nil {
+			return fmt.Errorf("slack 平台配置无效: %w", err)
+		}
+		if err := s.registerPlatform(slackplatform.New(s.cfg), aiService); err != nil {
 			return err
 		}
 	}
