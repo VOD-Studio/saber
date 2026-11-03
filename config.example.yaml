@@ -65,6 +65,16 @@ platforms:
     enabled: false # Matrix 聊天入口，账号等明细在顶层 matrix: 配置
   violet:
     enabled: false # Violet Bot API 接入，凭据在 Violet 管理端签发
+  telegram:
+    enabled: false # 默认关闭；getUpdates 长轮询，无需公网回调
+    bot_token: "" # BotFather 签发的 token，形如 123456:ABC-DEF
+  discord:
+    enabled: false # 默认关闭；必须在开发者后台开启 MESSAGE_CONTENT intent
+    bot_token: "" # 开发者后台签发的 bot token
+  slack:
+    enabled: false # 默认关闭；Socket Mode 需两个 token 同时配置
+    bot_token: "" # Bot User OAuth Token，形如 xoxb-
+    app_token: "" # App-Level Token，形如 xapp-，需要 connections:write
 mcp:
   enabled: false # 开启后仍须 execution 中的身份及工具授权
 execution:
@@ -91,6 +101,9 @@ memory:
   enabled: false # 长期记忆；启用后按用户与群作用域隔离保存，默认关闭
   max_chars: 2200 # 每个空间的存储上限（Unicode 字符）
   inject_max_bytes: 8192 # 单次注入字节上限，同时不超过总输入预算的四分之一
+  auto_learn: true # 记忆启用后按已完成轮次自动复盘；false 只保留显式写入
+  review_interval: 5 # 每多少个已完成轮次触发一次复盘；0 使用默认 5
+  review_model: "" # 复盘与历史摘要使用的模型；留空使用 ai.default_model
   skills: # SKILL.md 技能文件：显式 /skill import 才会写库，启动不产生副作用
     dirs: [] # 只读外部技能目录（绝对路径，最多 8 个，每个目录下的 <name>/SKILL.md）
     export_dir: "" # 技能导出目录（绝对路径，父目录需存在）；空值禁用 /skill export

@@ -1,6 +1,6 @@
 # Saber
 
-一个使用 Go 构建的 AI Agent，默认运行本机聊天服务，提供 Charm TUI，可选接入 Matrix 与 Violet 站内聊天。
+一个使用 Go 构建的 AI Agent，默认运行本机聊天服务，提供 Charm TUI，可选接入 Matrix、Violet、Telegram、Discord 与 Slack 站内聊天。
 
 ## 功能特性
 
@@ -10,6 +10,15 @@
 - **端到端加密**: Matrix 可选的 E2EE 支持，使用 goolm（纯 Go 实现，无需 CGO）
 - **Violet 站内聊天**: 以 Bot API 的 bot 虚拟用户身份接入 Violet 博客的聊天系统，SSE 收消息、原地编辑做流式回复、断线按消息历史补拉（默认关闭，接入步骤见 [docs/platform-system.md](docs/platform-system.md)）
 - **可插拔平台层**: 平台按 `platforms.<name>.enabled` 启停，接入新平台不必改注册表与装配代码
+- **Telegram / Discord / Slack**: 均默认关闭。Telegram 走 `getUpdates` 长轮询；Discord 走 Gateway WebSocket（需在开发者后台开启 `MESSAGE_CONTENT` intent）；Slack 走 Socket Mode（需 bot 与 app 两个 token），详见[配置](docs/configuration.md#平台接入platforms)
+
+### 扩展能力
+
+- **OpenAI 兼容 API**: `GET /v1/models` 与 `POST /v1/chat/completions`（含流式），沿用服务端 Bearer 令牌；非任务、不持久化、不启用工具
+- **编辑器接入（ACP）**: `saber acp` 通过 stdio 把 Agent Client Protocol 转发给已运行的 `saber serve`，适用于 Zed 等编辑器
+- **技能文件**: `memory.skills.dirs` 读取 `<name>/SKILL.md`，`/skill files|import|export` 显式导入导出，聊天中可用 `/技能名` 调用
+- **上下文与快照**: 自动注入 `AGENTS.md` 等工作区约定与 `@文件` 引用；`write_file`/`apply_patch` 写前快照，`snapshot rollback` 可撤回
+- **历史摘要与画像**: `saber_history` 结果附带带缓存的 LLM 摘要；`/memory profile [refresh]` 查看或重建当前空间画像
 
 ### AI 功能
 
@@ -657,9 +666,15 @@ saber/
       terminal/                    # 本机 HTTP 聊天入口生命周期（saber chat / TUI 后端）
       matrix/                      # Matrix 平台接入端：消息适配与任务投递
       violet/                      # Violet Bot API、SSE 与命令目录发布
+      telegram/                    # Telegram Bot API 长轮询接入
+      discord/                     # Discord Gateway WebSocket 与 REST 接入
+      slack/                       # Slack Socket Mode 接入
+    acp/                           # Agent Client Protocol stdio 适配（saber acp）
     conversation/                  # 平台无关的历史、串行调度与回复交付
     task/                          # SQLite 任务与定时计划、执行日志、目录互斥和结果重试
     execution/                     # 容器命令/文件工具、权限检查、日志与交付文件
+      snapshots.go                 # write_file/apply_patch 写前快照与回滚
+      refs.go                      # 工作区上下文文件与 @ 引用解析
     agent/
       runtime.go                   # 独立执行循环、预算、取消和工具错误回传
       types.go                     # 模型与工具接口、运行事件和每轮记录
@@ -726,6 +741,9 @@ saber/
       skill_commands.go            # skill 通用命令处理
       history.go                   # 历史回忆 saber_history 工具与投影同步
       memory_review.go             # 受限沙箱后台复盘与配额控制流水线
+      memory_profile.go            # 用户画像生成、注入与刷新
+      openai_api.go                # OpenAI 兼容 /v1 非任务请求
+      context_files.go             # 工作区约定文件与 @ 引用展开
     mcp/
       manager.go                   # MCP 管理器
       factory.go                   # MCP 服务器工厂模式

@@ -280,6 +280,35 @@ platforms:
     group_chat_mention_reply: true
     edit_interval_ms: 200
     http_timeout_seconds: 15
+  telegram:
+    enabled: false # 默认关闭；getUpdates 长轮询，无需公网回调
+    bot_token: "" # BotFather 签发，形如 123456:ABC-DEF
+    api_base: "https://api.telegram.org" # 留空同默认；可指向自建反代
+    account: "" # 留空用 telegram
+    direct_chat_auto_reply: true
+    group_chat_mention_reply: true
+    edit_interval_ms: 200
+    http_timeout_seconds: 15
+    poll_timeout_seconds: 30
+  discord:
+    enabled: false # 默认关闭；必须在开发者后台开启 MESSAGE_CONTENT intent
+    bot_token: "" # 开发者后台签发
+    api_base: "https://discord.com/api/v10"
+    account: "" # 留空用 discord
+    direct_chat_auto_reply: true
+    group_chat_mention_reply: true
+    edit_interval_ms: 200
+    http_timeout_seconds: 15
+  slack:
+    enabled: false # 默认关闭；Socket Mode 需两个 token
+    bot_token: "" # Bot User OAuth Token，形如 xoxb-
+    app_token: "" # App-Level Token，形如 xapp-，需要 connections:write
+    api_base: "https://slack.com/api"
+    account: "" # 留空用 slack
+    direct_chat_auto_reply: true
+    group_chat_mention_reply: true
+    edit_interval_ms: 200
+    http_timeout_seconds: 15
 ```
 
 - `terminal.enabled` 控制本机 HTTP 聊天入口。它不依赖任何外部平台，因此默认开启；设为 `false` 后不创建本机令牌、不监听端口，`saber chat` 与 TUI 无法连接（会明确报错）；其他平台接入、CLI 与 `doctor` 等本地检查不受影响。Matrix 与 Violet 默认关闭，需要显式启用。
@@ -291,4 +320,7 @@ platforms:
 - `http_timeout_seconds` 只作用于普通 API 请求，事件流是长连接，靠 30 秒心跳与 90 秒静默看门狗判活。
 - 断线恢复：Violet 的 bot 事件流不支持 `Last-Event-ID` 补发，Saber 在重连后按消息历史接口补齐水位之后的消息，并按消息 ID 去重；首次连接只打水位基线，不会把站内旧消息当新问题回答一遍。
 - 能力边界：Violet 只走 `HandleChat` 这条最小链路。`!ai <内容>` 会被剥掉前缀当提问，其余 `!` 开头命令（`!task`、`!schedule`、上下文命令）在本平台无落点、直接跳过；任务产出的文件不投递（上传通道仍按 Matrix 限定）；主动聊天未接入 Violet（`SendNotice` 没有对等语义）。
+- Telegram：`bot_token` 在 `enabled: true` 时必填；走 `getUpdates` 长轮询（`poll_timeout_seconds`，默认 30），不需要公网地址、证书或 webhook。私聊按 `direct_chat_auto_reply`，群聊需被 `@` 或直接回复 bot 的消息（`group_chat_mention_reply`）；频道消息、其他机器人与非文本消息跳过。单条正文超过 4000 字符时截断并标注。
+- Discord：`bot_token` 在 `enabled: true` 时必填；入站走 Gateway WebSocket、出站走 REST。**必须在 Discord 开发者后台为 bot 开启 `MESSAGE_CONTENT` 特权 intent**，否则频道与私聊正文为空串；频道内需被 `@` 或回复 bot 的消息才触发，私聊由 `direct_chat_auto_reply` 控制。出站会清空 `allowed_mentions`，模型输出不会 ping 任何人；单条正文超过 1900 字符时截断。
+- Slack：`bot_token`（`xoxb-`）与 `app_token`（`xapp-`，需 `connections:write`）在启用时都必填，缺一个都无法收发；使用 Socket Mode WebSocket，不需要公网回调。频道内需被 `@` 或在 bot 所在线程回复才触发，IM 由 `direct_chat_auto_reply` 控制；Slack 没有独立引用字段，回复以线程承载。单条正文超过 39000 字符时截断。
 - Matrix 的启用开关在 `platforms.matrix.enabled`，账号、媒体等明细配置仍在顶层 `matrix:` 节。旧的 `matrix.enabled` 不再接受；迁移已有配置时只需将该开关移到 `platforms.matrix`。
