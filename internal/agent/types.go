@@ -115,6 +115,12 @@ type Limits struct {
 	Timeout time.Duration
 	// MaxToolOutputBytes 限制每条工具消息，包含截断标记，最小为 128。
 	MaxToolOutputBytes int
+	// InitialRounds 是自适应预算的初始软限；零值表示 min(5, MaxRounds)。
+	InitialRounds int
+	// ExtensionRounds 是每次评估通过后追加的轮数，零值使用 5。
+	ExtensionRounds int
+	// MaxTotalTokens 是全任务用量上限；零值表示不启用账本。
+	MaxTotalTokens int
 }
 
 // ToolOutput 保留工具返回的数据及协议级失败标记。
@@ -194,6 +200,8 @@ type Result struct {
 	State *TaskState
 	// Checkpoint 是最后已提交的压缩检查点，没有压缩时为 nil。
 	Checkpoint *Checkpoint
+	// Budget 是本次运行的预算与用量快照；未启用账本时为 nil。
+	Budget *BudgetStats
 }
 
 // EventKind 表示可由聊天 adapter 或测试消费的运行事件。
@@ -226,6 +234,10 @@ const (
 	TaskStateUpdated EventKind = "task_state_updated"
 	// ContextCompacted 表示上下文已压缩并提交检查点。
 	ContextCompacted EventKind = "context_compacted"
+	// BudgetExtended 表示评估通过后追加了轮数。
+	BudgetExtended EventKind = "budget_extended"
+	// BudgetStopped 表示预算停止并给出可观察原因。
+	BudgetStopped EventKind = "budget_stopped"
 )
 
 // Event 由 Run 串行发送；回调应快速返回，不得修改引用的响应数据。
@@ -249,6 +261,8 @@ type Event struct {
 	State *TaskState
 	// Checkpoint 是压缩后提交的检查点。
 	Checkpoint *Checkpoint
+	// Budget 是预算追加或停止时的快照。
+	Budget *BudgetStats
 	// Error 是运行终止原因。
 	Error error
 }

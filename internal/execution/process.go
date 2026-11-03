@@ -168,6 +168,19 @@ func (e *Executor) runProcess(ctx context.Context, args map[string]any, run scop
 	}
 }
 
+// ProcessCount 返回指定任务仍在运行的后台作业数。
+func (e *Executor) ProcessCount(taskID int64) int {
+	e.processMu.Lock()
+	defer e.processMu.Unlock()
+	count := 0
+	for _, record := range e.processes[taskID] {
+		if record.running() {
+			count++
+		}
+	}
+	return count
+}
+
 func (e *Executor) processFor(taskID int64, args map[string]any) (*processRecord, error) {
 	id, _ := args["id"].(string)
 	if id == "" {

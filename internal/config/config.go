@@ -103,11 +103,20 @@ type AIConfig struct {
 type AgentConfig struct {
 	ToolCallingConfig       `yaml:",inline"`
 	Context                 ContextConfig        `yaml:"context"`                    // 上下文管理配置
+	Budget                  BudgetConfig         `yaml:"budget"`                     // 自适应轮数与用量预算
 	StreamEnabled           bool                 `yaml:"stream"`                     // 是否启用流式响应
 	TaskReceiptEnabled      bool                 `yaml:"task_receipt_enabled"`       // 是否在任务入库后发送接收回执
 	TaskDeliveryMaxAttempts int                  `yaml:"task_delivery_max_attempts"` // 任务结果投递最大尝试次数（含首次），零值用默认 20
 	Retry                   RetryConfig          `yaml:"retry"`                      // 重试配置
 	CircuitBreaker          CircuitBreakerConfig `yaml:"circuit_breaker"`            // 熔断器配置
+}
+
+// BudgetConfig 控制初始轮数、自动追加和全任务用量上限。
+type BudgetConfig struct {
+	Enabled         bool `yaml:"enabled"`
+	InitialRounds   int  `yaml:"initial_rounds"` // 0 表示 min(5, max_rounds)
+	ExtensionRounds int  `yaml:"extension_rounds"`
+	MaxTotalTokens  int  `yaml:"max_total_tokens"`
 }
 
 // ContextConfig 存储上下文管理配置
@@ -310,6 +319,7 @@ const DefaultTaskDeliveryMaxAttempts = 20
 func DefaultAgentConfig() AgentConfig {
 	return AgentConfig{
 		Context:                 DefaultContextConfig(),
+		Budget:                  DefaultBudgetConfig(),
 		StreamEnabled:           true,
 		TaskReceiptEnabled:      false,
 		TaskDeliveryMaxAttempts: DefaultTaskDeliveryMaxAttempts,
@@ -317,6 +327,11 @@ func DefaultAgentConfig() AgentConfig {
 		ToolCallingConfig:       DefaultToolCallingConfig(),
 		CircuitBreaker:          DefaultCircuitBreakerConfig(),
 	}
+}
+
+// DefaultBudgetConfig 返回自适应预算默认值。
+func DefaultBudgetConfig() BudgetConfig {
+	return BudgetConfig{Enabled: true, InitialRounds: 0, ExtensionRounds: 5, MaxTotalTokens: 200000}
 }
 
 // DefaultContextConfig 返回带有合理默认值的上下文配置
@@ -367,7 +382,7 @@ func DefaultRetryConfig() RetryConfig {
 // DefaultToolCallingConfig 返回带有合理默认值的工具调用配置
 func DefaultToolCallingConfig() ToolCallingConfig {
 	return ToolCallingConfig{
-		MaxIterations:      5,
+		MaxIterations:      40,
 		TimeoutSeconds:     600,
 		MaxToolOutputBytes: 32768,
 	}
@@ -592,6 +607,12 @@ func (a *AgentConfig) Validate() error {
 			return fmt.Errorf("context.compaction requires 0 < target_ratio < trigger_ratio < 1")
 		}
 	}
+	if a.Budget.ExtensionRounds <= 0 || a.Budget.MaxTotalTokens <= 0 {
+		return fmt.Errorf("budget.extension_rounds and budget.max_total_tokens must be positive")
+	}
+	if a.Budget.InitialRounds < 0 || a.Budget.InitialRounds > a.MaxIterations {
+		return fmt.Errorf("budget.initial_rounds must be 0 or between 1 and max_rounds")
+	}
 	if a.Retry.MaxRetries < 0 || a.Retry.InitialDelayMs < 0 || a.Retry.MaxDelayMs < a.Retry.InitialDelayMs || int64(a.Retry.MaxDelayMs) > 9223372036854 || a.Retry.BackoffFactor < 1 {
 		return fmt.Errorf("invalid retry limits")
 	}
@@ -628,8 +649,8 @@ func (t *ToolCallingConfig) Validate() error {
 	if t.MaxIterations < 1 {
 		return fmt.Errorf("max_rounds must be at least 1")
 	}
-	if t.MaxIterations > 20 {
-		slog.Warn("max_rounds is very high, this may cause long response times",
+	if t.MaxIterations > 100 {
+		slog.Warn("max_rounds is very high, this may cause long response times and high cost",
 			"value", t.MaxIterations)
 	}
 	return nil
@@ -961,9 +982,14 @@ agent:
   stream: true # 模型传输开关，所有接入共同遵守
   task_receipt_enabled: false # 默认不发送「已接收，任务 #...」；结果仍正常投递
   task_delivery_max_attempts: 20 # 结果投递最大尝试次数（含首次）；退避封顶 256 秒，20 次约 51 分钟，用尽后放弃自动重试
-  max_rounds: 5 # 包含最终回答
+  max_rounds: 40 # 硬上限，包含最终回答
   timeout_seconds: 600 # 整次任务，包含请求、重试等待与工具执行
   max_tool_output_bytes: 32768
+  budget: # 自适应轮数与用量封顶
+    enabled: true
+    initial_rounds: 0 # 0 = min(5, max_rounds)
+    extension_rounds: 5 # 每次评估通过后追加
+    max_total_tokens: 200000 # 全任务保守用量上限，包含摘要与评估
   context:
     enabled: true
     max_messages: 50

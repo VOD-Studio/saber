@@ -8,6 +8,7 @@ import (
 	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/execution"
 	"rua.plus/saber/internal/model"
+	"rua.plus/saber/internal/task"
 )
 
 // RunAgent 不连接聊天平台地运行一次 Agent，返回完整轨迹供调用方保存。
@@ -25,6 +26,17 @@ func (s *Service) runAgent(ctx context.Context, req agent.Request, emit func(age
 		retry.FallbackModels = s.config.Agent.Retry.FallbackModels
 	}
 	retry.CircuitBreaker = s.circuitBreaker
+	budget := s.config.Agent.Budget
+	limits := agent.Limits{
+		MaxRounds:          s.config.Agent.MaxIterations,
+		Timeout:            time.Duration(s.config.Agent.TimeoutSeconds) * time.Second,
+		MaxToolOutputBytes: s.config.Agent.MaxToolOutputBytes,
+		MaxTotalTokens:     budget.MaxTotalTokens,
+	}
+	if budget.Enabled {
+		limits.InitialRounds = budget.InitialRounds
+		limits.ExtensionRounds = budget.ExtensionRounds
+	}
 	getClient := func(model string) (*Client, error) {
 		if firstClient != nil && model == req.Model {
 			return firstClient, nil
@@ -34,7 +46,7 @@ func (s *Service) runAgent(ctx context.Context, req agent.Request, emit func(age
 	runtime := agent.Runtime{
 		Context:   s.contextPolicy(),
 		Summarize: s.summarizer(req.Model),
-		Limits:    agent.Limits{MaxRounds: s.config.Agent.MaxIterations, Timeout: time.Duration(s.config.Agent.TimeoutSeconds) * time.Second, MaxToolOutputBytes: s.config.Agent.MaxToolOutputBytes},
+		Limits:    limits,
 		Model:     model.AgentModel(getClient, retry),
 		Execute: func(ctx context.Context, name string, args map[string]any) (agent.ToolOutput, error) {
 			value, err := s.toolExecutor.ExecuteToolCall(ctx, name, args)
@@ -49,6 +61,12 @@ func (s *Service) runAgent(ctx context.Context, req agent.Request, emit func(age
 			}
 			return output, err
 		},
+	}
+	if budget.Enabled {
+		runtime.Evaluate = s.budgetEvaluator(req.Model)
+	}
+	if s.executor != nil {
+		runtime.RunningProcesses = func() int { return s.executor.ProcessCount(task.ID(ctx)) }
 	}
 	return runtime.Run(ctx, req, emit)
 }

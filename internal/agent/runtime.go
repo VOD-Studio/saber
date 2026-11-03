@@ -26,6 +26,10 @@ type Runtime struct {
 	Context ContextPolicy
 	// Summarize 在带任务状态的运行中压缩超预算上下文；为空时不做压缩。
 	Summarize SummaryFunc
+	// Evaluate 在软预算将尽时评估是否追加轮数；为空时软限等于硬限。
+	Evaluate BudgetEvaluator
+	// RunningProcesses 返回当前任务仍在运行的后台作业数。
+	RunningProcesses func() int
 }
 
 // Run 顺序执行模型与工具，任何终态都返回已有记录并发出一次 RunFinished。
@@ -61,6 +65,34 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 	}
 	ctx, cancel := context.WithDeadline(ctx, started.Add(limits.Timeout))
 	defer cancel()
+	hard := limits.MaxRounds
+	soft := hard
+	if r.Evaluate != nil {
+		soft = limits.InitialRounds
+		if soft <= 0 {
+			soft = min(5, hard)
+		}
+		if soft > hard {
+			soft = hard
+		}
+	}
+	extension := limits.ExtensionRounds
+	if extension <= 0 {
+		extension = 5
+	}
+	var led *ledger
+	if limits.MaxTotalTokens > 0 {
+		led = newLedger(limits.MaxTotalTokens)
+		ctx = WithAttemptGate(ctx, led)
+	}
+	extensions := 0
+	stopReason := ""
+	defer func() {
+		result.Budget = budgetSnapshot(led, len(result.Rounds), soft, hard, extensions, stopReason)
+		if led != nil {
+			result.Usage = led.reportedUsage()
+		}
+	}()
 	stop := func(cause error) (Result, error) {
 		if ctx.Err() != nil {
 			cause = ctx.Err()
@@ -98,7 +130,7 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 			allowed[tool.Function.Name] = true
 		}
 	}
-	for number := 1; number <= limits.MaxRounds; number++ {
+	for number := 1; number <= hard; number++ {
 		if err := ctx.Err(); err != nil {
 			return stop(err)
 		}
@@ -167,8 +199,34 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 			result.Status, result.Content = Completed, response.Content
 			return result, nil
 		}
-		if number == limits.MaxRounds {
+		if number == hard {
+			stopReason = "hard round limit reached"
 			return stop(ErrBudgetExhausted)
+		}
+		if r.Evaluate != nil && number >= soft {
+			progress := BudgetProgress{RoundsUsed: number, SoftLimit: soft, HardLimit: hard, Elapsed: time.Since(started)}
+			if req.State != nil {
+				progress.State = *CloneTaskState(req.State)
+			}
+			completed := result.Rounds
+			if len(completed) > 0 {
+				completed = completed[:len(completed)-1]
+			}
+			progress.Recent = completed[max(0, len(completed)-3):]
+			if led != nil {
+				progress.AccountedTokens = led.accountedTokens()
+			}
+			if r.RunningProcesses != nil {
+				progress.RunningProcesses = r.RunningProcesses()
+			}
+			if _, reason := r.evaluateBudget(ctx, progress, led); reason != "" {
+				stopReason = reason
+				emit(Event{Kind: BudgetStopped, Round: number, Budget: budgetSnapshot(led, number, soft, hard, extensions, reason)})
+				return stop(fmt.Errorf("%w: %s", ErrBudgetExhausted, reason))
+			}
+			soft = min(hard, soft+extension)
+			extensions++
+			emit(Event{Kind: BudgetExtended, Round: number, Budget: budgetSnapshot(led, number, soft, hard, extensions, "")})
 		}
 		if len(response.ResponsesOutput) > 0 {
 			if req.ResponsesHistory == nil {

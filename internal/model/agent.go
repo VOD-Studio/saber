@@ -10,6 +10,7 @@ import (
 // AgentModel 将模型客户端、重试和增量响应适配为独立 Runtime 的模型接口。
 func AgentModel(getClient func(string) (*Client, error), retry *RetryConfigWrapper) agent.ModelFunc {
 	return func(ctx context.Context, req agent.Request, emit func(agent.Event)) (agent.Response, error) {
+		gate, gated := agent.AttemptGateFromContext(ctx)
 		fallback := FallbackModelHandler{MainModel: req.Model, RetryConfig: retry}
 		attempt := 0
 		var response agent.Response
@@ -35,33 +36,43 @@ func AgentModel(getClient func(string) (*Client, error), retry *RetryConfigWrapp
 							request.Temperature = *client.config.Temperature
 						}
 					}
-					if client.usesResponses() {
-						collector := newAgentStreamHandler(emit)
-						var result *ChatCompletionResponse
-						result, requestErr = client.createResponse(ctx, request, collector)
-						if result != nil {
-							response = *result
-							if summary := collector.response().Thinking; response.Thinking == "" {
-								response.Thinking = summary
-							} else if summary == "" && response.Thinking != "" {
-								emit(agent.Event{Kind: agent.ThinkingDelta, Text: response.Thinking})
+					admitted := false
+					if gated {
+						request, requestErr = gate.Admit(request)
+						admitted = requestErr == nil
+					}
+					if requestErr == nil {
+						if client.usesResponses() {
+							collector := newAgentStreamHandler(emit)
+							var result *ChatCompletionResponse
+							result, requestErr = client.createResponse(ctx, request, collector)
+							if result != nil {
+								response = *result
+								if summary := collector.response().Thinking; response.Thinking == "" {
+									response.Thinking = summary
+								} else if summary == "" && response.Thinking != "" {
+									emit(agent.Event{Kind: agent.ThinkingDelta, Text: response.Thinking})
+								}
+							} else {
+								response = collector.response()
 							}
-						} else {
+						} else if req.Stream {
+							collector := newAgentStreamHandler(emit)
+							requestErr = client.CreateStreamingChatCompletionWithTools(ctx, request, collector)
 							response = collector.response()
-						}
-					} else if req.Stream {
-						collector := newAgentStreamHandler(emit)
-						requestErr = client.CreateStreamingChatCompletionWithTools(ctx, request, collector)
-						response = collector.response()
-					} else {
-						var result *ChatCompletionResponse
-						result, requestErr = client.CreateChatCompletion(ctx, request)
-						if result != nil {
-							response = *result
-							if response.Thinking != "" {
-								emit(agent.Event{Kind: agent.ThinkingDelta, Text: response.Thinking})
+						} else {
+							var result *ChatCompletionResponse
+							result, requestErr = client.CreateChatCompletion(ctx, request)
+							if result != nil {
+								response = *result
+								if response.Thinking != "" {
+									emit(agent.Event{Kind: agent.ThinkingDelta, Text: response.Thinking})
+								}
 							}
 						}
+					}
+					if admitted {
+						gate.Record(request, response)
 					}
 				}
 			}
