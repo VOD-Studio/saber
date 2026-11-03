@@ -1,17 +1,62 @@
-"""容器内命令执行；输入仅来自 stdin，不把模型参数拼接到宿主 shell。"""
+"""任务容器内的命令 supervisor；只从 stdin 读取程序构造的 JSON。"""
+import base64
 import json
 import os
+import signal
 import subprocess
 import sys
+import threading
 
-request = json.load(sys.stdin)
-args = request["args"]
+try:
+    request = json.loads(sys.stdin.readline())
+except Exception:
+    print(json.dumps({"type": "error", "message": "invalid supervisor request"}))
+    sys.exit(2)
+
+if request.get("control"):
+    try:
+        os.killpg(int(request["pgid"]), int(request["signal"]))
+    except Exception as error:
+        print(json.dumps({"type": "error", "message": str(error)}))
+        sys.exit(1)
+    sys.exit(0)
+
+command = request.get("command")
+if not isinstance(command, str) or not command:
+    print(json.dumps({"type": "error", "message": "command is required"}))
+    sys.exit(2)
+
 environment = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
-environment.update(request["env"] or {})
+environment.update(request.get("env") or {})
 os.environ.clear()
 os.environ.update(environment)
 
-if request["tool"] != "exec":
-    print("unsupported tool", file=sys.stderr)
+try:
+    process = subprocess.Popen(
+        ["/bin/sh", "-c", command],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        cwd="/workspace",
+    )
+except Exception as error:
+    print(json.dumps({"type": "error", "message": str(error)}))
     sys.exit(1)
-sys.exit(subprocess.call(["/bin/sh", "-c", args["command"]], env=environment, cwd="/workspace"))
+
+print(json.dumps({"type": "started", "pgid": os.getpgid(process.pid)}), flush=True)
+
+
+def pump():
+    while True:
+        chunk = process.stdout.read1(4096)
+        if not chunk:
+            break
+        print(json.dumps({"type": "output", "data": base64.b64encode(chunk).decode()}), flush=True)
+
+
+thread = threading.Thread(target=pump, daemon=True)
+thread.start()
+code = process.wait()
+thread.join(timeout=5)
+print(json.dumps({"type": "exit", "exit_code": code}), flush=True)

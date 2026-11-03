@@ -79,7 +79,7 @@ func TestTaskDelivery_SlowMultipleFilesResumeWithoutReupload(t *testing.T) {
 	client.DefaultHTTPRetries = 0
 	commands := matrix.NewCommandService(client, "@bot:test", nil)
 	dir, logs := t.TempDir(), t.TempDir()
-	cfg := config.ExecutionConfig{Enabled: true, LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"w": {Path: dir}}, Grants: []config.ExecutionGrant{{Platform: "matrix", Account: "@bot:test", Room: "!room:test", Users: []string{"@alice:test"}, Workspace: "w", Tools: []string{"read_file"}}}}
+	cfg := config.ExecutionConfig{Enabled: true, Backend: "local", LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"w": {Path: dir}}, Grants: []config.ExecutionGrant{{Platform: "matrix", Account: "@bot:test", Room: "!room:test", Users: []string{"@alice:test"}, Workspace: "w", Tools: []string{"read_file"}}}}
 	executor, err := execution.New(cfg, nil, nil)
 	require.NoError(t, err)
 	artifactDir := filepath.Join(logs, "task-1", "artifacts")
@@ -329,7 +329,7 @@ func (f *fileSink) SendUploadedFile(_ context.Context, reply chat.Reply, payload
 func newArtifactTask(t *testing.T, adapter chat.Adapter) (*task.Manager, chat.Message, string) {
 	t.Helper()
 	dir, logs := t.TempDir(), t.TempDir()
-	cfg := config.ExecutionConfig{Enabled: true, LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"w": {Path: dir}}, Grants: []config.ExecutionGrant{{Platform: "violet", Account: "bot", Room: "room", Users: []string{"user"}, Workspace: "w", Tools: []string{"read_file"}}}}
+	cfg := config.ExecutionConfig{Enabled: true, Backend: "local", LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"w": {Path: dir}}, Grants: []config.ExecutionGrant{{Platform: "violet", Account: "bot", Room: "room", Users: []string{"user"}, Workspace: "w", Tools: []string{"read_file"}}}}
 	executor, err := execution.New(cfg, nil, nil)
 	require.NoError(t, err)
 	artifactDir := filepath.Join(logs, "task-1", "artifacts")

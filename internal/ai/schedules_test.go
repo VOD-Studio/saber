@@ -83,7 +83,7 @@ func TestSchedules_CommandsRestartReportAndNaturalTool(t *testing.T) {
 	cfg.AI.DefaultModel = "openai.local"
 	cfg.AI.SystemPrompt = "system"
 	workdir, logs, dbdir := t.TempDir(), t.TempDir(), t.TempDir()
-	execCfg := config.ExecutionConfig{Enabled: true, LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"project": {Path: workdir}}, Grants: []config.ExecutionGrant{{Platform: "matrix", Account: "@bot:test", Room: "!room:test", Users: []string{"@alice:test"}, Workspace: "project", Tools: []string{"read_file"}}}}
+	execCfg := config.ExecutionConfig{Enabled: true, Backend: "local", LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"project": {Path: workdir}}, Grants: []config.ExecutionGrant{{Platform: "matrix", Account: "@bot:test", Room: "!room:test", Users: []string{"@alice:test"}, Workspace: "project", Tools: []string{"read_file"}}}}
 	start := func() *Service {
 		s, err := NewService(&cfg, WithMatrix(commands, nil))
 		require.NoError(t, err)

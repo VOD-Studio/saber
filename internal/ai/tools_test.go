@@ -255,7 +255,7 @@ func TestToolExecutor_DefaultMaxIterations(t *testing.T) {
 // 应在执行前把错误反馈给模型，而不是等到任务结束才无法发送。
 func TestToolExecutor_ExecuteToolCall_ReadFileDeliverUnsupported(t *testing.T) {
 	dir, logs := t.TempDir(), t.TempDir()
-	cfg := config.ExecutionConfig{Enabled: true, LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"w": {Path: dir}}, Grants: []config.ExecutionGrant{{Platform: "violet", Account: "bot", Room: "room", Users: []string{"user"}, Workspace: "w", Tools: []string{"read_file"}}}}
+	cfg := config.ExecutionConfig{Enabled: true, Backend: "local", LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"w": {Path: dir}}, Grants: []config.ExecutionGrant{{Platform: "violet", Account: "bot", Room: "room", Users: []string{"user"}, Workspace: "w", Tools: []string{"read_file"}}}}
 	executor, err := execution.New(cfg, nil, nil)
 	require.NoError(t, err)
 	s := &Service{executor: executor}
@@ -273,7 +273,7 @@ func TestToolExecutor_ExecuteToolCall_ReadFileDeliverUnsupported(t *testing.T) {
 // 平台支持文件发送时 deliver=true 不被提前拦截，而是继续交给执行器。
 func TestToolExecutor_ExecuteToolCall_ReadFileDeliverSupportedPasses(t *testing.T) {
 	dir, logs := t.TempDir(), t.TempDir()
-	cfg := config.ExecutionConfig{Enabled: true, LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"w": {Path: dir}}, Grants: []config.ExecutionGrant{{Platform: "violet", Account: "bot", Room: "room", Users: []string{"user"}, Workspace: "w", Tools: []string{"read_file"}}}}
+	cfg := config.ExecutionConfig{Enabled: true, Backend: "local", LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"w": {Path: dir}}, Grants: []config.ExecutionGrant{{Platform: "violet", Account: "bot", Room: "room", Users: []string{"user"}, Workspace: "w", Tools: []string{"read_file"}}}}
 	executor, err := execution.New(cfg, nil, nil)
 	require.NoError(t, err)
 	s := &Service{executor: executor}

@@ -115,6 +115,7 @@ func TestInitServices_ProtectedPathsFollowMatrix(t *testing.T) {
 			cfg.Platforms.Matrix.Enabled = tt.enabled
 			cfg.Execution = config.ExecutionConfig{
 				Enabled:    true,
+				Backend:    "local",
 				LogDir:     t.TempDir(),
 				Workspaces: map[string]config.WorkspaceConfig{"repo": {Path: wd}},
 				Grants: []config.ExecutionGrant{{

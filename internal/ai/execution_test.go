@@ -149,7 +149,7 @@ func TestTaskAutonomousDockerWorkflow(t *testing.T) {
 	require.NoError(t, err)
 	defer service.Stop()
 	workdir, logs := t.TempDir(), t.TempDir()
-	execCfg := config.ExecutionConfig{Enabled: true, Image: image, LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"project": {Path: workdir}}, Grants: []config.ExecutionGrant{{Platform: "matrix", Account: "@bot:test", Room: "!room:test", Users: []string{"@alice:test"}, Workspace: "project", Tools: []string{"exec", "read_file", "list_files", "write_file", "apply_patch"}}}}
+	execCfg := config.ExecutionConfig{Enabled: true, Backend: "docker", Image: image, LogDir: logs, Workspaces: map[string]config.WorkspaceConfig{"project": {Path: workdir}}, Grants: []config.ExecutionGrant{{Platform: "matrix", Account: "@bot:test", Room: "!room:test", Users: []string{"@alice:test"}, Workspace: "project", Tools: []string{"exec", "read_file", "list_files", "write_file", "apply_patch"}}}}
 	require.NoError(t, service.ConfigureExecution(execCfg, nil, []string{"test"}))
 	require.NoError(t, service.EnableTasks(filepath.Join(t.TempDir(), "tasks.db")))
 	ctx := matrix.WithMessageRelations(matrix.WithEventID(context.Background(), "$source"), "", "$thread")

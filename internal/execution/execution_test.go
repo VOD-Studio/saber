@@ -17,7 +17,7 @@ import (
 func fixture(t *testing.T) (config.ExecutionConfig, chat.Identity) {
 	t.Helper()
 	identity := chat.Identity{Session: chat.Session{Platform: "matrix", Account: "bot", Conversation: "room"}, SenderID: "alice"}
-	cfg := config.ExecutionConfig{Enabled: true, LogDir: t.TempDir(), Workspaces: map[string]config.WorkspaceConfig{"project": {Path: t.TempDir(), Env: map[string]string{"PROJECT_FLAG": "configured"}}}, Grants: []config.ExecutionGrant{{Platform: "matrix", Account: "bot", Room: "room", Users: []string{"alice"}, Workspace: "project", Tools: []string{"exec", "read_file", "list_files", "write_file", "apply_patch"}}}}
+	cfg := config.ExecutionConfig{Enabled: true, Backend: "local", LogDir: t.TempDir(), Workspaces: map[string]config.WorkspaceConfig{"project": {Path: t.TempDir(), Env: map[string]string{"PROJECT_FLAG": "configured"}}}, Grants: []config.ExecutionGrant{{Platform: "matrix", Account: "bot", Room: "room", Users: []string{"alice"}, Workspace: "project", Tools: []string{"exec", "read_file", "list_files", "write_file", "apply_patch"}}}}
 	return cfg, identity
 }
 
@@ -161,6 +161,7 @@ func TestDockerExecution(t *testing.T) {
 		t.Skip("设置 SABER_EXECUTION_TEST_IMAGE 后运行真实 Docker 隔离验收")
 	}
 	cfg, identity := fixture(t)
+	cfg.Backend = "docker"
 	cfg.Image = image
 	cfg.TimeoutSeconds = 2
 	e, err := New(cfg, nil, nil)
@@ -199,8 +200,8 @@ func TestDockerExecution(t *testing.T) {
 	require.Equal(t, "failure", r.Summary)
 	r = run("write_file", map[string]any{"path": "answer.txt", "content": "first\n"})
 	require.Zero(t, r.ExitCode)
-	r = run("apply_patch", map[string]any{"path": "answer.txt", "edits": []any{map[string]any{"old": "absent", "new": "second"}}})
-	require.NotZero(t, r.ExitCode)
+	_, err = e.Run(ctx, "apply_patch", map[string]any{"path": "answer.txt", "edits": []any{map[string]any{"old": "absent", "new": "second"}}})
+	require.Error(t, err)
 	r = run("apply_patch", map[string]any{"path": "answer.txt", "edits": []any{map[string]any{"old": "first", "new": "second"}}})
 	require.Zero(t, r.ExitCode)
 	r = run("read_file", map[string]any{"path": "answer.txt", "deliver": true})
@@ -221,8 +222,8 @@ func TestDockerExecution(t *testing.T) {
 	r = run("exec", map[string]any{"command": "ln -s /etc/passwd escape; ln -s /etc outside"})
 	require.Zero(t, r.ExitCode)
 	for _, path := range []string{"escape", "outside/passwd"} {
-		r = run("read_file", map[string]any{"path": path})
-		require.NotZero(t, r.ExitCode)
+		_, err = e.Run(ctx, "read_file", map[string]any{"path": path})
+		require.Error(t, err)
 	}
 	_, err = e.Run(ctx, "read_file", map[string]any{"path": "../config.yaml"})
 	require.Error(t, err)
@@ -245,6 +246,8 @@ func TestDockerExecution(t *testing.T) {
 	}, 5*time.Second, 50*time.Millisecond)
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
+	// 任务环境在清理前保持，CloseTask 后对应标签容器必须消失。
+	require.NoError(t, e.CloseTask(context.Background(), 42))
 	out, err := docker(context.Background(), "ps", "-aq", "--filter", "label=saber.executor="+e.owner).Output()
 	require.NoError(t, err)
 	require.Empty(t, strings.TrimSpace(string(out)))
@@ -301,42 +304,34 @@ func TestExecutor_ContainerArgs_Network(t *testing.T) {
 		}
 		return ""
 	}
+	argsFor := func(cfg config.ExecutionConfig) []string {
+		b := &dockerBackend{cfg: cfg}
+		return b.containerArgs("test-box", sessionSpec{TaskID: 1, Workspace: "/tmp"})
+	}
 
 	t.Run("默认配置使用 bridge 网络", func(t *testing.T) {
 		cfg, _ := fixture(t)
-		e, err := New(cfg, nil, nil)
-		require.NoError(t, err)
-		args := e.containerArgs("test-box", "/tmp", 1)
-		require.Equal(t, "bridge", extractNetwork(args))
+		require.Equal(t, "bridge", extractNetwork(argsFor(cfg)))
 	})
 
 	t.Run("显式 network: false 使用 none 网络", func(t *testing.T) {
 		cfg, _ := fixture(t)
 		disabled := false
 		cfg.Network = &disabled
-		e, err := New(cfg, nil, nil)
-		require.NoError(t, err)
-		args := e.containerArgs("test-box", "/tmp", 1)
-		require.Equal(t, "none", extractNetwork(args))
+		require.Equal(t, "none", extractNetwork(argsFor(cfg)))
 	})
 
 	t.Run("显式 network_enabled: false 使用 none 网络", func(t *testing.T) {
 		cfg, _ := fixture(t)
 		disabled := false
 		cfg.NetworkEnabled = &disabled
-		e, err := New(cfg, nil, nil)
-		require.NoError(t, err)
-		args := e.containerArgs("test-box", "/tmp", 1)
-		require.Equal(t, "none", extractNetwork(args))
+		require.Equal(t, "none", extractNetwork(argsFor(cfg)))
 	})
 
 	t.Run("显式 network: true 使用 bridge 网络", func(t *testing.T) {
 		cfg, _ := fixture(t)
 		enabled := true
 		cfg.Network = &enabled
-		e, err := New(cfg, nil, nil)
-		require.NoError(t, err)
-		args := e.containerArgs("test-box", "/tmp", 1)
-		require.Equal(t, "bridge", extractNetwork(args))
+		require.Equal(t, "bridge", extractNetwork(argsFor(cfg)))
 	})
 }

@@ -1,9 +1,13 @@
 package config
 
+import "fmt"
+
 // ExecutionConfig 仅从管理员配置加载执行权限，聊天内容不能修改它。
 type ExecutionConfig struct {
 	// Enabled 启用已授权工作区的工具，默认关闭。
 	Enabled bool `yaml:"enabled"`
+	// Backend 选择执行后端：local 或 docker；空值表示未显式选择，有效默认 local。
+	Backend string `yaml:"backend,omitempty"`
 	// Network 控制沙箱容器是否允许联网；默认开启，设为 false 可显式关闭断网。
 	Network *bool `yaml:"network,omitempty"`
 	// NetworkEnabled 是 Network 的别名，便于配置命名风格保持一致。
@@ -29,6 +33,8 @@ type ExecutionConfig struct {
 type WorkspaceConfig struct {
 	// Path 是已存在的绝对目录，不得包含 Saber 的配置、会话或日志。
 	Path string `yaml:"path"`
+	// Backend 覆盖该工作区的执行后端；空值继承全局 backend。
+	Backend string `yaml:"backend,omitempty"`
 	// Env 只注入这些变量，不继承 Saber 环境；不得配置 Saber 自身凭据。
 	Env map[string]string `yaml:"env"`
 }
@@ -86,4 +92,21 @@ func (c ExecutionConfig) IsNetworkEnabled() bool {
 		return false
 	}
 	return true
+}
+
+// BackendFor 返回工作区的有效执行后端：工作区显式值 > 全局显式值 > local。
+// 原始字段为空表示管理员未显式选择，有效默认仍是 local。
+func (c ExecutionConfig) BackendFor(workspace string) (string, error) {
+	backend := c.Backend
+	if w, ok := c.Workspaces[workspace]; ok && w.Backend != "" {
+		backend = w.Backend
+	}
+	switch backend {
+	case "":
+		return "local", nil
+	case "local", "docker":
+		return backend, nil
+	default:
+		return "", fmt.Errorf("unknown execution backend %q; use local or docker", backend)
+	}
 }

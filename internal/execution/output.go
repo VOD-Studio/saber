@@ -122,20 +122,33 @@ func (e *Executor) ReadOutput(ctx context.Context, args map[string]any) (Result,
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	file, err := os.Open(e.outputPath(taskID, hexID))
+	_, active := e.activeOutputs.Load(id)
+	data, err := readOutputPage(e.outputPath(taskID, hexID), id, offset, limit, active)
+	if err != nil {
+		return result, err
+	}
+	result.ExitCode = 0
+	result.Data = data
+	result.Summary = fmt.Sprintf("read output %s bytes %d-%d", id, data["offset"], data["next_offset"])
+	return result, nil
+}
+
+// readOutputPage 按原始字节游标分页读取归档；active 表示 writer 尚未关闭。
+func readOutputPage(path, id string, offset, limit int, active bool) (map[string]any, error) {
+	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return result, errors.New("output archive does not exist")
+			return nil, errors.New("output archive does not exist")
 		}
-		return result, err
+		return nil, err
 	}
 	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
-		return result, err
+		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return result, errors.New("output archive is not a regular file")
+		return nil, errors.New("output archive is not a regular file")
 	}
 	size := info.Size()
 	if int64(offset) > size {
@@ -147,16 +160,16 @@ func (e *Executor) ReadOutput(ctx context.Context, args map[string]any) (Result,
 		probe := make([]byte, back+1)
 		n, probeErr := file.ReadAt(probe, int64(offset-back))
 		if probeErr != nil && !errors.Is(probeErr, io.EOF) {
-			return result, probeErr
+			return nil, probeErr
 		}
 		if !utf8Boundary(probe[:n], back) {
-			return result, errors.New("offset must be a UTF-8 boundary")
+			return nil, errors.New("offset must be a UTF-8 boundary")
 		}
 	}
 	buffer := make([]byte, limit+utf8.UTFMax)
 	n, err := file.ReadAt(buffer, int64(offset))
 	if err != nil && !errors.Is(err, io.EOF) {
-		return result, err
+		return nil, err
 	}
 	buffer = buffer[:n]
 	end := len(buffer)
@@ -169,7 +182,6 @@ func (e *Executor) ReadOutput(ctx context.Context, args map[string]any) (Result,
 	text := strings.ToValidUTF8(string(buffer[:end]), "\uFFFD")
 	next := offset + end
 	atEnd := next >= int(size)
-	_, active := e.activeOutputs.Load(id)
 	data := map[string]any{
 		"output_id":   id,
 		"offset":      offset,
@@ -181,10 +193,7 @@ func (e *Executor) ReadOutput(ctx context.Context, args map[string]any) (Result,
 	if active && atEnd {
 		data["caught_up"] = true
 	}
-	result.ExitCode = 0
-	result.Data = data
-	result.Summary = fmt.Sprintf("read output %s bytes %d-%d", id, offset, next)
-	return result, nil
+	return data, nil
 }
 
 // intArgument 接受工具 JSON 解码后的数字类型，拒绝小数与负数。

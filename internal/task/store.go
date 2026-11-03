@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"rua.plus/saber/internal/agent"
@@ -230,33 +231,86 @@ func (s *store) query(ctx context.Context, where string, args ...any) (tasks []T
 	return tasks, rows.Err()
 }
 
-func (s *store) recover(ctx context.Context) error {
+// recover 标记中断任务；被隔离目录的运行行保持原状以继续锁定工作区。
+func (s *store) recover(ctx context.Context, blocked []string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	_, err = tx.ExecContext(ctx, `UPDATE tasks SET status='interrupted',error='进程停止，执行结果可能包含外部副作用；请核查执行记录，不自动重放' WHERE status='running'`)
-	if err != nil {
+	query := `UPDATE tasks SET status='interrupted',error='进程停止，执行结果可能包含外部副作用；请核查执行记录，不自动重放' WHERE status='running'`
+	args := []any{}
+	if len(blocked) > 0 {
+		query += ` AND work_dir NOT IN (` + placeholders(len(blocked)) + `)`
+		for _, dir := range blocked {
+			args = append(args, dir)
+		}
+	}
+	if _, err = tx.ExecContext(ctx, query, args...); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO task_pending_projections(task_id,created_at)
-		SELECT id, ? FROM tasks WHERE status='interrupted'
-		ON CONFLICT(task_id) DO NOTHING`, time.Now().UnixMilli())
-	if err != nil {
+	projection := `INSERT INTO task_pending_projections(task_id,created_at)
+		SELECT id, ? FROM tasks WHERE status='interrupted'`
+	projectionArgs := []any{time.Now().UnixMilli()}
+	if len(blocked) > 0 {
+		projection += ` AND work_dir NOT IN (` + placeholders(len(blocked)) + `)`
+		for _, dir := range blocked {
+			projectionArgs = append(projectionArgs, dir)
+		}
+	}
+	projection += ` ON CONFLICT(task_id) DO NOTHING`
+	if _, err = tx.ExecContext(ctx, projection, projectionArgs...); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (s *store) claim(ctx context.Context) (Task, error) {
-	return scanTask(s.db.QueryRowContext(ctx, `UPDATE tasks SET status='running' WHERE id=(
+// claim 只领取未被隔离目录的任务，避免先领取再运行无工具任务。
+func (s *store) claim(ctx context.Context, blocked []string) (Task, error) {
+	query := `UPDATE tasks SET status='running' WHERE id=(
 		SELECT id FROM tasks q WHERE status='queued' AND NOT EXISTS (
    SELECT 1 FROM task_links l JOIN tasks p ON p.id=l.parent_id WHERE l.task_id=q.id AND p.status IN ('queued','running')
   ) AND NOT EXISTS (
 			SELECT 1 FROM tasks r WHERE r.status='running' AND r.work_dir=q.work_dir
-		) ORDER BY id LIMIT 1
-	) RETURNING `+taskColumns))
+		)`
+	args := []any{}
+	if len(blocked) > 0 {
+		query += ` AND q.work_dir NOT IN (` + placeholders(len(blocked)) + `)`
+		for _, dir := range blocked {
+			args = append(args, dir)
+		}
+	}
+	query += ` ORDER BY id LIMIT 1
+	) RETURNING ` + taskColumns
+	return scanTask(s.db.QueryRowContext(ctx, query, args...))
+}
+
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.Repeat("?,", n-1) + "?"
+}
+
+// cleanupFailed 保留 running 状态锁住目录，并记录可公开的清理失败原因。
+func (s *store) cleanupFailed(ctx context.Context, taskID int64, cause error) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	message := "cleanup_failed: " + cause.Error()
+	if _, err = tx.ExecContext(ctx, `UPDATE tasks SET error=? WHERE id=? AND status='running'`, message, taskID); err != nil {
+		return err
+	}
+	event, err := json.Marshal(agent.Event{Kind: agent.EnvironmentCleanupFailed, Error: errors.New(message)})
+	if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO task_events(task_id,created_at,record) VALUES(?,?,?)`, taskID, time.Now().UnixMilli(), event); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *store) record(ctx context.Context, taskID int64, event agent.Event) error {

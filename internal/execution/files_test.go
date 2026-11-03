@@ -14,7 +14,7 @@ import (
 func fileFixture(t *testing.T) (*Executor, context.Context, string) {
 	t.Helper()
 	cfg, identity := fixture(t)
-	cfg.Grants[0].Tools = append(cfg.Grants[0].Tools, "read_output", "search_files", "glob_files")
+	cfg.Grants[0].Tools = append(cfg.Grants[0].Tools, "read_output", "search_files", "glob_files", "process")
 	e, err := New(cfg, nil, nil)
 	require.NoError(t, err)
 	dir, err := e.Workspace(identity)

@@ -973,8 +973,17 @@ platforms:
 mcp:
   enabled: false # 开启后仍须 execution 中的身份及工具授权
 execution:
-  enabled: false
-  # network: true # 沙箱联网权限；默认开启，设为 false 时断网隔离
+  enabled: false # 关闭时仍可正常聊天；开启前必须显式选择 backend
+  backend: local # local 直接使用宿主用户权限；docker 使用预装镜像隔离
+  # image: python:3.13-slim # backend: docker 时使用，需预先安装
+  # network: true # 仅 docker 生效；local 不支持断网隔离
+  # workspaces:
+  #   project:
+  #     path: /absolute/path/to/project
+  #     backend: docker # 可选，覆盖全局 backend
+  #     env: {PROJECT_FLAG: "value"}
+  # grants:
+  #   - {platform: matrix, account: "@bot:example", room: "!room:example", users: ["@alice:example"], workspace: project, tools: [exec, read_file, search_files, glob_files, process, read_output]}
 commands:
   admins: [] # 全局模型切换、共享人格创建和删除；按 platform/account/users 精确配置
   session_writers: [] # 当前会话上下文和人格修改；按 platform/account/room/users 精确配置

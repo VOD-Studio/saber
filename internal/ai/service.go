@@ -233,6 +233,13 @@ func (s *Service) Stop() {
 			slog.Error("关闭任务服务失败", "error", err)
 		}
 	}
+	if s.executor != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		if err := s.executor.Close(ctx); err != nil {
+			slog.Error("关闭执行环境失败", "error", err)
+		}
+		cancel()
+	}
 	if s.contextManager != nil {
 		s.contextManager.Stop()
 		slog.Debug("AI 服务上下文管理器已停止")

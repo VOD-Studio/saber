@@ -164,7 +164,7 @@ func TestManager_ContinuationRejectsMalformedToolHistory(t *testing.T) {
 				m := &Manager{store: store, ctx: ctx}
 				source, err := m.Submit(ctx, message("source", "alice"), dir, request("original goal"))
 				require.NoError(t, err)
-				_, err = store.claim(ctx)
+				_, err = store.claim(ctx, nil)
 				require.NoError(t, err)
 				runtime := agent.Runtime{Model: func(context.Context, agent.Request, func(agent.Event)) (agent.Response, error) {
 					return agent.Response{Content: "partial response", ToolCalls: tc.calls, FinishReason: tc.finish}, nil
@@ -175,7 +175,7 @@ func TestManager_ContinuationRejectsMalformedToolHistory(t *testing.T) {
 				result, runErr := runtime.Run(ctx, source.Request, func(e agent.Event) { require.NoError(t, store.record(ctx, source.ID, e)) })
 				require.Error(t, runErr)
 				if journal {
-					require.NoError(t, store.recover(ctx))
+					require.NoError(t, store.recover(ctx, nil))
 				} else {
 					require.NoError(t, store.finish(ctx, source, result, runErr, false))
 				}

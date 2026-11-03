@@ -180,6 +180,8 @@ const (
 	ToolFinished EventKind = "tool_finished"
 	// RunFinished 表示唯一终态，之后不再产生事件。
 	RunFinished EventKind = "run_finished"
+	// EnvironmentCleanupFailed 表示任务环境清理失败，工作区保持锁定等待人工核查。
+	EnvironmentCleanupFailed EventKind = "environment_cleanup_failed"
 )
 
 // Event 由 Run 串行发送；回调应快速返回，不得修改引用的响应数据。

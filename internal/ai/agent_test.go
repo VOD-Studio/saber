@@ -106,7 +106,7 @@ func TestService_RunAgentMCPFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service.executor, err = execution.New(config.ExecutionConfig{Enabled: true, LogDir: t.TempDir(), Workspaces: map[string]config.WorkspaceConfig{"test": {Path: workspace}}, Grants: []config.ExecutionGrant{{Platform: "matrix", Account: "legacy", Room: "!test:local", Users: []string{"@test:local"}, Workspace: "test", Tools: []string{"mcp:test:lookup"}, Capabilities: []string{"external"}}}, MCPRequirements: map[string][]string{"mcp:test:lookup": {}}}, nil, nil)
+	service.executor, err = execution.New(config.ExecutionConfig{Enabled: true, Backend: "local", LogDir: t.TempDir(), Workspaces: map[string]config.WorkspaceConfig{"test": {Path: workspace}}, Grants: []config.ExecutionGrant{{Platform: "matrix", Account: "legacy", Room: "!test:local", Users: []string{"@test:local"}, Workspace: "test", Tools: []string{"mcp:test:lookup"}, Capabilities: []string{"external"}}}, MCPRequirements: map[string][]string{"mcp:test:lookup": {}}}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

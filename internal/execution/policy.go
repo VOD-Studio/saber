@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -30,6 +31,15 @@ type Executor struct {
 	activeOutputs sync.Map
 	outputMu      sync.RWMutex
 	outputAuth    func(context.Context, int64) error
+	// backends 按名称缓存无状态后端实现；环境生命周期由 envs 管理。
+	backends map[string]backend
+	envMu    sync.Mutex
+	envs     map[int64]*envEntry
+	// closedTasks 阻止清理后的任务 ID 重新打开环境。
+	closedTasks sync.Map
+	// processes 按任务保存后台作业，已结束作业保留状态与日志引用。
+	processMu sync.Mutex
+	processes map[int64]map[string]*processRecord
 }
 
 type scope struct {
@@ -65,11 +75,12 @@ func (e *Executor) grant(identity chat.Identity) (config.ExecutionGrant, bool) {
 
 // LocalTool 判断名称是否属于本地执行工具保留字。
 func LocalTool(name string) bool {
-	return slices.Contains([]string{"exec", "read_file", "list_files", "write_file", "apply_patch", "read_output", "search_files", "glob_files"}, name)
+	return slices.Contains([]string{"exec", "read_file", "list_files", "write_file", "apply_patch", "read_output", "search_files", "glob_files", "process"}, name)
 }
 
-// New 验证并冻结权限配置，拒绝挂载包含机器人私有数据的工作区。
-func New(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) (*Executor, error) {
+// ValidateConfig 归一化执行配置并校验授权、路径与后端约束；不创建目录。
+// 返回的 map/slice 都是克隆，调用者的配置不会被修改。
+func ValidateConfig(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) (config.ExecutionConfig, error) {
 	if cfg.Image == "" {
 		cfg.Image = "python:3.13-slim"
 	}
@@ -80,7 +91,7 @@ func New(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) 
 		cfg.TimeoutSeconds = 60
 	}
 	if cfg.TimeoutSeconds < 1 || cfg.TimeoutSeconds > 3600 {
-		return nil, errors.New("execution timeout must be 1..3600 seconds")
+		return cfg, errors.New("execution timeout must be 1..3600 seconds")
 	}
 	cfg.Workspaces = maps.Clone(cfg.Workspaces)
 	cfg.Grants = slices.Clone(cfg.Grants)
@@ -88,46 +99,37 @@ func New(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) 
 	for k, v := range cfg.MCPRequirements {
 		cfg.MCPRequirements[k] = slices.Clone(v)
 		if !strings.HasPrefix(k, "mcp:") {
-			return nil, errors.New("MCP permission keys must use mcp:server:tool")
+			return cfg, errors.New("MCP permission keys must use mcp:server:tool")
 		}
 		for _, capability := range v {
 			if !validCapability(capability) {
-				return nil, fmt.Errorf("unknown capability %q", capability)
+				return cfg, fmt.Errorf("unknown capability %q", capability)
 			}
 		}
 	}
 	logDir, err := filepath.Abs(cfg.LogDir)
 	if err != nil {
-		return nil, err
-	}
-	if cfg.Enabled {
-		if err = os.MkdirAll(logDir, 0700); err != nil {
-			return nil, err
-		}
-		logDir, err = filepath.EvalSymlinks(logDir)
-		if err != nil {
-			return nil, err
-		}
+		return cfg, err
 	}
 	cfg.LogDir = logDir
 	protectedPaths = append(slices.Clone(protectedPaths), logDir, "/var/run/docker.sock")
 	for name, w := range cfg.Workspaces {
 		if !filepath.IsAbs(w.Path) || w.Path == string(filepath.Separator) {
-			return nil, fmt.Errorf("workspace %q requires a specific absolute directory", name)
+			return cfg, fmt.Errorf("workspace %q requires a specific absolute directory", name)
 		}
 		path, err := filepath.EvalSymlinks(w.Path)
 		if err != nil {
-			return nil, err
+			return cfg, err
 		}
 		info, err := os.Stat(path)
 		if err != nil {
-			return nil, err
+			return cfg, err
 		}
 		if !info.IsDir() {
-			return nil, errors.New("workspace is not a directory")
+			return cfg, errors.New("workspace is not a directory")
 		}
 		if strings.ContainsAny(path, ",\n\r") {
-			return nil, errors.New("workspace path contains unsupported mount characters")
+			return cfg, errors.New("workspace path contains unsupported mount characters")
 		}
 		for _, protected := range protectedPaths {
 			if protected == "" {
@@ -135,68 +137,170 @@ func New(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) 
 			}
 			p, err := resolveFuturePath(protected)
 			if err != nil {
-				return nil, err
+				return cfg, err
 			}
 			if within(path, p) {
-				return nil, fmt.Errorf("workspace %q contains protected Saber data: %s", name, p)
+				return cfg, fmt.Errorf("workspace %q contains protected Saber data: %s", name, p)
 			}
 		}
 		w.Path = path
 		w.Env = maps.Clone(w.Env)
 		if err := ValidateEnvironment(w.Env, forbiddenSecrets); err != nil {
-			return nil, fmt.Errorf("workspace %q: %w", name, err)
+			return cfg, fmt.Errorf("workspace %q: %w", name, err)
+		}
+		if _, err := cfg.BackendFor(name); err != nil {
+			return cfg, fmt.Errorf("workspace %q: %w", name, err)
 		}
 		cfg.Workspaces[name] = w
 	}
 	for name, a := range cfg.Workspaces {
 		for other, b := range cfg.Workspaces {
 			if name != other && a.Path != b.Path && (within(a.Path, b.Path) || within(b.Path, a.Path)) {
-				return nil, errors.New("nested workspaces would bypass directory serialization")
+				return cfg, errors.New("nested workspaces would bypass directory serialization")
 			}
 		}
 	}
-	e := &Executor{cfg: cfg, grants: make(map[string]config.ExecutionGrant), admins: make(map[string]bool), owner: fmt.Sprintf("%x", sha256.Sum256([]byte(cfg.LogDir)))}
 	for _, admin := range cfg.TaskAdmins {
 		if admin.Platform == "" || admin.Account == "" || admin.Room == "" || len(admin.Users) == 0 || strings.Contains(admin.Platform+admin.Account+admin.Room, "*") {
-			return nil, errors.New("task admin requires exact platform, account, room and users")
+			return cfg, errors.New("task admin requires exact platform, account, room and users")
 		}
 		for _, user := range admin.Users {
 			if user == "" || strings.Contains(user, "*") {
-				return nil, errors.New("task admin requires exact member IDs")
+				return cfg, errors.New("task admin requires exact member IDs")
 			}
-			e.admins[identityKey(chat.Identity{Session: chat.Session{Platform: admin.Platform, Account: admin.Account, Conversation: admin.Room}, SenderID: user})] = true
 		}
 	}
-	for _, grant := range cfg.Grants {
+	seen := make(map[string]bool)
+	active := make(map[string]bool)
+	for i := range cfg.Grants {
+		grant := cfg.Grants[i]
 		if _, ok := cfg.Workspaces[grant.Workspace]; !ok {
-			return nil, fmt.Errorf("unknown workspace %q", grant.Workspace)
+			return cfg, fmt.Errorf("unknown workspace %q", grant.Workspace)
 		}
 		if grant.Platform == "" || strings.Contains(grant.Platform, "*") || grant.Account == "" || strings.Contains(grant.Account, "*") || grant.Room == "" || (grant.Room != "*" && strings.Contains(grant.Room, "*")) || len(grant.Users) == 0 {
-			return nil, errors.New("grant requires exact platform/account and room/users (only full * wildcard allowed)")
+			return cfg, errors.New("grant requires exact platform/account and room/users (only full * wildcard allowed)")
 		}
 		grant.Tools = slices.Clone(grant.Tools)
 		grant.Capabilities = slices.Clone(grant.Capabilities)
 		for _, capability := range grant.Capabilities {
 			if !validCapability(capability) {
-				return nil, fmt.Errorf("unknown capability %q", capability)
+				return cfg, fmt.Errorf("unknown capability %q", capability)
 			}
 		}
 		for _, tool := range grant.Tools {
 			if !LocalTool(tool) {
 				if _, ok := cfg.MCPRequirements[tool]; !ok {
-					return nil, fmt.Errorf("tool %q has no trusted permission declaration", tool)
+					return cfg, fmt.Errorf("tool %q has no trusted permission declaration", tool)
 				}
 			}
 		}
 		for _, user := range grant.Users {
 			if user == "" || (user != "*" && strings.Contains(user, "*")) {
-				return nil, errors.New("grant user must be an exact ID or *")
+				return cfg, errors.New("grant user must be an exact ID or *")
 			}
 			key := identityKey(chat.Identity{Session: chat.Session{Platform: grant.Platform, Account: grant.Account, Conversation: grant.Room}, SenderID: user})
-			if _, ok := e.grants[key]; ok {
-				return nil, errors.New("member has conflicting workspace grants in one room")
+			if seen[key] {
+				return cfg, errors.New("member has conflicting workspace grants in one room")
 			}
+			seen[key] = true
+		}
+		active[grant.Workspace] = true
+		cfg.Grants[i] = grant
+	}
+	if cfg.Enabled {
+		for name := range active {
+			backend, err := cfg.BackendFor(name)
+			if err != nil {
+				return cfg, err
+			}
+			if cfg.Backend == "" && cfg.Workspaces[name].Backend == "" {
+				return cfg, errors.New("execution backend must be explicit when enabling execution: set backend: local or docker")
+			}
+			if backend != "local" {
+				continue
+			}
+			if !cfg.IsNetworkEnabled() {
+				return cfg, errors.New("local backend cannot enforce network isolation")
+			}
+			if !workspaceNeedsCommands(cfg.Grants, name) {
+				continue
+			}
+			if !slices.Contains([]string{"darwin", "linux", "freebsd", "openbsd"}, runtime.GOOS) {
+				return cfg, errors.New("local execution is unsupported on this platform; configure backend: docker")
+			}
+			if _, err := os.Stat("/bin/sh"); err != nil {
+				return cfg, fmt.Errorf("local execution requires /bin/sh: %w", err)
+			}
+		}
+	}
+	return cfg, nil
+}
+
+func workspaceNeedsCommands(grants []config.ExecutionGrant, workspace string) bool {
+	for _, grant := range grants {
+		if grant.Workspace != workspace {
+			continue
+		}
+		if slices.Contains(grant.Tools, "exec") || slices.Contains(grant.Tools, "process") {
+			return true
+		}
+	}
+	return false
+}
+
+// New 验证并冻结权限配置，拒绝挂载包含机器人私有数据的工作区。
+func New(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) (*Executor, error) {
+	var err error
+	cfg, err = ValidateConfig(cfg, protectedPaths, forbiddenSecrets)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Enabled {
+		if err = os.MkdirAll(cfg.LogDir, 0700); err != nil {
+			return nil, err
+		}
+		resolved, err := filepath.EvalSymlinks(cfg.LogDir)
+		if err != nil {
+			return nil, err
+		}
+		if resolved != cfg.LogDir {
+			cfg.LogDir = resolved
+			if cfg, err = ValidateConfig(cfg, protectedPaths, forbiddenSecrets); err != nil {
+				return nil, err
+			}
+		}
+	}
+	e := &Executor{
+		cfg:       cfg,
+		grants:    make(map[string]config.ExecutionGrant),
+		admins:    make(map[string]bool),
+		owner:     fmt.Sprintf("%x", sha256.Sum256([]byte(cfg.LogDir))),
+		backends:  make(map[string]backend),
+		envs:      make(map[int64]*envEntry),
+		processes: make(map[int64]map[string]*processRecord),
+	}
+	for _, admin := range cfg.TaskAdmins {
+		for _, user := range admin.Users {
+			e.admins[identityKey(chat.Identity{Session: chat.Session{Platform: admin.Platform, Account: admin.Account, Conversation: admin.Room}, SenderID: user})] = true
+		}
+	}
+	for _, grant := range cfg.Grants {
+		for _, user := range grant.Users {
+			key := identityKey(chat.Identity{Session: chat.Session{Platform: grant.Platform, Account: grant.Account, Conversation: grant.Room}, SenderID: user})
 			e.grants[key] = grant
+		}
+	}
+	if err = e.loadEnvironmentRecords(); err != nil {
+		return nil, err
+	}
+	if cfg.Enabled {
+		for name := range e.activeWorkspaces() {
+			if backend, backendErr := cfg.BackendFor(name); backendErr == nil && backend == "docker" {
+				if err = probeDocker(cfg); err != nil {
+					return nil, err
+				}
+				break
+			}
 		}
 	}
 	return e, nil

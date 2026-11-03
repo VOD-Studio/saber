@@ -97,6 +97,18 @@ func (s *Service) EnableTasks(path string) error {
 		DeliveryMaxAttempts: s.config.Agent.TaskDeliveryMaxAttempts,
 		Schedule:            s.authorizeSchedule,
 		Manage:              func(identity chat.Identity) bool { return s.executor != nil && s.executor.IsTaskAdmin(identity) },
+		Finalize: func(ctx context.Context, taskID int64) error {
+			if s.executor == nil {
+				return nil
+			}
+			return s.executor.CloseTask(ctx, taskID)
+		},
+		BlockedDirectories: func() []string {
+			if s.executor == nil {
+				return nil
+			}
+			return s.executor.BlockedDirectories()
+		},
 		OnProjection: func() {
 			<-ready
 			if s.memory != nil {

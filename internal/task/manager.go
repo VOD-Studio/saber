@@ -25,6 +25,10 @@ type Options struct {
 	Manage       func(chat.Identity) bool
 	Context      agent.ContextPolicy
 	OnProjection func()
+	// Finalize 在保存终态前清理任务环境；失败时不释放工作目录。
+	Finalize func(context.Context, int64) error
+	// BlockedDirectories 返回因清理失败被隔离的工作区快照。
+	BlockedDirectories func() []string
 	// DeliveryMaxAttempts 是结果投递的最大尝试次数（含首次），用尽后任务的投递状态变为 abandoned；
 	// 零值使用 DefaultDeliveryMaxAttempts。
 	DeliveryMaxAttempts int
@@ -49,6 +53,8 @@ type Manager struct {
 	manage        func(chat.Identity) bool
 	contextPolicy agent.ContextPolicy
 	onProjection  func()
+	finalize      func(context.Context, int64) error
+	blocked       func() []string
 	// deliveryMaxAttempts 是结果投递的最大尝试次数，恒为正数。
 	deliveryMaxAttempts int
 }
@@ -63,10 +69,6 @@ func Open(path string, run RunFunc, send SendFunc, options ...Options) (*Manager
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	if err = s.recover(ctx); err != nil {
-		cancel()
-		return nil, errors.Join(err, s.db.Close())
-	}
 	m := &Manager{store: s, run: run, deliveries: make(map[string]SendFunc), ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), done: make(chan struct{}), active: make(map[int64]context.CancelFunc)}
 	m.deliveryMaxAttempts = DefaultDeliveryMaxAttempts
 	if len(options) > 0 {
@@ -77,6 +79,16 @@ func Open(path string, run RunFunc, send SendFunc, options ...Options) (*Manager
 		m.manage = options[0].Manage
 		m.contextPolicy = options[0].Context
 		m.onProjection = options[0].OnProjection
+		m.finalize = options[0].Finalize
+		m.blocked = options[0].BlockedDirectories
+	}
+	var blocked []string
+	if m.blocked != nil {
+		blocked = m.blocked()
+	}
+	if err = s.recover(ctx, blocked); err != nil {
+		cancel()
+		return nil, errors.Join(err, s.db.Close())
 	}
 	if send != nil {
 		m.deliveries["*"] = send
@@ -243,8 +255,12 @@ func (m *Manager) loop() {
 func (m *Manager) dispatch() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var blocked []string
+	if m.blocked != nil {
+		blocked = m.blocked()
+	}
 	for len(m.active) < 4 && m.ctx.Err() == nil {
-		t, err := m.store.claim(m.ctx)
+		t, err := m.store.claim(m.ctx, blocked)
 		if errors.Is(err, sql.ErrNoRows) {
 			return
 		}
@@ -293,6 +309,15 @@ func (m *Manager) execute(ctx context.Context, cancel context.CancelFunc, t Task
 	}
 	if journalErr != nil {
 		runErr = errors.Join(runErr, journalErr)
+	}
+	if m.finalize != nil {
+		if cleanupErr := m.finalize(context.Background(), t.ID); cleanupErr != nil {
+			// 保持 running 锁住目录；不宣布 cancelled/completed，等待人工核查。
+			if recordErr := m.store.cleanupFailed(context.Background(), t.ID, cleanupErr); recordErr != nil {
+				slog.Error("保存环境清理失败状态失败，需要人工核查", "error", taskError(t.ID, recordErr))
+			}
+			return
+		}
 	}
 	if err := m.store.finish(context.Background(), t, result, runErr, m.ctx.Err() != nil); err != nil {
 		// 保持 running 以锁住目录；重启后转 interrupted，绝不重跑。

@@ -3,20 +3,14 @@ package execution
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	_ "embed"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"rua.plus/saber/internal/chat"
 )
@@ -50,67 +44,42 @@ type Artifact struct {
 	Path string
 }
 
-// Recover 删除属于本执行器的残留容器；失败则禁止启动任务。
+// Recover 清理本执行器的残留容器；没有活动 Docker 工作区或旧记录时不探测 Docker。
 func (e *Executor) Recover(ctx context.Context) error {
 	if !e.cfg.Enabled {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	out, err := docker(ctx, "ps", "-aq", "--filter", "label=saber.executor="+e.owner).Output()
+	records, err := e.readEnvironmentRecords()
 	if err != nil {
-		return fmt.Errorf("docker unavailable: %w", err)
+		return err
 	}
-	for _, id := range strings.Fields(string(out)) {
-		if err := e.remove(id); err != nil {
-			return err
+	needDocker := false
+	for _, record := range records {
+		if record.Backend == "docker" && record.State == envActive {
+			needDocker = true
 		}
 	}
-	return nil
-}
-
-func docker(ctx context.Context, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	// Docker CLI 只获取连接 daemon 所需变量，不携带机器人凭据。
-	for _, key := range []string{"PATH", "HOME", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"} {
-		if v, ok := os.LookupEnv(key); ok {
-			cmd.Env = append(cmd.Env, key+"="+v)
+	for name := range e.activeWorkspaces() {
+		if backend, err := e.cfg.BackendFor(name); err == nil && backend == "docker" {
+			needDocker = true
 		}
 	}
-	cmd.WaitDelay = 2 * time.Second
-	return cmd
+	if !needDocker {
+		return nil
+	}
+	return e.backend("docker").Recover(ctx)
 }
 
-func (e *Executor) remove(name string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	output, err := docker(ctx, "rm", "--force", name).CombinedOutput()
-	if err != nil && !strings.Contains(string(output), "No such container") {
-		return fmt.Errorf("cannot terminate task container %s: %w", name, err)
+func (e *Executor) activeWorkspaces() map[string]bool {
+	active := make(map[string]bool, len(e.cfg.Grants))
+	for _, grant := range e.cfg.Grants {
+		active[grant.Workspace] = true
 	}
-	return nil
+	return active
 }
 
-func (e *Executor) containerArgs(name, dir string, taskID int64) []string {
-	uid, gid := os.Getuid(), os.Getgid()
-	if uid < 1 {
-		uid = 65534
-	}
-	if gid < 1 {
-		gid = 65534
-	}
-	networkMode := "bridge"
-	if !e.cfg.IsNetworkEnabled() {
-		networkMode = "none"
-	}
-	return []string{"create", "--pull=never", "--interactive", "--name", name, "--label", "saber.executor=" + e.owner, "--label", "saber.task=" + strconv.FormatInt(taskID, 10),
-		"--network", networkMode, "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "128", "--memory", "512m", "--cpus", "1",
-		"--user", fmt.Sprintf("%d:%d", uid, gid), "--mount", "type=bind,src=" + dir + ",dst=/workspace,bind-recursive=disabled",
-		"--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m", "--workdir", "/workspace", "--entrypoint", "/usr/bin/env", e.cfg.Image, "-i", "PATH=/usr/local/bin:/usr/bin:/bin", "python3", "-I", "-c", helper}
-}
-
-// Run 检查权限后在单次容器中执行；退出、取消或超时都会删除整个容器。
-// 非零命令退出码作为普通结果返回，供 Agent 修改下一步操作。
+// Run 检查权限后在任务环境中执行；非零退出码作为普通结果返回。
+// exec 使用执行超时；环境打开与后台作业使用完整任务 context。
 func (e *Executor) Run(ctx context.Context, tool string, args map[string]any) (result Result, err error) {
 	result.ExitCode = -1
 	if err = e.Check(ctx, tool); err != nil {
@@ -130,122 +99,59 @@ func (e *Executor) Run(ctx context.Context, tool string, args map[string]any) (r
 		// 归档读取不需要容器或挂载检查，权限由任务祖先关系单独校验。
 		return e.ReadOutput(ctx, args)
 	}
+	if tool == "process" {
+		return e.runProcess(ctx, args, run)
+	}
 	if tool != "exec" {
 		// 文件工具使用共享 Go 实现，两个后端产生相同的分页与错误语义。
 		return e.runFileTool(ctx, tool, args, run)
 	}
 	identity, _ := chat.IdentityFromContext(ctx)
 	grant, _ := e.grant(identity)
-	w := e.cfg.Workspaces[grant.Workspace]
+	workspace := e.cfg.Workspaces[grant.Workspace]
 	// 防止宿主管理员替换已授权路径为指向其他目录的符号链接。
 	resolved, resolveErr := filepath.EvalSymlinks(run.dir)
 	if resolveErr != nil || resolved != run.dir {
 		return result, errors.New("workspace path changed since authorization")
 	}
-	if err = checkMountFiles(ctx, run.dir); err != nil {
-		return result, err
-	}
-	data, err := json.Marshal(map[string]any{"tool": tool, "args": args, "env": w.Env})
+	entry, err := e.openEnvironment(ctx, run, grant.Workspace, workspace.Env)
 	if err != nil {
 		return result, err
 	}
-	if len(data) > 4*1024*1024 {
-		return result, errors.New("tool input exceeds 4 MiB")
-	}
+	command, _ := args["command"].(string)
 	archive, err := e.openOutput(run.id)
 	if err != nil {
 		return result, err
 	}
-	dir := filepath.Dir(archive.Path)
-	log := archive.file
 	result.LogPath = archive.Path
 	result.OutputID = archive.ID
-	writer := &archiveWriter{file: log}
+	writer := &archiveWriter{file: archive.file}
 	defer func() {
 		err = errors.Join(err, archive.close(e))
-		result.Summary = strings.ToValidUTF8(writer.summary.String(), "")
+		result.Summary = strings.ToValidUTF8(writer.summary.String(), "\uFFFD")
 		if err != nil {
 			result.Error = err.Error()
 		}
 	}()
-	var random [16]byte
-	if _, err = rand.Read(random[:]); err != nil {
-		return result, err
-	}
-	name := "saber-task-" + hex.EncodeToString(random[:])
-	defer func() {
-		if cleanupErr := e.remove(name); cleanupErr != nil {
-			e.blocked.Store(run.dir, true)
-			err = errors.Join(err, cleanupErr)
-		}
-	}()
-	ctx, cancel := context.WithTimeout(ctx, e.Timeout())
+	execCtx, cancel := context.WithTimeout(ctx, e.Timeout())
 	defer cancel()
 	writer.cancel = cancel
-	// create 使用独立短超时，确保取消时先得到确定创建结果，再移除容器。
-	createCtx, createCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	create := docker(createCtx, e.containerArgs(name, run.dir, run.id)...)
-	output, createErr := create.CombinedOutput()
-	createCancel()
-	if createErr != nil {
-		_, writeErr := writer.Write(output)
-		return result, errors.Join(fmt.Errorf("create task container: %w", createErr), writeErr)
-	}
-	if err = ctx.Err(); err != nil {
+	process, err := entry.environment.Start(execCtx, command, writer)
+	if err != nil {
 		return result, err
 	}
-	cmd := docker(ctx, "start", "--attach", "--interactive", name)
-	cmd.Stdin = bytes.NewReader(data)
-	cmd.Stdout = writer
-	cmd.Stderr = writer
-	runErr := cmd.Run()
+	code, waitErr := process.Wait()
 	if writer.err != nil {
 		return result, writer.err
 	}
 	if ctx.Err() != nil {
 		return result, ctx.Err()
 	}
-	if runErr != nil {
-		var exit *exec.ExitError
-		if errors.As(runErr, &exit) {
-			result.ExitCode = exit.ExitCode()
-		} else {
-			return result, runErr
-		}
-	} else {
-		result.ExitCode = 0
+	if waitErr != nil {
+		return result, waitErr
 	}
-	if result.ExitCode == 0 && tool == "read_file" && args["deliver"] == true {
-		if err = log.Sync(); err != nil {
-			return result, err
-		}
-		artifactDir := filepath.Join(dir, "artifacts")
-		if err = os.MkdirAll(artifactDir, 0700); err != nil {
-			return result, err
-		}
-		result.Artifact = filepath.Join(artifactDir, hex.EncodeToString(random[:])+"-"+filepath.Base(args["path"].(string)))
-		// 输出文件已停止写入，硬链接固定本次读取快照，避免额外复制及半成品。
-		if err = os.Link(log.Name(), result.Artifact); err != nil {
-			return result, err
-		}
-	}
+	result.ExitCode = code
 	return result, nil
-}
-
-func checkMountFiles(ctx context.Context, dir string) error {
-	// Unix socket 即使断网也可连到宿主服务；拒绝随工作区夹带 IPC/设备节点。
-	return filepath.WalkDir(dir, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if entry.Type()&(os.ModeSocket|os.ModeDevice|os.ModeNamedPipe) != 0 {
-			return fmt.Errorf("workspace contains an IPC or device node: %s", path)
-		}
-		return nil
-	})
 }
 
 type archiveWriter struct {
@@ -309,6 +215,7 @@ func validateArgs(tool string, args map[string]any) error {
 		"apply_patch":  {"path", "edits"},
 		"search_files": {"pattern", "path", "file_glob", "case_sensitive", "offset", "limit", "include_hidden"},
 		"glob_files":   {"pattern", "path", "offset", "limit", "include_hidden"},
+		"process":      {"action", "command", "id", "offset", "limit", "wait_seconds"},
 	}
 	for key := range args {
 		found := false
@@ -330,6 +237,9 @@ func validateArgs(tool string, args map[string]any) error {
 			return errors.New("command is required")
 		}
 		return nil
+	}
+	if tool == "process" {
+		return validateProcessArgs(args)
 	}
 	if tool == "read_output" {
 		if !text("output_id", false) {
@@ -435,6 +345,58 @@ func validateArgs(tool string, args map[string]any) error {
 			if _, ok = e["new"].(string); !ok {
 				return errors.New("new must be a string")
 			}
+		}
+	}
+	return nil
+}
+
+// validateProcessArgs 只接受当前 action 适用的参数，未知字段一律拒绝。
+func validateProcessArgs(args map[string]any) error {
+	action, ok := args["action"].(string)
+	if !ok || action == "" {
+		return errors.New("action is required")
+	}
+	allowed := map[string]map[string]bool{
+		"start":  {"action": true, "command": true},
+		"list":   {"action": true},
+		"status": {"action": true, "id": true},
+		"kill":   {"action": true, "id": true},
+		"wait":   {"action": true, "id": true, "wait_seconds": true},
+		"logs":   {"action": true, "id": true, "offset": true, "limit": true},
+	}
+	fields, ok := allowed[action]
+	if !ok {
+		return fmt.Errorf("unknown process action %q", action)
+	}
+	for key := range args {
+		if !fields[key] {
+			return fmt.Errorf("argument %q is not valid for process action %q", key, action)
+		}
+	}
+	if action == "start" {
+		command, valid := args["command"].(string)
+		if !valid || command == "" || strings.ContainsRune(command, 0) {
+			return errors.New("command is required")
+		}
+		return nil
+	}
+	if action != "list" {
+		id, valid := args["id"].(string)
+		if !valid || id == "" || strings.ContainsRune(id, 0) {
+			return errors.New("id is required")
+		}
+	}
+	if action == "wait" {
+		if err := validateInteger(args, "wait_seconds", 0, processWaitMax); err != nil {
+			return err
+		}
+	}
+	if action == "logs" {
+		if err := validateInteger(args, "offset", 0, 0); err != nil {
+			return err
+		}
+		if err := validateInteger(args, "limit", outputPageMin, outputPageMax); err != nil {
+			return err
 		}
 	}
 	return nil
