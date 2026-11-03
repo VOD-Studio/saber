@@ -86,6 +86,10 @@ type Request struct {
 	Tools []openai.Tool `json:"tools,omitempty"`
 	// ToolChoice 保留调用方指定的工具选择策略。
 	ToolChoice *string `json:"tool_choice,omitempty"`
+
+	// reservedTokens 是 Admit 在本账本与父账本上预留的 token 数，仅供 Record 精确释放。
+	// 不参与序列化，也不来自模型或外部请求。
+	reservedTokens int
 }
 
 // Response 是一轮完整响应；失败时也可返回已收到的部分响应用于记录。

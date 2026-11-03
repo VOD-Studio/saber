@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -117,4 +119,72 @@ func TestRuntime_NestedLedgerForwardsChildCharge(t *testing.T) {
 	require.ErrorIs(t, err, ErrBudgetExhausted)
 	require.Equal(t, BudgetExhausted, sixth.Status)
 	require.Zero(t, sixth.Budget.AccountedTokens)
+}
+
+// TestRuntime_ConcurrentChildrenShareParentReservation 验证并发子运行只能预留父账本的
+// 同一份额度：父上限 1000、每个子运行预留 200 时，任何时刻最多 1000 token 被占用。
+func TestRuntime_ConcurrentChildrenShareParentReservation(t *testing.T) {
+	parent := newLedger(1000)
+	parentCtx := WithAttemptGate(context.Background(), parent)
+	runChild := func() (Result, error) {
+		child := Runtime{
+			Limits: Limits{MaxRounds: 2, Timeout: 5 * time.Second, MaxToolOutputBytes: 1024, MaxTotalTokens: 200},
+			Model: func(ctx context.Context, req Request, _ func(Event)) (Response, error) {
+				gate, ok := AttemptGateFromContext(ctx)
+				if !ok {
+					return Response{}, errors.New("missing attempt gate")
+				}
+				admitted, err := gate.Admit(req)
+				if err != nil {
+					return Response{}, err
+				}
+				// 拉长预留窗口，让并发子运行的预留真正重叠。
+				time.Sleep(10 * time.Millisecond)
+				response := Response{FinishReason: "stop", Content: "ok", Usage: openai.Usage{PromptTokens: 120, CompletionTokens: 80, TotalTokens: 200}}
+				gate.Record(admitted, response)
+				return response, nil
+			},
+		}
+		return child.Run(parentCtx, Request{
+			Model:     "test",
+			Messages:  []openai.ChatCompletionMessage{{Role: "user", Content: "hi"}},
+			MaxTokens: 200,
+		}, nil)
+	}
+
+	const children = 8
+	results := make([]Result, children)
+	errs := make([]error, children)
+	var wg sync.WaitGroup
+	for i := range children {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = runChild()
+		}()
+	}
+	wg.Wait()
+
+	parent.mu.Lock()
+	committed := parent.accounted + parent.reservations
+	parent.mu.Unlock()
+	require.LessOrEqual(t, committed, 1000, "预留加记账不得超过父账本上限")
+
+	succeeded, exhausted := 0, 0
+	for i := range children {
+		if errs[i] == nil {
+			succeeded++
+			require.Equal(t, Completed, results[i].Status)
+			require.Equal(t, 200, results[i].Usage.TotalTokens)
+			require.Equal(t, 200, results[i].Budget.AccountedTokens)
+			continue
+		}
+		require.ErrorIs(t, errs[i], ErrBudgetExhausted, "子运行只允许因父账本耗尽失败")
+		require.Equal(t, BudgetExhausted, results[i].Status)
+		exhausted++
+	}
+	require.Positive(t, succeeded)
+	require.Positive(t, exhausted, "并发子运行必须有人被父账本拒绝")
+	require.GreaterOrEqual(t, parent.remaining(), 0)
+	t.Logf("succeeded=%d exhausted=%d committed=%d remaining=%d", succeeded, exhausted, committed, parent.remaining())
 }

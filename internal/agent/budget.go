@@ -61,10 +61,13 @@ type AttemptGate interface {
 // 它只用于请求前的额度预留；真实消耗以提供商返回的 usage 为准。
 const bytesPerToken = 4
 
-// chargeSink 是嵌套运行向父账本上推实际消耗、并读取父账本余额的最小接口。
-// 子运行只上报已完成的消耗，不复制父账本的预留与报告逻辑。
+// chargeSink 是嵌套运行向父账本预留额度、上推实际消耗的最小接口。
+// 子运行用 reserve/release 让父账本在请求前就锁定并发额度，只读余额无法阻止
+// 多个子运行同时看到同一份剩余量。
 type chargeSink interface {
 	charge(tokens int, estimated bool, usage openai.Usage, purpose string)
+	reserve(tokens int) error
+	release(tokens int)
 	remaining() int
 }
 
@@ -104,17 +107,9 @@ func (l *ledger) Admit(req Request) (Request, error) {
 		return req, nil
 	}
 	estimate := estimateInputTokens(req)
-	// 父账本余额只作为额外上限提示，先读后加锁，避免父子账本锁嵌套。
-	parentRemaining := math.MaxInt
-	if l.parent != nil {
-		parentRemaining = l.parent.remaining()
-	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	remaining := l.max - l.accounted - l.reservations
-	if parentRemaining < remaining {
-		remaining = parentRemaining
-	}
 	if remaining <= 0 {
 		return req, fmt.Errorf("%w: token budget exhausted", ErrBudgetExhausted)
 	}
@@ -132,8 +127,17 @@ func (l *ledger) Admit(req Request) (Request, error) {
 			output = allowed
 		}
 	}
+	reserved := estimate + output
+	// 父账本必须与本账本一起原子预留：只读父余额时，并发子运行会同时看到同一份额度，
+	// 各自放行后在 Record 阶段共同超额。锁顺序恒为子账本 → 父账本，父账本不会反向持锁。
+	if l.parent != nil {
+		if err := l.parent.reserve(reserved); err != nil {
+			return req, err
+		}
+	}
 	req.MaxTokens = output
-	l.reservations += estimate + output
+	req.reservedTokens = reserved
+	l.reservations += reserved
 	return req, nil
 }
 
@@ -146,10 +150,40 @@ func (l *ledger) Record(req Request, response Response) {
 		return
 	}
 	charge, estimated := chargeFor(req, response)
+	reserved := req.reservedTokens
 	l.mu.Lock()
-	l.reservations = max(0, l.reservations-(estimateInputTokens(req)+req.MaxTokens))
+	l.reservations = max(0, l.reservations-reserved)
 	l.mu.Unlock()
+	// 父账本按同一预留量归还，再按真实消耗记账。Admit 成功但请求始终没走到 Record
+	// 时，预留会一直占着额度；这与自身账本的既有行为一致，靠父运行结束回收。
+	if l.parent != nil && reserved > 0 {
+		l.parent.release(reserved)
+	}
 	l.charge(charge, estimated, response.Usage, req.Purpose)
+}
+
+// reserve 在账本内原子预留额度，失败时返回包装后的 ErrBudgetExhausted。
+func (l *ledger) reserve(tokens int) error {
+	if l == nil || l.max <= 0 || tokens <= 0 {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.max-l.accounted-l.reservations < tokens {
+		return fmt.Errorf("%w: token budget exhausted", ErrBudgetExhausted)
+	}
+	l.reservations += tokens
+	return nil
+}
+
+// release 归还 reserve 预留但未实际消耗的额度，下限归零。
+func (l *ledger) release(tokens int) {
+	if l == nil || l.max <= 0 || tokens <= 0 {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.reservations = max(0, l.reservations-tokens)
 }
 
 // charge 记录一笔已在别处预留过的实际消耗，并把同一笔消耗上推给父账本。
