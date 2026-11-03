@@ -2,6 +2,8 @@ package command_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"rua.plus/saber/internal/agent"
@@ -159,5 +161,99 @@ func TestRegistry_OnceImageDoesNotResendOnDuplicate(t *testing.T) {
 	}
 	if adapter.images != 1 || len(adapter.Replies()) != 1 {
 		t.Fatalf("重复投递 images=%d replies=%+v", adapter.images, adapter.Replies())
+	}
+}
+
+// TestRegistry_Fallback 验证未命中命令路径时先经过兜底处理器，且不改变已注册命令语义。
+func TestRegistry_Fallback(t *testing.T) {
+	tests := []struct {
+		name        string
+		text        string
+		fallback    command.Fallback
+		wantCalls   int
+		wantUnknown bool
+		wantErr     bool
+	}{
+		{
+			name: "兜底处理未知命令",
+			text: "/deploy 参数",
+			fallback: func(context.Context, chat.Message, chat.Adapter) (bool, error) {
+				return true, nil
+			},
+			wantCalls: 1,
+		},
+		{
+			name: "兜底放行后回复未知命令",
+			text: "/deploy 参数",
+			fallback: func(context.Context, chat.Message, chat.Adapter) (bool, error) {
+				return false, nil
+			},
+			wantCalls:   1,
+			wantUnknown: true,
+		},
+		{
+			name: "兜底报错不再追加提示",
+			text: "/deploy",
+			fallback: func(context.Context, chat.Message, chat.Adapter) (bool, error) {
+				return false, errors.New("boom")
+			},
+			wantCalls: 1,
+			wantErr:   true,
+		},
+		{
+			name: "已注册命令不进入兜底",
+			text: "/ping",
+			fallback: func(context.Context, chat.Message, chat.Adapter) (bool, error) {
+				return true, nil
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := command.New()
+			if err := r.Register(command.Definition{Descriptor: command.Descriptor{ID: "ping", Path: []string{"ping"}, Scope: "conversation"}, Handle: func(_ context.Context, message chat.Message, reply chat.Adapter, _ string) error {
+				_, err := reply.Send(context.Background(), chat.Reply{Session: message.Session, Text: "pong"})
+				return err
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			var calls int
+			var seen string
+			r.SetFallback(func(_ context.Context, message chat.Message, _ chat.Adapter) (bool, error) {
+				calls++
+				seen = message.Text
+				return tt.fallback(context.Background(), message, nil)
+			})
+			adapter := memory.New("bot", chat.Capabilities{}, nil)
+			message := chat.Message{Session: chat.Session{Platform: "memory", Account: "bot", Conversation: "room"}, ID: "$1", SenderID: "user", Text: tt.text}
+			handled, err := r.Dispatch(context.Background(), message, adapter, nil)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Dispatch() err = %v, wantErr = %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && !handled {
+				t.Fatal("Dispatch() 应始终报告已处理")
+			}
+			if calls != tt.wantCalls {
+				t.Fatalf("兜底调用次数 = %d, want %d", calls, tt.wantCalls)
+			}
+			if tt.wantCalls > 0 && seen != tt.text {
+				t.Fatalf("兜底收到的正文 = %q, want %q", seen, tt.text)
+			}
+			replies := adapter.Replies()
+			switch {
+			case tt.wantUnknown:
+				if len(replies) != 1 || !strings.Contains(replies[0].Text, "未知命令") {
+					t.Fatalf("未知命令回复 = %+v", replies)
+				}
+			case tt.wantCalls == 0:
+				if len(replies) != 1 || replies[0].Text != "pong" {
+					t.Fatalf("已注册命令回复 = %+v", replies)
+				}
+			default:
+				if len(replies) != 0 {
+					t.Fatalf("兜底处理时不应回复未知命令: %+v", replies)
+				}
+			}
+		})
 	}
 }

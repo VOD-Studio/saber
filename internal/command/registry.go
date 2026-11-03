@@ -33,6 +33,12 @@ type Descriptor struct {
 // Handler 只接收可信接入端构造的消息与出站 adapter。raw 保留路径之后的原文。
 type Handler func(context.Context, chat.Message, chat.Adapter, string) error
 
+// Fallback 处理未命中任何已注册命令路径的正文，例如按需解析 `/技能名`。
+//
+// 返回 handled=false 表示兜底处理器不负责该正文，注册表继续回复「未知命令」。
+// 返回 error 时错误原样交还调用方，不再追加未知命令提示。
+type Fallback func(ctx context.Context, message chat.Message, reply chat.Adapter) (handled bool, err error)
+
 // Definition 将目录信息与执行规则放在一起，避免目录与实际命令漂移。
 type Definition struct {
 	Descriptor
@@ -57,6 +63,7 @@ type Registry struct {
 	paths       map[string]int
 	maxDepth    int
 	receipts    Receipts
+	fallback    Fallback
 }
 
 // New 创建空注册表。
@@ -64,6 +71,9 @@ func New() *Registry { return &Registry{paths: make(map[string]int)} }
 
 // SetReceipts 在开始接收消息前接入持久化回执存储。
 func (r *Registry) SetReceipts(receipts Receipts) { r.receipts = receipts }
+
+// SetFallback 在开始接收消息前注册未命中命令的兜底处理器；传 nil 恢复为直接回复「未知命令」。
+func (r *Registry) SetFallback(fn Fallback) { r.fallback = fn }
 
 // Register 校验路径与别名，拒绝歧义定义。
 func (r *Registry) Register(def Definition) error {
@@ -204,6 +214,12 @@ func (r *Registry) Dispatch(ctx context.Context, message chat.Message, reply cha
 				return true, r.dispatchOnce(ctx, message, reply, def, rests[length-1])
 			}
 			return true, def.Handle(ctx, message, reply, rests[length-1])
+		}
+	}
+	// 未命中任何命令路径时才交给兜底处理器；已注册命令的授权失败仍按原语义直接拒绝。
+	if r.fallback != nil {
+		if handled, err := r.fallback(ctx, message, reply); handled || err != nil {
+			return handled, err
 		}
 	}
 	return true, send(ctx, message, reply, "未知命令："+text)

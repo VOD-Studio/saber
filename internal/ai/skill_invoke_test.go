@@ -260,3 +260,48 @@ func joinRequestContents(req agent.Request) string {
 	}
 	return b.String()
 }
+
+func TestService_CanInvokeSkillAndInvokeCommand(t *testing.T) {
+	ctx := context.Background()
+	mem := newTestMemory(t, memory.Config{})
+	identity := chat.Identity{Session: chat.Session{Platform: "memory", Account: "bot", Conversation: "dm"}, SenderID: "@alice:test", Direct: true}
+	if _, err := mem.AddSkill(ctx, identity, "deploy", "发布服务", "第一步：构建", memory.Source{}); err != nil {
+		t.Fatalf("AddSkill() error = %v", err)
+	}
+	server, requests := skillModelServer(t)
+	svc := newSkillTestService(t, mem, server.URL)
+	adapter := chatmemory.New("bot", chat.Capabilities{}, nil)
+	message := chat.Message{Session: identity.Session, ID: "$deploy", SenderID: identity.SenderID, Direct: true, Text: "/deploy 生产环境"}
+
+	if !svc.CanInvokeSkill(ctx, message) {
+		t.Fatal("CanInvokeSkill() 未识别存在的技能")
+	}
+	escaped := "/deploy 生产环境"
+	if svc.CanInvokeSkill(ctx, chat.Message{Session: identity.Session, SenderID: identity.SenderID, Direct: true, Text: escaped, ControlText: &escaped}) {
+		t.Fatal("CanInvokeSkill() 不应识别 // 转义正文")
+	}
+	missing := chat.Message{Session: identity.Session, ID: "$missing", SenderID: identity.SenderID, Direct: true, Text: "/missing 参数"}
+	if svc.CanInvokeSkill(ctx, missing) {
+		t.Fatal("CanInvokeSkill() 不应识别不存在的技能")
+	}
+
+	if err := svc.InvokeSkillCommand(ctx, message, adapter); err != nil {
+		t.Fatalf("InvokeSkillCommand() error = %v", err)
+	}
+	all := requests()
+	if len(all) != 1 {
+		t.Fatalf("模型请求数 = %d, want 1", len(all))
+	}
+	if last := all[0].Messages[len(all[0].Messages)-1]; last.Content != "生产环境" {
+		t.Fatalf("技能调用 user 消息 = %q", last.Content)
+	}
+	if !strings.Contains(joinRequestContents(all[0]), "【技能：deploy (v1)】") {
+		t.Fatal("InvokeSkillCommand() 未注入技能正文")
+	}
+	if err := svc.InvokeSkillCommand(ctx, missing, adapter); err == nil {
+		t.Fatal("InvokeSkillCommand() 对非技能消息应返回错误")
+	}
+	if len(requests()) != 1 {
+		t.Fatal("非技能消息不应触发模型请求")
+	}
+}

@@ -13,6 +13,26 @@ import (
 	"rua.plus/saber/internal/memory"
 )
 
+// CanInvokeSkill 判断消息首词是否为当前可信空间存在的 `/name` 技能调用。
+//
+// 供命令注册表的兜底处理器在回复「未知命令」前判定；`//name` 转义、非斜杠正文、
+// 非法名称与未知技能都返回 false。
+func (s *Service) CanInvokeSkill(ctx context.Context, message chat.Message) bool {
+	_, ok := s.lookupSkillInvocation(ctx, message)
+	return ok
+}
+
+// InvokeSkillCommand 用与普通聊天相同的链路执行一次技能调用。
+//
+// 调用方应先用 CanInvokeSkill 判定；消息不是可执行的技能调用时返回错误，不降级为普通聊天。
+func (s *Service) InvokeSkillCommand(ctx context.Context, message chat.Message, reply chat.Adapter) error {
+	if !s.CanInvokeSkill(ctx, message) {
+		return errors.New("当前消息不是可执行的技能调用")
+	}
+	_, err := s.handleChat(ctx, message, reply, s.GetModelRegistry().GetDefault(), true)
+	return err
+}
+
 // skillInvocation 是一次 `/name [args]` 技能调用的解析结果。
 type skillInvocation struct {
 	entry memory.SkillEntry
