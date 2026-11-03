@@ -168,6 +168,19 @@ func TestLedger_AdmitClampsAndRejects(t *testing.T) {
 	require.ErrorIs(t, err, ErrBudgetExhausted)
 }
 
+func TestLedger_UnlimitedOutputKeepsRequestUncapped(t *testing.T) {
+	led := newLedger(1000)
+	admitted, err := led.Admit(Request{Messages: []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "x"}}})
+	require.NoError(t, err)
+	require.Zero(t, admitted.MaxTokens)
+	led.Record(admitted, Response{Content: "ok", Usage: openai.Usage{TotalTokens: 900}})
+	require.Zero(t, led.reservations)
+	require.Equal(t, 900, led.accountedTokens())
+	// 不设输出上限仍受任务总量约束：剩余不足输入估算时拒绝，不再放大输出预留。
+	_, err = led.Admit(Request{Messages: []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: strings.Repeat("x", 400)}}})
+	require.ErrorIs(t, err, ErrBudgetExhausted)
+}
+
 func TestLedger_UsesConservativeEstimateWithoutUsage(t *testing.T) {
 	led := newLedger(100000)
 	request, err := led.Admit(Request{Messages: []openai.ChatCompletionMessage{{Role: "user", Content: "hello"}}, MaxTokens: 10})

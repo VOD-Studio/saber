@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- 支持不设输出上限：全局 `ai.max_tokens: 0` 时主请求、评估与摘要请求都省略 `max_output_tokens`/`max_tokens`，交由模型或上游默认，避免推理模型的思考 token 被固定上限截断；任务仍按实际用量记账，超过 `agent.budget.max_total_tokens` 后拒绝后续请求。模型级 `max_tokens: 0` 仍表示继承全局。
+
 ### Fixed
 
-- 预算评估与摘要请求的输出上限原本固定为 512/1024 token，而推理模型的思考 token 同样计入 `max_output_tokens`（Responses）或 completion tokens，思考一旦超过上限，上游就以 `incomplete: max_output_tokens` 截断；评估失败随后被当成「轮数预算耗尽」终止任务，用户只能看到底层模型错误。现在两类辅助请求沿用模型自身的 `max_tokens`，评估时限也与摘要统一为 30 秒，避免推理模型先写思考时被过早判死。
+- 预算评估与摘要请求的输出上限原本固定为 512/1024 token，而推理模型的思考 token 同样计入 `max_output_tokens`（Responses）或 completion tokens，思考一旦超过上限，上游就以 `incomplete: max_output_tokens` 截断；评估失败随后被当成「轮数预算耗尽」终止任务，用户只能看到底层模型错误，前半段回复也没有任何实际动作。现在两类辅助请求沿用模型自身的 `max_tokens`，时限沿用请求超时，并遵守 `agent.retry` 的瞬时错误重试，一次 5xx 不再直接判死整次任务。
 
 ## [0.5.0] - 2026-11-03
 

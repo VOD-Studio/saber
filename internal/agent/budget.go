@@ -97,9 +97,15 @@ func (l *ledger) Admit(req Request) (Request, error) {
 	if estimate >= remaining {
 		return req, fmt.Errorf("%w: input estimate exceeds remaining token budget", ErrBudgetExhausted)
 	}
-	allowed := remaining - estimate
-	if output <= 0 || output > allowed {
-		output = allowed
+	// MaxTokens 为 0 表示不发送输出上限：只预留输入，实际用量仍由 Record 记账。
+	// 单次输出无法在请求前封顶，超量只会在后续请求被拒。
+	if output < 0 {
+		output = 0
+	}
+	if output > 0 {
+		if allowed := remaining - estimate; output > allowed {
+			output = allowed
+		}
 	}
 	req.MaxTokens = output
 	l.reservations += estimate + output

@@ -18,14 +18,7 @@ func (s *Service) RunAgent(ctx context.Context, req agent.Request, emit func(age
 }
 
 func (s *Service) runAgent(ctx context.Context, req agent.Request, emit func(agent.Event), firstClient *Client) (agent.Result, error) {
-	retry := &RetryConfigWrapper{MaxRetries: s.config.Agent.Retry.MaxRetries, InitialDelay: time.Duration(s.config.Agent.Retry.InitialDelayMs) * time.Millisecond, MaxDelay: time.Duration(s.config.Agent.Retry.MaxDelayMs) * time.Millisecond, BackoffFactor: s.config.Agent.Retry.BackoffFactor}
-	if !s.config.Agent.Retry.Enabled {
-		retry.MaxRetries = 0
-	}
-	if s.config.Agent.Retry.FallbackEnabled {
-		retry.FallbackModels = s.config.Agent.Retry.FallbackModels
-	}
-	retry.CircuitBreaker = s.circuitBreaker
+	retry := s.agentRetry()
 	budget := s.config.Agent.Budget
 	limits := agent.Limits{
 		MaxRounds:          s.config.Agent.MaxIterations,

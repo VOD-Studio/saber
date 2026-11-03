@@ -201,18 +201,47 @@ func (s *Service) getClient(modelName string) (*Client, error) {
 	return s.core.GetClient(modelName)
 }
 
-// auxiliaryRequestTimeout 是评估、摘要等辅助模型请求的时限。
-// 推理模型要先把思考 token 写完才会给出结论，过短的时限会与截断一样让任务误判预算耗尽。
-const auxiliaryRequestTimeout = 30 * time.Second
+// auxiliaryTimeout 是评估、摘要等辅助模型请求的时限，沿用主请求的请求超时。
+// 推理模型要先把思考 token 写完才会给出结论，固定短时限会与截断一样让任务误判预算耗尽。
+func (s *Service) auxiliaryTimeout(modelName string) time.Duration {
+	seconds := s.config.AI.TimeoutSeconds
+	if cfg, ok := s.core.GetConfig().GetModelConfig(modelName); ok && cfg.RequestTimeoutSeconds > 0 {
+		seconds = cfg.RequestTimeoutSeconds
+	}
+	if seconds <= 0 {
+		seconds = 120
+	}
+	return time.Duration(seconds) * time.Second
+}
 
 // auxiliaryMaxTokens 返回评估、摘要等辅助请求的输出上限。
-// 与主请求一致沿用模型自身的生成预算：Responses 的 max_output_tokens 和推理模型的
-// completion tokens 都包含思考 token，固定小额度会在结论或 JSON 产出前被上游截断。
+// 与主请求一致沿用模型自身的生成预算（0 表示不发送上限）；
+// Responses 的 max_output_tokens 和推理模型的 completion tokens 都包含思考 token，
+// 固定小额度会在结论或 JSON 产出前被上游截断。仅当模型配置缺失时退回全局默认。
 func (s *Service) auxiliaryMaxTokens(modelName string) int {
-	if cfg, ok := s.core.GetConfig().GetModelConfig(modelName); ok && cfg.MaxTokens > 0 {
+	if cfg, ok := s.core.GetConfig().GetModelConfig(modelName); ok {
 		return cfg.MaxTokens
 	}
 	return config.DefaultAIConfig().MaxTokens
+}
+
+// agentRetry 返回主请求与辅助请求共用的重试策略。
+// 评估、摘要同样受运营者配置的瞬时错误重试保护：一次 5xx 不应终止整次任务。
+func (s *Service) agentRetry() *RetryConfigWrapper {
+	retry := &RetryConfigWrapper{
+		MaxRetries:    s.config.Agent.Retry.MaxRetries,
+		InitialDelay:  time.Duration(s.config.Agent.Retry.InitialDelayMs) * time.Millisecond,
+		MaxDelay:      time.Duration(s.config.Agent.Retry.MaxDelayMs) * time.Millisecond,
+		BackoffFactor: s.config.Agent.Retry.BackoffFactor,
+	}
+	if !s.config.Agent.Retry.Enabled {
+		retry.MaxRetries = 0
+	}
+	if s.config.Agent.Retry.FallbackEnabled {
+		retry.FallbackModels = s.config.Agent.Retry.FallbackModels
+	}
+	retry.CircuitBreaker = s.circuitBreaker
+	return retry
 }
 
 // IsEnabled 检查 AI 服务是否已启用。

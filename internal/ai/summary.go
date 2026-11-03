@@ -20,7 +20,7 @@ const summarySystemPrompt = `你是任务上下文压缩器。把给定的历史
 // summarizer 用当前主模型执行一次无工具、非流式、固定短超时的摘要请求。
 func (s *Service) summarizer(modelName string) agent.SummaryFunc {
 	return func(ctx context.Context, input agent.SummaryInput) (agent.SummaryOutput, error) {
-		ctx, cancel := context.WithTimeout(ctx, auxiliaryRequestTimeout)
+		ctx, cancel := context.WithTimeout(ctx, s.auxiliaryTimeout(modelName))
 		defer cancel()
 		var body strings.Builder
 		if input.Previous != "" {
@@ -50,8 +50,7 @@ func (s *Service) summarizer(modelName string) agent.SummaryFunc {
 			MaxTokens: s.auxiliaryMaxTokens(modelName),
 			Purpose:   "summary",
 		}
-		retry := &RetryConfigWrapper{MaxRetries: 0}
-		response, err := model.AgentModel(s.getClient, retry)(ctx, request, func(agent.Event) {})
+		response, err := model.AgentModel(s.getClient, s.agentRetry())(ctx, request, func(agent.Event) {})
 		if err != nil {
 			return agent.SummaryOutput{}, err
 		}

@@ -91,7 +91,7 @@ type AIConfig struct {
 	// 留空则带图消息仍走 default_model，纯文本模型会拒绝图片输入。
 	MediaModel string `yaml:"media_model,omitempty"`
 
-	MaxTokens          int                    `yaml:"max_tokens"`              // 最大生成 token 数
+	MaxTokens          int                    `yaml:"max_tokens"`              // 最大生成 token 数（0 表示不发送输出上限）
 	Temperature        float64                `yaml:"temperature"`             // 生成温度（0-2）
 	SystemPrompt       string                 `yaml:"system_prompt"`           // 系统提示词
 	RateLimitPerMinute int                    `yaml:"rate_limit_per_minute"`   // 每分钟请求限制（0 表示无限制）
@@ -224,7 +224,7 @@ type ModelConfig struct {
 	Provider    string   `yaml:"provider"`              // 提供商（覆盖全局）
 	BaseURL     string   `yaml:"base_url"`              // API URL（覆盖全局）
 	APIKey      string   `yaml:"api_key"`               // API 密钥（覆盖全局）
-	MaxTokens   int      `yaml:"max_tokens"`            // 最大 token 数（覆盖全局）
+	MaxTokens   int      `yaml:"max_tokens"`            // 最大 token 数（覆盖全局；0 表示继承全局）
 	Temperature *float64 `yaml:"temperature,omitempty"` // nil 继承全局，显式 0 保持零温度。
 }
 
@@ -974,7 +974,7 @@ ai:
   #         reasoning_effort: high # 按模型支持情况设置；省略则用上游默认
   default_model: "" # 例如 podlink-responses.gpt-5.6-sol
   media_model: "" # 带图片消息使用的多模态模型，留空则走 default_model
-  max_tokens: 8192 # 每次生成预算；模型配置可覆盖，并非模型能力上限
+  max_tokens: 8192 # 每次生成预算；0 表示不发送输出上限；模型配置可覆盖
   temperature: 0.7 # Responses 仅在 reasoning_effort: none 时发送
   request_timeout_seconds: 120 # 单次请求总时限，包含流式读取
 

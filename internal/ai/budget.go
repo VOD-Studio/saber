@@ -22,7 +22,7 @@ const budgetSystemPrompt = `你是任务预算评估器。判断当前任务是�
 // 输出上限，固定小额度会在 JSON 产出前被截断，评估失败即终止任务。
 func (s *Service) budgetEvaluator(modelName string) agent.BudgetEvaluator {
 	return func(ctx context.Context, progress agent.BudgetProgress) (agent.BudgetDecision, error) {
-		ctx, cancel := context.WithTimeout(ctx, auxiliaryRequestTimeout)
+		ctx, cancel := context.WithTimeout(ctx, s.auxiliaryTimeout(modelName))
 		defer cancel()
 		var body strings.Builder
 		fmt.Fprintf(&body, "已用轮次 %d/%d（软限 %d），账号用量 %d，运行中进程 %d，已用时 %s。\n",
@@ -54,8 +54,7 @@ func (s *Service) budgetEvaluator(modelName string) agent.BudgetEvaluator {
 			MaxTokens: s.auxiliaryMaxTokens(modelName),
 			Purpose:   "evaluation",
 		}
-		retry := &RetryConfigWrapper{MaxRetries: 0}
-		response, err := model.AgentModel(s.getClient, retry)(ctx, request, func(agent.Event) {})
+		response, err := model.AgentModel(s.getClient, s.agentRetry())(ctx, request, func(agent.Event) {})
 		if err != nil {
 			return agent.BudgetDecision{}, err
 		}

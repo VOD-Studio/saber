@@ -18,7 +18,7 @@ ai:
   enabled: true
   default_model: podlink-responses.gpt-5.6-sol
   media_model: "" # 带图片消息使用的多模态模型（provider.model），留空则走 default_model
-  max_tokens: 8192
+  max_tokens: 8192 # 每次生成预算；0 表示不发送输出上限
   temperature: 0.7
   reasoning_effort: ""
   request_timeout_seconds: 120
@@ -40,7 +40,7 @@ ai:
 ```
 
 - 模型 ID 为 `提供商.模型名`，模型名可以包含点。`api` 支持 `openai-completions` 和 `openai-responses`，默认是前者；不支持 `anthropic-messages`。
-- `max_tokens` 是每次请求的输出预算，不是模型上下文窗口或能力上限。模型值覆盖全局值；省略或设为 0 时继承。备用模型也使用自己的预算。
+- `max_tokens` 是每次请求的输出预算，不是模型上下文窗口或能力上限。模型值覆盖全局值；模型省略或设为 0 时继承全局。全局设为 0 表示不发送输出上限（`max_output_tokens`/`max_tokens` 字段直接省略，交由模型或上游默认），任务仍按实际用量记账，超过 `agent.budget.max_total_tokens` 后拒绝后续请求。备用模型也使用自己的预算。
 - `temperature` 的模型值覆盖全局值，显式 0 不等于省略。Responses 仅在思考等级为 `none` 时发送温度。
 - 思考等级：TUI 本轮选择 > 模型/别名 > 提供商 > AI 全局；省略或空字符串表示继承。全部为空时使用上游默认。等级由对应模型决定，Saber 原样传递，不自动降级。
 - `request_timeout_seconds` 是单次 HTTP 请求的总时限，包含等待与流式读取。模型可覆盖全局值。它独立于整个任务的时限。
@@ -94,7 +94,7 @@ agent:
 
 `max_rounds` 是硬上限，包含最终回答；默认 40。`timeout_seconds` 覆盖整次任务的模型请求、重试等待与工具执行，不会被预算追加动态延长。`execution.timeout_seconds` 单独限制一次前台执行工具调用。
 
-`budget.enabled` 开启自适应轮数：到达 `initial_rounds`（0 表示 `min(5, max_rounds)`）后，程序先做确定性否决（取消/截止、用量不足、三次同名同参数且实质输出相同），再用主模型做一次无工具评估；只有程序决定才按 `extension_rounds` 追加，封顶 `max_rounds`。`max_total_tokens` 是任务级保守用量上限，覆盖主请求、重试、摘要和评估；`admit` 在真实 HTTP 请求前收紧输出预算，无 usage 时按输入/输出字节估算。关闭自适应时仍按 `max_rounds` 固定执行并遵守用量上限。
+`budget.enabled` 开启自适应轮数：到达 `initial_rounds`（0 表示 `min(5, max_rounds)`）后，程序先做确定性否决（取消/截止、用量不足、三次同名同参数且实质输出相同），再用主模型做一次无工具评估；只有程序决定才按 `extension_rounds` 追加，封顶 `max_rounds`。`max_total_tokens` 是任务级保守用量上限，覆盖主请求、重试、摘要和评估；`admit` 在真实 HTTP 请求前收紧输出预算（全局 `max_tokens: 0` 时不发送输出上限，只预留输入，实际用量照常记账），无 usage 时按输入/输出字节估算。关闭自适应时仍按 `max_rounds` 固定执行并遵守用量上限。
 
 `max_rounds > 100` 会提示成本风险，默认 40 不告警。
 
