@@ -355,3 +355,87 @@ func TestSchedules_ScheduledMemoryScope(t *testing.T) {
 	_, got = svc.scheduledMemoryRequest(chat.WithIdentity(ctx, dm), chat.Message{Session: dm.Session, ID: "$x", SenderID: "@bob:test", Direct: true, Text: "x"}, req)
 	require.Empty(t, got.RuntimeContext)
 }
+
+// 没有执行授权的用户也必须能通过模型调用 saber_schedule 创建纯聊天计划；
+// 计划是否申请执行授权仍由创建时冻结的工具集合决定，不因工具可见而提升权限。
+func TestPrepareTools_ScheduleVisibleWithoutExecutionGrant(t *testing.T) {
+	var mu sync.Mutex
+	var advertised [][]string
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req agent.Request
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		last := req.Messages[len(req.Messages)-1]
+		answer := map[string]any{"role": "assistant", "content": "已完成"}
+		finish := "stop"
+		if last.Role != openai.ChatMessageRoleTool {
+			mu.Lock()
+			advertised = append(advertised, toolNames(req.Tools))
+			mu.Unlock()
+			goal := "每天提醒喝水"
+			if strings.Contains(last.Content, "目录") {
+				goal = "运行 ls 并汇报目录"
+			}
+			answer = map[string]any{"role": "assistant", "tool_calls": []openai.ToolCall{{ID: "schedule", Type: openai.ToolTypeFunction,
+				Function: openai.FunctionCall{Name: "saber_schedule", Arguments: fmt.Sprintf(`{"action":"create","goal":%q,"delivery":"silent","spec":{"kind":"every","timezone":"UTC","every":"24h"}}`, goal)}}}}
+			finish = "tool_calls"
+		}
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": answer, "finish_reason": finish}}}))
+	}))
+	defer model.Close()
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled, cfg.Agent.StreamEnabled = true, false
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: model.URL, APIKey: "test"}}
+	cfg.AI.DefaultModel = "openai.local"
+	cfg.AI.SystemPrompt = "system"
+	svc, err := NewService(&cfg)
+	require.NoError(t, err)
+	defer svc.Stop()
+	workdir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	execCfg := config.ExecutionConfig{Enabled: true, Backend: "local", LogDir: t.TempDir(), Workspaces: map[string]config.WorkspaceConfig{"project": {Path: workdir}}, Grants: []config.ExecutionGrant{{Platform: "matrix", Account: "@bot:test", Room: "!room:test", Users: []string{"@alice:test"}, Workspace: "project", Tools: []string{"read_file"}}}}
+	svc.executor, err = execution.New(execCfg, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, svc.EnableTasks(filepath.Join(t.TempDir(), "tasks.db")))
+	require.NoError(t, svc.RegisterTaskDelivery("matrix", &silentAdapter{}))
+
+	session := chat.Session{Platform: "matrix", Account: "@bot:test", Conversation: "!room:test"}
+	bob := chat.Identity{Session: session, SenderID: "@bob:test"}
+	tools, ok := svc.toolExecutor.PrepareTools(chat.WithIdentity(context.Background(), bob))
+	require.True(t, ok)
+	require.Contains(t, toolNames(tools), "saber_schedule")
+	require.NotContains(t, toolNames(tools), "read_file", "无授权用户不应看到执行工具")
+
+	// 真实运行任务：模型拿到 saber_schedule 才能通过运行时校验并创建计划。
+	for eventID, text := range map[string]string{"$bob-tool": "每天提醒喝水", "$bob-exec": "运行 ls 并汇报目录"} {
+		msg := chat.Message{Session: session, ID: eventID, SenderID: bob.SenderID, Text: text}
+		_, err = svc.tasks.Submit(context.Background(), msg, svc.taskDir, agent.Request{
+			Model: cfg.AI.DefaultModel, Messages: []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: text}},
+		})
+		require.NoError(t, err)
+	}
+	require.Eventually(t, func() bool {
+		plans, listErr := svc.tasks.ListSchedules(context.Background(), session)
+		return listErr == nil && len(plans) == 2
+	}, 10*time.Second, 20*time.Millisecond)
+	plans, err := svc.tasks.ListSchedules(context.Background(), session)
+	require.NoError(t, err)
+	require.Len(t, plans, 2)
+	for _, plan := range plans {
+		require.False(t, plan.RequiresExecution, "无授权用户的计划不得申请执行授权")
+		require.Equal(t, "silent", plan.Delivery)
+		require.Equal(t, svc.taskDir, plan.WorkDir)
+	}
+	mu.Lock()
+	require.NotEmpty(t, advertised)
+	for _, names := range advertised {
+		require.Contains(t, names, "saber_schedule")
+		require.NotContains(t, names, "exec")
+		require.NotContains(t, names, "read_file")
+	}
+	mu.Unlock()
+
+	// 即便以后获得授权，纯聊天计划运行时仍只保留聊天工具。
+	grantedCtx := execution.WithTask(chat.WithIdentity(context.Background(), chat.Identity{Session: session, SenderID: "@alice:test"}), 1, workdir)
+	require.True(t, scheduleNeedsExecution(svc.executor.Tools(grantedCtx)))
+	require.NotContains(t, toolNames(filterChatTools(append(tools, svc.executor.Tools(grantedCtx)...))), "exec")
+}

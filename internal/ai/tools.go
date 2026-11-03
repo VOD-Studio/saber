@@ -141,10 +141,11 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 	}
 	if te.service.tasks != nil {
 		tools = append(tools, taskTool())
-		if identity, ok := chat.IdentityFromContext(ctx); ok && te.service.executor != nil {
-			if _, err := te.service.executor.Workspace(identity); err == nil {
-				tools = append(tools, scheduleTool())
-			}
+		// 计划工具本身不产生外部副作用，只要求可信身份即可可见；创建计划时
+		// scheduleOperation 会按当前授权重新收集工具并冻结 RequiresExecution，
+		// 没有执行授权的用户只能得到纯聊天计划。
+		if _, ok := chat.IdentityFromContext(ctx); ok {
+			tools = append(tools, scheduleTool())
 		}
 	}
 	if te.service.memory != nil {
