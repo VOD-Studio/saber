@@ -43,6 +43,8 @@ func (s *Service) runAgent(ctx context.Context, req agent.Request, emit func(age
 			}
 			if result, ok := value.(execution.Result); ok {
 				output.IsError = result.ExitCode != 0 || result.Error != ""
+				output.OutputID = result.OutputID
+				output.Structured = true
 			}
 			return output, err
 		},

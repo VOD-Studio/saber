@@ -225,6 +225,7 @@ func (r Runtime) callTool(ctx context.Context, call openai.ToolCall, allowed map
 			}
 		}
 	}
+	record.OutputID = output.OutputID
 	var data []byte
 	if err != nil {
 		data = errorContent(record.ErrorCode, err.Error())
@@ -237,9 +238,28 @@ func (r Runtime) callTool(ctx context.Context, call openai.ToolCall, allowed map
 			data = errorContent(record.ErrorCode, string(data))
 		}
 	}
-	record.OriginalBytes = len(data)
+	originalBytes := len(data)
+	budgetError := false
+	if output.Structured && err == nil && !output.IsError && originalBytes > limit {
+		// 结构化结果超预算时用可回读句柄替代正文，绝不返回被截断的 JSON。
+		budgetError = true
+		if output.OutputID == "" {
+			record.ErrorCode = "tool_result_exceeds_context_budget"
+			data = []byte(`{"ok":false,"error":{"code":"tool_result_exceeds_context_budget","message":"use output_id"}}`)
+		} else {
+			fallback, marshalErr := json.Marshal(map[string]string{"error": "tool_result_exceeds_context_budget", "output_id": output.OutputID})
+			if marshalErr != nil || len(fallback) > limit {
+				record.ErrorCode = "tool_result_exceeds_context_budget"
+				data = []byte(`{"ok":false,"error":{"code":"tool_result_exceeds_context_budget","message":"use output_id"}}`)
+			} else {
+				data = fallback
+				record.Truncated = true
+			}
+		}
+	}
+	record.OriginalBytes = originalBytes
 	record.Content = string(data)
-	if len(data) > limit {
+	if len(data) > limit && !budgetError {
 		suffix := fmt.Sprintf("\n[truncated: original_bytes=%d]", len(data))
 		end := limit - len(suffix)
 		for end > 0 && !utf8.Valid(data[:end]) {

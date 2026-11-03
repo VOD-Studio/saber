@@ -159,6 +159,35 @@ func (m *Manager) Cancel(ctx context.Context, identity chat.Identity, taskID int
 	return m.Get(ctx, identity.Session, taskID)
 }
 
+// AuthorizeOutput 校验输出句柄属于当前任务或其祖先，并要求调用者为源任务发起人或本群任务管理员。
+// 不接受仅凭相同房间读取其他成员任务日志。
+func (m *Manager) AuthorizeOutput(ctx context.Context, identity chat.Identity, currentID, sourceID int64) error {
+	if currentID <= 0 || sourceID <= 0 {
+		return errors.New("output access requires a persistent task")
+	}
+	if _, err := m.Get(ctx, identity.Session, currentID); err != nil {
+		return err
+	}
+	var ancestor bool
+	err := m.store.db.QueryRowContext(ctx, `WITH RECURSIVE chain(id) AS (
+		SELECT ? UNION ALL SELECT l.parent_id FROM task_links l JOIN chain c ON l.task_id=c.id
+	) SELECT EXISTS(SELECT 1 FROM chain WHERE id=?)`, currentID, sourceID).Scan(&ancestor)
+	if err != nil {
+		return err
+	}
+	if !ancestor {
+		return errors.New("output belongs to an unrelated task")
+	}
+	source, err := m.Get(ctx, identity.Session, sourceID)
+	if err != nil {
+		return err
+	}
+	if !m.CanManage(identity, source.Message.SenderID) {
+		return errors.New("只有源任务发起人或本群任务管理员可以读取该输出")
+	}
+	return nil
+}
+
 // Events 返回同群可见的持久化执行记录，包括崩溃前已派发的工具。
 func (m *Manager) Events(ctx context.Context, session chat.Session, taskID int64) (records []string, err error) {
 	if _, err := m.Get(ctx, session, taskID); err != nil {

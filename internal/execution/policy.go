@@ -26,6 +26,10 @@ type Executor struct {
 	owner   string
 	admins  map[string]bool
 	blocked sync.Map
+	// activeOutputs 记录仍在写入的归档句柄；读取到当前末尾时用 caught_up 区分。
+	activeOutputs sync.Map
+	outputMu      sync.RWMutex
+	outputAuth    func(context.Context, int64) error
 }
 
 type scope struct {
@@ -61,7 +65,7 @@ func (e *Executor) grant(identity chat.Identity) (config.ExecutionGrant, bool) {
 
 // LocalTool 判断名称是否属于本地执行工具保留字。
 func LocalTool(name string) bool {
-	return slices.Contains([]string{"exec", "read_file", "list_files", "write_file", "apply_patch"}, name)
+	return slices.Contains([]string{"exec", "read_file", "list_files", "write_file", "apply_patch", "read_output"}, name)
 }
 
 // New 验证并冻结权限配置，拒绝挂载包含机器人私有数据的工作区。

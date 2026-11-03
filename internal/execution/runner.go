@@ -30,10 +30,14 @@ type Result struct {
 	ExitCode int `json:"exit_code"`
 	// Summary 最多包含前 8 KiB 输出。
 	Summary string `json:"summary"`
-	// LogPath 指向工作区外的完整输出文件。
+	// LogPath 指向工作区外的完整输出文件，仅用于内部投递，不接受模型指定路径。
 	LogPath string `json:"log_path"`
+	// OutputID 是可按字节游标回读的不可变日志句柄。
+	OutputID string `json:"output_id,omitempty"`
 	// Artifact 是显式请求交付的不可变文件快照。
 	Artifact string `json:"artifact,omitempty"`
+	// Data 保存结构化工具结果，摘要不重复正文。
+	Data any `json:"data,omitempty"`
 	// Error 是启动、取消、超时或存储故障，不包含环境变量。
 	Error string `json:"error,omitempty"`
 }
@@ -122,6 +126,10 @@ func (e *Executor) Run(ctx context.Context, tool string, args map[string]any) (r
 	if err = validateArgs(tool, args); err != nil {
 		return result, err
 	}
+	if tool == "read_output" {
+		// 归档读取不需要容器或挂载检查，权限由任务祖先关系单独校验。
+		return e.ReadOutput(ctx, args)
+	}
 	identity, _ := chat.IdentityFromContext(ctx)
 	grant, _ := e.grant(identity)
 	w := e.cfg.Workspaces[grant.Workspace]
@@ -140,19 +148,18 @@ func (e *Executor) Run(ctx context.Context, tool string, args map[string]any) (r
 	if len(data) > 4*1024*1024 {
 		return result, errors.New("tool input exceeds 4 MiB")
 	}
-	dir := filepath.Join(e.cfg.LogDir, "task-"+strconv.FormatInt(run.id, 10))
-	if err = os.MkdirAll(dir, 0700); err != nil {
-		return result, err
-	}
-	log, err := os.CreateTemp(dir, "output-*.log")
+	archive, err := e.openOutput(run.id)
 	if err != nil {
 		return result, err
 	}
-	result.LogPath = log.Name()
+	dir := filepath.Dir(archive.Path)
+	log := archive.file
+	result.LogPath = archive.Path
+	result.OutputID = archive.ID
 	writer := &archiveWriter{file: log}
 	defer func() {
-		err = errors.Join(err, log.Close())
-		result.Summary = strings.ToValidUTF8(writer.summary.String(), "�")
+		err = errors.Join(err, archive.close(e))
+		result.Summary = strings.ToValidUTF8(writer.summary.String(), "")
 		if err != nil {
 			result.Error = err.Error()
 		}
@@ -289,7 +296,7 @@ func (e *Executor) Artifacts(taskID int64) ([]Artifact, error) {
 }
 
 func validateArgs(tool string, args map[string]any) error {
-	allowed := map[string][]string{"exec": {"command"}, "read_file": {"path", "deliver"}, "list_files": {"path"}, "write_file": {"path", "content"}, "apply_patch": {"path", "edits"}}
+	allowed := map[string][]string{"exec": {"command"}, "read_file": {"path", "deliver"}, "list_files": {"path"}, "write_file": {"path", "content"}, "apply_patch": {"path", "edits"}, "read_output": {"output_id", "offset", "limit"}}
 	for key := range args {
 		found := false
 		for _, a := range allowed[tool] {
@@ -308,6 +315,23 @@ func validateArgs(tool string, args map[string]any) error {
 	if tool == "exec" {
 		if !text("command", false) {
 			return errors.New("command is required")
+		}
+		return nil
+	}
+	if tool == "read_output" {
+		if !text("output_id", false) {
+			return errors.New("output_id is required")
+		}
+		if value, ok := args["offset"]; ok {
+			if _, valid := intArgument(value); !valid {
+				return errors.New("offset must be a non-negative integer")
+			}
+		}
+		if value, ok := args["limit"]; ok {
+			limit, valid := intArgument(value)
+			if !valid || limit < outputPageMin || limit > outputPageMax {
+				return fmt.Errorf("limit must be between %d and %d", outputPageMin, outputPageMax)
+			}
 		}
 		return nil
 	}

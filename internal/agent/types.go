@@ -87,6 +87,10 @@ type ToolOutput struct {
 	Value any
 	// IsError 表示工具协议报告了失败，即使 Go error 为空。
 	IsError bool
+	// OutputID 是可按字节游标回读的结构化输出句柄。
+	OutputID string
+	// Structured 表示 Value 是结构化结果，超预算时应改用可回读句柄。
+	Structured bool
 }
 
 // ModelFunc 取得一轮响应，可通过 emit 发出文本和尝试事件。
@@ -118,6 +122,8 @@ type ToolRecord struct {
 	ErrorCode string
 	// OriginalBytes 是截断前的内容字节数。
 	OriginalBytes int
+	// OutputID 是结构化结果的回读句柄，普通工具为空。
+	OutputID string
 	// Truncated 表示结果被长度限制截断。
 	Truncated bool
 	// Duration 是解析和执行耗时。

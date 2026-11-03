@@ -109,6 +109,15 @@ func (s *Service) EnableTasks(path string) error {
 		return err
 	}
 	s.tasks, s.taskDir = manager, dir
+	if s.executor != nil {
+		s.executor.SetOutputAuthorizer(func(ctx context.Context, sourceID int64) error {
+			identity, ok := chat.IdentityFromContext(ctx)
+			if !ok {
+				return errors.New("output access requires trusted identity")
+			}
+			return manager.AuthorizeOutput(ctx, identity, task.ID(ctx), sourceID)
+		})
+	}
 	close(ready)
 	if s.memory != nil {
 		_ = s.syncHistoryProjections(context.Background())
