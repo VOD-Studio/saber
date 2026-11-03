@@ -50,9 +50,11 @@ func TestInitServices_RegistersVioletWithoutMatrix(t *testing.T) {
 	_, ok = state.services.platforms.Lookup("matrix")
 	require.False(t, ok, "Matrix 关闭时不应注册其平台接入端")
 
+	// 本机终端入口默认开启且注册在最先，violet 紧随其后。
 	enabled := state.services.platforms.Enabled(cfg)
-	require.Len(t, enabled, 1)
-	require.Equal(t, "violet", enabled[0].Name())
+	require.Len(t, enabled, 2)
+	require.Equal(t, terminalPlatformName, enabled[0].Name())
+	require.Equal(t, "violet", enabled[1].Name())
 	adapter := memory.New("bot", chat.Capabilities{}, state.handleChat)
 	_, err := adapter.Receive(context.Background(), chat.Message{Session: chat.Session{Conversation: "room"}, ID: "source", SenderID: "user", Text: "/task list"})
 	require.NoError(t, err)
