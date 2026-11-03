@@ -338,6 +338,18 @@ func (s *appState) initServices() error {
 			}
 			svc.platforms.Register(slackplatform.New(s.cfg))
 		}
+		if err := s.initMemoryService(); err != nil {
+			return err
+		}
+		if svc.memoryService != nil {
+			// 记忆与技能命令不依赖模型；AI 关闭时也装配服务，保证 /memory 与 /skill
+			// 的文件导入导出可用。模型请求仍由 IsEnabled 拒绝。
+			memoryAI, err := ai.NewService(s.cfg, ai.WithMemory(svc.memoryService))
+			if err != nil {
+				return fmt.Errorf("AI服务初始化失败: %w", err)
+			}
+			svc.aiService = memoryAI
+		}
 		return s.buildCommands()
 	}
 
@@ -363,20 +375,6 @@ func (s *appState) initServices() error {
 	}
 
 	configDir := filepath.Dir(s.flags.ConfigPath)
-	// 长期记忆默认关闭；群空间写权限复用命令授权配置，不跟随模型参数。
-	if s.cfg.Memory.Enabled {
-		memorySvc, err := memory.Open(filepath.Join(configDir, "memory.db"), memory.Config{
-			MaxChars:       s.cfg.Memory.MaxChars,
-			InjectBytes:    s.cfg.Memory.InjectMaxBytes,
-			GroupWriter:    s.cfg.Commands.CanWriteSession,
-			SkillDirs:      s.cfg.Memory.Skills.Dirs,
-			SkillExportDir: s.cfg.Memory.Skills.ExportDir,
-		})
-		if err != nil {
-			return fmt.Errorf("长期记忆初始化失败: %w", err)
-		}
-		svc.memoryService = memorySvc
-	}
 
 	aiService, err := ai.NewService(s.cfg, ai.WithMatrix(svc.commandService, svc.mediaService), ai.WithMCP(svc.mcpManager), ai.WithMemory(svc.memoryService))
 	if err != nil {
@@ -452,6 +450,29 @@ func (s *appState) initServices() error {
 	}
 
 	return s.buildCommands()
+}
+
+// initMemoryService 按配置打开长期记忆库；关闭时保持 nil，命令与工具不注册。
+//
+// 它与 AI 是否启用无关：/skill files 与 /skill import 不调用模型，
+// AI 关闭时仍应可用。
+func (s *appState) initMemoryService() error {
+	if !s.cfg.Memory.Enabled {
+		return nil
+	}
+	configDir := filepath.Dir(s.flags.ConfigPath)
+	memorySvc, err := memory.Open(filepath.Join(configDir, "memory.db"), memory.Config{
+		MaxChars:       s.cfg.Memory.MaxChars,
+		InjectBytes:    s.cfg.Memory.InjectMaxBytes,
+		GroupWriter:    s.cfg.Commands.CanWriteSession,
+		SkillDirs:      s.cfg.Memory.Skills.Dirs,
+		SkillExportDir: s.cfg.Memory.Skills.ExportDir,
+	})
+	if err != nil {
+		return fmt.Errorf("长期记忆初始化失败: %w", err)
+	}
+	s.services.memoryService = memorySvc
+	return nil
 }
 
 // registerTerminalPlatform 把本机 HTTP 入口登记为平台。
