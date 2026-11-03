@@ -130,6 +130,10 @@ func (e *Executor) Run(ctx context.Context, tool string, args map[string]any) (r
 		// 归档读取不需要容器或挂载检查，权限由任务祖先关系单独校验。
 		return e.ReadOutput(ctx, args)
 	}
+	if tool != "exec" {
+		// 文件工具使用共享 Go 实现，两个后端产生相同的分页与错误语义。
+		return e.runFileTool(ctx, tool, args, run)
+	}
 	identity, _ := chat.IdentityFromContext(ctx)
 	grant, _ := e.grant(identity)
 	w := e.cfg.Workspaces[grant.Workspace]
@@ -296,7 +300,16 @@ func (e *Executor) Artifacts(taskID int64) ([]Artifact, error) {
 }
 
 func validateArgs(tool string, args map[string]any) error {
-	allowed := map[string][]string{"exec": {"command"}, "read_file": {"path", "deliver"}, "list_files": {"path"}, "write_file": {"path", "content"}, "apply_patch": {"path", "edits"}, "read_output": {"output_id", "offset", "limit"}}
+	allowed := map[string][]string{
+		"exec":         {"command"},
+		"read_output":  {"output_id", "offset", "limit"},
+		"read_file":    {"path", "offset", "limit", "byte_offset", "deliver"},
+		"list_files":   {"path"},
+		"write_file":   {"path", "content"},
+		"apply_patch":  {"path", "edits"},
+		"search_files": {"pattern", "path", "file_glob", "case_sensitive", "offset", "limit", "include_hidden"},
+		"glob_files":   {"pattern", "path", "offset", "limit", "include_hidden"},
+	}
 	for key := range args {
 		found := false
 		for _, a := range allowed[tool] {
@@ -322,16 +335,58 @@ func validateArgs(tool string, args map[string]any) error {
 		if !text("output_id", false) {
 			return errors.New("output_id is required")
 		}
-		if value, ok := args["offset"]; ok {
-			if _, valid := intArgument(value); !valid {
-				return errors.New("offset must be a non-negative integer")
+		if err := validateInteger(args, "offset", 0, 0); err != nil {
+			return err
+		}
+		if err := validateInteger(args, "limit", outputPageMin, outputPageMax); err != nil {
+			return err
+		}
+		return nil
+	}
+	if tool == "search_files" || tool == "glob_files" {
+		if !text("pattern", false) {
+			return errors.New("pattern is required")
+		}
+		if len(args["pattern"].(string)) > 512 {
+			return errors.New("pattern exceeds 512 bytes")
+		}
+		if value, ok := args["path"]; ok {
+			path, valid := value.(string)
+			if !valid {
+				return errors.New("path must be a string")
+			}
+			if err := validatePath(path, true); err != nil {
+				return err
 			}
 		}
-		if value, ok := args["limit"]; ok {
-			limit, valid := intArgument(value)
-			if !valid || limit < outputPageMin || limit > outputPageMax {
-				return fmt.Errorf("limit must be between %d and %d", outputPageMin, outputPageMax)
+		if tool == "search_files" {
+			if value, ok := args["file_glob"]; ok {
+				if glob, valid := value.(string); !valid {
+					return errors.New("file_glob must be a string")
+				} else if _, err := splitGlob(glob); err != nil {
+					return err
+				}
 			}
+			if value, ok := args["case_sensitive"]; ok {
+				if _, valid := value.(bool); !valid {
+					return errors.New("case_sensitive must be boolean")
+				}
+			}
+		}
+		if value, ok := args["include_hidden"]; ok {
+			if _, valid := value.(bool); !valid {
+				return errors.New("include_hidden must be boolean")
+			}
+		}
+		if err := validateInteger(args, "offset", 0, 0); err != nil {
+			return err
+		}
+		maxLimit := searchLimitMax
+		if tool == "glob_files" {
+			maxLimit = globLimitMax
+		}
+		if err := validateInteger(args, "limit", 1, maxLimit); err != nil {
+			return err
 		}
 		return nil
 	}
@@ -341,20 +396,23 @@ func validateArgs(tool string, args map[string]any) error {
 	if !text("path", false) {
 		return errors.New("path is required")
 	}
-	p := args["path"].(string)
-	if tool != "list_files" || p != "." {
-		if strings.HasPrefix(p, "/") || strings.Contains(p, "\\") {
-			return errors.New("path must be relative")
-		}
-		for _, part := range strings.Split(p, "/") {
-			if part == "" || part == "." || part == ".." {
-				return errors.New("invalid path component")
+	if err := validatePath(args["path"].(string), tool == "list_files"); err != nil {
+		return err
+	}
+	if tool == "read_file" {
+		if args["deliver"] != nil {
+			if _, ok := args["deliver"].(bool); !ok {
+				return errors.New("deliver must be boolean")
 			}
 		}
-	}
-	if tool == "read_file" && args["deliver"] != nil {
-		if _, ok := args["deliver"].(bool); !ok {
-			return errors.New("deliver must be boolean")
+		if err := validateInteger(args, "offset", 0, 0); err != nil {
+			return err
+		}
+		if err := validateInteger(args, "limit", 1, readLimitMax); err != nil {
+			return err
+		}
+		if err := validateInteger(args, "byte_offset", 0, 0); err != nil {
+			return err
 		}
 	}
 	if tool == "write_file" && !text("content", true) {
@@ -377,6 +435,44 @@ func validateArgs(tool string, args map[string]any) error {
 			if _, ok = e["new"].(string); !ok {
 				return errors.New("new must be a string")
 			}
+		}
+	}
+	return nil
+}
+
+// validateInteger 校验可选整数参数；max 为 0 表示只要求非负。
+func validateInteger(args map[string]any, key string, minValue, maxValue int) error {
+	value, ok := args[key]
+	if !ok {
+		return nil
+	}
+	number, valid := intArgument(value)
+	if !valid {
+		return fmt.Errorf("%s must be an integer", key)
+	}
+	if number < minValue || maxValue > 0 && number > maxValue {
+		if maxValue > 0 {
+			return fmt.Errorf("%s must be between %d and %d", key, minValue, maxValue)
+		}
+		return fmt.Errorf("%s must be at least %d", key, minValue)
+	}
+	return nil
+}
+
+// validatePath 只接受工作区内相对路径；目录参数额外允许 "."。
+func validatePath(p string, allowDot bool) error {
+	if p == "" {
+		return errors.New("path is required")
+	}
+	if allowDot && p == "." {
+		return nil
+	}
+	if strings.HasPrefix(p, "/") || strings.Contains(p, "\\") {
+		return errors.New("path must be relative")
+	}
+	for _, part := range strings.Split(p, "/") {
+		if part == "" || part == "." || part == ".." {
+			return errors.New("invalid path component")
 		}
 	}
 	return nil

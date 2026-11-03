@@ -16,12 +16,14 @@ func (e *Executor) Tools(ctx context.Context) []openai.Tool {
 		properties        map[string]any
 		required          []string
 	}{
-		{"exec", "在断网容器的 /workspace 中运行 shell 命令。返回退出码、输出摘要和完整日志位置。非零退出后可调整命令继续操作。", map[string]any{"command": text("要执行的 shell 命令")}, []string{"command"}},
+		{"exec", "在授权工作区中运行 shell 命令。返回退出码、输出摘要和可用 read_output 回读的 output_id；非零退出后先核查再调整命令。", map[string]any{"command": text("要执行的 shell 命令")}, []string{"command"}},
 		{"read_output", "按原始字节游标分页回读工具输出归档。用工具返回的 output_id，不要猜测路径；offset 为 0-based 字节位置，limit 为 4..4096。", map[string]any{"output_id": text("工具返回的输出句柄"), "offset": map[string]any{"type": "integer", "minimum": 0}, "limit": map[string]any{"type": "integer", "minimum": 4, "maximum": 4096}}, []string{"output_id"}},
-		{"read_file", "读取工作区内文件。deliver=true 时保存不可变快照，任务完成后作为文件发送到原群消息。", map[string]any{"path": text("相对 /workspace 的文件路径"), "deliver": map[string]any{"type": "boolean"}}, []string{"path"}},
+		{"read_file", "分页读取工作区文本文件。offset 为 0-based 行号，limit 为 1..1000（默认 200），单页正文最多 4096 字节；超长行用返回的 next_byte_offset 续读。deliver=true 时改为保存并交付完整文件快照。", map[string]any{"path": text("相对工作区的文件路径"), "offset": map[string]any{"type": "integer", "minimum": 0}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 1000}, "byte_offset": map[string]any{"type": "integer", "minimum": 0}, "deliver": map[string]any{"type": "boolean"}}, []string{"path"}},
 		{"list_files", "列出工作区指定目录的直属文件，不跟随符号链接。", map[string]any{"path": text("相对路径，默认 .")}, nil},
 		{"write_file", "创建或覆盖工作区文件。父目录必须已存在；需要交付时随后 read_file(deliver=true)。", map[string]any{"path": text("相对文件路径"), "content": text("完整文件内容")}, []string{"path", "content"}},
 		{"apply_patch", "精确修改单个文件。edits 中每项 old 必须只出现一次，全部验证成功才写回；失败后先读文件再调整。", map[string]any{"path": text("相对文件路径"), "edits": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "object", "properties": map[string]any{"old": text("唯一匹配的原文本"), "new": text("替换文本")}, "required": []string{"old", "new"}, "additionalProperties": false}}}, []string{"path", "edits"}},
+		{"search_files", "按正则搜索工作区文件内容。默认忽略隐藏项和 .git；返回 path、1-based line 与命中文本，并用 next_offset 分页。二进制、超大文件和不可读项计入 skipped。", map[string]any{"pattern": text("Go RE2 正则，最多 512 字节"), "path": text("相对目录，默认 ."), "file_glob": text("文件 glob，默认 **"), "case_sensitive": map[string]any{"type": "boolean"}, "offset": map[string]any{"type": "integer", "minimum": 0}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 200}, "include_hidden": map[string]any{"type": "boolean"}}, []string{"pattern"}},
+		{"glob_files", "按路径 glob 查找工作区条目，支持 * ? [] 与匹配零到多个路径段的 **。默认忽略隐藏项和 .git；用 next_offset 分页。", map[string]any{"pattern": text("路径 glob，例如 **/*.go"), "path": text("相对目录，默认 ."), "offset": map[string]any{"type": "integer", "minimum": 0}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 500}, "include_hidden": map[string]any{"type": "boolean"}}, []string{"pattern"}},
 	}
 	var tools []openai.Tool
 	for _, d := range definitions {
