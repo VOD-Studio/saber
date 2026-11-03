@@ -81,7 +81,7 @@ func (e *Executor) grant(identity chat.Identity) (config.ExecutionGrant, bool) {
 
 // LocalTool 判断名称是否属于本地执行工具保留字。
 func LocalTool(name string) bool {
-	return slices.Contains([]string{"exec", "read_file", "list_files", "write_file", "apply_patch", "read_output", "search_files", "glob_files", "process"}, name)
+	return slices.Contains([]string{"exec", "read_file", "list_files", "write_file", "apply_patch", "read_output", "search_files", "glob_files", "process", "snapshot"}, name)
 }
 
 // ValidateConfig 归一化执行配置并校验授权、路径与后端约束；不创建目录。
@@ -438,7 +438,12 @@ func (e *Executor) Check(ctx context.Context, tool string) error {
 		return errors.New("workspace quarantined after container cleanup failure")
 	}
 	grant, _ := e.grant(identity)
-	if !slices.Contains(grant.Tools, tool) {
+	authorized := slices.Contains(grant.Tools, tool)
+	// 快照工具不单独授权，只复用已有写入能力，不扩大任何权限。
+	if tool == "snapshot" {
+		authorized = slices.Contains(grant.Tools, "write_file") || slices.Contains(grant.Tools, "apply_patch")
+	}
+	if !authorized {
 		return fmt.Errorf("tool %q is not authorized", tool)
 	}
 	if !LocalTool(tool) {

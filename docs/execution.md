@@ -15,7 +15,8 @@
 - `process {action,...}`：`start|list|status|wait|logs|kill` 管理本任务后台作业；每任务最多 8 个运行中作业，作业 ID 为 `p_<32hex>`，只能由当前任务访问。
 - `read_file {path, offset?, limit?, byte_offset?, deliver?}`：分页读取文本；`offset` 是 0-based 行号，`limit` 为 1..1000（默认 200），单页正文最多 4096 字节。超长行用返回的 `next_byte_offset` 续读；二进制或非法 UTF-8 会被拒绝。`deliver=true` 改为保存完整文件快照并交付，不能与分页参数同时使用。
 - `list_files {path?}`：列出直属条目，展示链接名称但不跟随。
-- `write_file {path, content}`、`apply_patch {path, edits:[{old,new}]}`：父目录必须存在；补丁要求每处 `old` 唯一匹配后才写回，单文件上限 16 MiB。
+- `write_file {path, content}`、`apply_patch {path, edits:[{old,new}]}`：父目录必须存在；补丁要求每处 `old` 唯一匹配后才写回，单文件上限 16 MiB。两者都会在修改前自动保存编辑前快照。
+- `snapshot {action, snapshot_id?, path?}`：`list` 返回本任务最近 50 条快照摘要（不返回正文）；`rollback` 按 `snapshot_id` 或 `path`（该路径最近一条）恢复。只有持有 `write_file` 或 `apply_patch` 授权时才暴露，不单独授权。回滚覆盖与快照不同的现有内容前，会先为当前内容再存一份快照并返回 `pre_rollback_snapshot_id`，因此回滚本身也可撤销；快照记录的原文件不存在时（`absent`）回滚即删除该文件。
 - `search_files {pattern, path?, file_glob?, case_sensitive?, offset?, limit?, include_hidden?}`：Go RE2 正则搜索文件内容，返回 `path`、1-based `line` 与命中文本；默认跳过隐藏项和 `.git`。
 - `glob_files {pattern, path?, offset?, limit?, include_hidden?}`：按路径段匹配 `* ? []` 与 `**`（匹配零个或多个路径段）。
 - `read_output {output_id, offset?, limit?}`：按原始字节游标回读任何工具或后台作业的输出归档，`limit` 为 4..4096。
@@ -23,6 +24,18 @@
 搜索与 glob 都按字典序深度优先遍历，最多 100000 项、32 层；内容搜索跳过首 8 KiB 含 NUL 或超过 4 MiB 的文件，累计读取上限 64 MiB。触达硬限时返回 `truncated:true`、`eof:false`、`next_offset:null`，应缩小 `path` 或 `file_glob`。搜索/glob 的 `data` 编码后不超过 8 KiB。
 
 所有文件工具共用 Go 实现，两个后端语义一致。工作区路径通过 `os.OpenRoot` 钉住，逐组件拒绝链接；Unix 上以 `O_NOFOLLOW|O_NONBLOCK` 打开后校验普通文件，避免符号链接、FIFO 与末组件替换。`local` 后端不会对整个工作区做挂载节点扫描；Docker 后端在打开执行环境前和每次新命令前检查挂载中的 IPC/设备节点。
+
+## 编辑快照
+
+`write_file` 与 `apply_patch` 在写回前把原文件保存为任务私有快照：`<log_dir>/task-<id>/snapshots/<32hex>.json`，目录 `0700`、文件 `0600`，记录工作区相对路径、SHA-256、原内容（或“文件不存在”）与时间。原文件超过 16 MiB 时拒绝修改，保证快照可完整恢复。
+
+快照目录位于任务日志内，任务进入终态后只要还没删除仍可回滚。`rollback` 校验目标仍是一个普通文件且路径未逃离当前授权工作区；覆盖前先把当前内容再存一份快照，返回的 `pre_rollback_snapshot_id` 可用于回滚这次回滚。快照工具不新增任何权限：没有 `write_file`/`apply_patch` 授权的身份既看不到也调用不了它。
+
+## 上下文文件与 @ 引用
+
+持久任务运行前，Saber 在授权工作目录中按 `AGENTS.md`、`CLAUDE.md`、`.cursorrules`、`CONTRIBUTING.md`、`.github/copilot-instructions.md` 顺序查找约定文件，并向祖先目录扩展，直到包含 `.git` 的 git 根为止；找不到 git 根时只读工作目录本身，避免把宿主无关目录注入模型。结果去重后最多 8 个文件、单文件 64 KiB、合计 128 KiB，非普通文件、符号链接、二进制与非法 UTF-8 跳过，超出上限的正文按 UTF-8 边界截断并标注 `[内容已截断]`。内容以 `<file path="...">…</file>` 追加到本轮系统运行时资料，不写回持久化请求，同一次运行只读一次；没有可信身份或执行授权时完全跳过。
+
+用户消息中的 `@path/to/file` 与 `@"path with space"` 会在任务入库前展开为文件内容，原消息文本保留，追加结果为 `<file path="...">…</file>`。单条消息最多 8 个引用、单文件 32 KiB、合计 64 KiB；路径必须是工作区相对路径，目录、符号链接、二进制、非法 UTF-8、越界路径与超出限额的引用跳过并在文本中说明。`@` 后没有有效路径（例如邮箱地址）时保持原文不变。该能力只在持久任务且身份持有已授权工作区时生效，引用不会逃逸工作区，也不写入共享聊天历史或系统提示配置。
 
 ## 危险命令绊线
 

@@ -31,6 +31,7 @@ func TestValidateArgs_RejectsIdentityKeys(t *testing.T) {
 		"search_files": {"pattern": "TODO"},
 		"glob_files":   {"pattern": "**/*.go"},
 		"process":      {"action": "list"},
+		"snapshot":     {"action": "list"},
 	}
 	identityKeys := []string{"user_id", "room_id", "sender", "owner", "platform", "account", "session"}
 	tools := e.Tools(WithTask(chat.WithIdentity(context.Background(), identity), 1, dir))

@@ -96,6 +96,10 @@ func (s *Service) EnableTasks(path string) error {
 		} else {
 			req = s.augmentMemory(ctx, req)
 		}
+		// 上下文文件只在已授权工作区的持久任务中注入，同一次运行只读取一次。
+		if !(scheduled && !plan.RequiresExecution) {
+			req = s.appendContextFiles(ctx, req)
+		}
 		// 重启恢复时按当前权限重新筛选，旧请求快照不能保留已撤销能力。
 		req.Tools, _ = s.toolExecutor.PrepareTools(ctx)
 		if scheduled && !plan.RequiresExecution {
@@ -247,6 +251,9 @@ func (s *Service) submitTask(ctx context.Context, message chat.Message, req agen
 	if message.ControlText != nil {
 		continuation.Text = *message.ControlText
 	}
+	// @ 引用必须在任务入库前展开；无执行授权或引用无法解析时原文本保持不变。
+	refCtx := chat.WithIdentity(ctx, chat.Identity{Session: message.Session, SenderID: message.SenderID, Direct: message.Direct})
+	continuation = s.expandReferences(refCtx, continuation)
 	req.Messages = append(req.Messages, taskInput(continuation))
 	dir := s.taskDir
 	if s.executor != nil {

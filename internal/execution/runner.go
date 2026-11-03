@@ -225,6 +225,7 @@ func validateArgs(tool string, args map[string]any) error {
 		"search_files": {"pattern", "path", "file_glob", "case_sensitive", "offset", "limit", "include_hidden"},
 		"glob_files":   {"pattern", "path", "offset", "limit", "include_hidden"},
 		"process":      {"action", "command", "id", "offset", "limit", "wait_seconds"},
+		"snapshot":     {"action", "snapshot_id", "path"},
 	}
 	for key := range args {
 		found := false
@@ -249,6 +250,9 @@ func validateArgs(tool string, args map[string]any) error {
 	}
 	if tool == "process" {
 		return validateProcessArgs(args)
+	}
+	if tool == "snapshot" {
+		return validateSnapshotArgs(args)
 	}
 	if tool == "read_output" {
 		if !text("output_id", false) {

@@ -32,7 +32,8 @@ func TestPolicy_TrustedScopeAndSeparateCapabilities(t *testing.T) {
 	require.NoError(t, err)
 	ctx := WithTask(chat.WithIdentity(context.Background(), identity), 42, dir)
 	require.NoError(t, e.Check(ctx, "exec"))
-	require.Len(t, e.Tools(ctx), 5)
+	// exec、read_file、list_files、write_file、apply_patch 加上随写入能力暴露的 snapshot。
+	require.Len(t, e.Tools(ctx), 6)
 	require.NoError(t, e.CheckMCP(ctx, "release", "push"))
 	require.Error(t, e.CheckMCP(ctx, "unknown", "tool"))
 	require.Error(t, e.Check(context.Background(), "exec"))

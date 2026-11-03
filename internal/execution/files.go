@@ -117,6 +117,8 @@ func (e *Executor) runFileTool(ctx context.Context, tool string, args map[string
 		return e.writeFile(args, run)
 	case "apply_patch":
 		return e.applyPatch(args, run)
+	case "snapshot":
+		return e.runSnapshotTool(ctx, args, run)
 	case "search_files":
 		return e.searchFiles(ctx, args, run)
 	case "glob_files":
@@ -485,19 +487,11 @@ func (e *Executor) writeFile(args map[string]any, run scope) (Result, error) {
 		return result, err
 	}
 	defer func() { _ = root.close() }()
-	file, err := root.openFile(path, os.O_WRONLY|os.O_CREATE, 0600)
-	if err != nil {
+	// 先保存原内容，写入失败时仍可用 snapshot 工具回滚。
+	if err = e.snapshotBeforeChange(root, run, path); err != nil {
 		return result, err
 	}
-	if err = file.Truncate(0); err != nil {
-		_ = file.Close()
-		return result, err
-	}
-	if _, err = file.WriteString(content); err != nil {
-		_ = file.Close()
-		return result, err
-	}
-	if err = file.Close(); err != nil {
+	if err = writeWorkspaceFile(root, path, []byte(content)); err != nil {
 		return result, err
 	}
 	result.ExitCode = 0
@@ -545,6 +539,10 @@ func (e *Executor) applyPatch(args map[string]any, run scope) (Result, error) {
 			return result, errors.New("patch old text must match exactly once")
 		}
 		text = strings.Replace(text, old, replacement, 1)
+	}
+	// 验证通过、写回之前保存原内容，避免不可逆编辑。
+	if err = e.snapshotBeforeWriteData(run, path, data); err != nil {
+		return result, err
 	}
 	if err = file.Truncate(0); err != nil {
 		return result, err
