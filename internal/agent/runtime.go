@@ -83,6 +83,13 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 	var led *ledger
 	if limits.MaxTotalTokens > 0 {
 		led = newLedger(limits.MaxTotalTokens)
+		// 嵌套运行（子代理）不能替换 ctx 里的父账本，否则父运行看不到子运行消耗。
+		// 子运行保留自己的上限，并把每笔实际消耗上推给父账本。
+		if existing, ok := AttemptGateFromContext(ctx); ok {
+			if parent, ok := existing.(chargeSink); ok {
+				led.parent = parent
+			}
+		}
 		ctx = WithAttemptGate(ctx, led)
 	}
 	extensions := 0
@@ -90,7 +97,8 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 	defer func() {
 		result.Budget = budgetSnapshot(led, len(result.Rounds), soft, hard, extensions, stopReason)
 		if led != nil {
-			result.Usage = led.reportedUsage()
+			// Result.Usage 只表示主请求用量；摘要与评估用量保留在 Budget 中。
+			result.Usage = led.mainUsage()
 		}
 	}()
 	stop := func(cause error) (Result, error) {

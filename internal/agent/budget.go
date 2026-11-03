@@ -43,6 +43,8 @@ type BudgetStats struct {
 	Extensions      int          `json:"extensions"`
 	AccountedTokens int          `json:"accounted_tokens"`
 	ReportedUsage   openai.Usage `json:"reported_usage"`
+	MainUsage       openai.Usage `json:"main_usage"`
+	AuxUsage        openai.Usage `json:"aux_usage"`
 	SummaryUsage    openai.Usage `json:"summary_usage"`
 	EvaluationUsage openai.Usage `json:"evaluation_usage"`
 	Estimated       bool         `json:"estimated"`
@@ -53,6 +55,17 @@ type BudgetStats struct {
 type AttemptGate interface {
 	Admit(Request) (Request, error)
 	Record(Request, Response)
+}
+
+// bytesPerToken 是预算预留使用的保守比率：4 个 UTF-8 字节视为 1 token。
+// 它只用于请求前的额度预留；真实消耗以提供商返回的 usage 为准。
+const bytesPerToken = 4
+
+// chargeSink 是嵌套运行向父账本上推实际消耗、并读取父账本余额的最小接口。
+// 子运行只上报已完成的消耗，不复制父账本的预留与报告逻辑。
+type chargeSink interface {
+	charge(tokens int, estimated bool, usage openai.Usage, purpose string)
+	remaining() int
 }
 
 type gateKey struct{}
@@ -69,6 +82,7 @@ func AttemptGateFromContext(ctx context.Context) (AttemptGate, bool) {
 }
 
 // ledger 是 Runtime 私有账本，记录预留、实际 charge 与按用途的原始用量。
+// 所有计数都以 token 为单位：预留用估算，记账优先用提供商 usage。
 type ledger struct {
 	mu           sync.Mutex
 	max          int
@@ -76,8 +90,11 @@ type ledger struct {
 	reservations int
 	estimated    bool
 	reported     openai.Usage
+	main         openai.Usage
 	summary      openai.Usage
 	evaluation   openai.Usage
+	// parent 是嵌套运行的父账本；子运行的每笔实际消耗都上推到这里。
+	parent chargeSink
 }
 
 func newLedger(max int) *ledger { return &ledger{max: max} }
@@ -86,16 +103,24 @@ func (l *ledger) Admit(req Request) (Request, error) {
 	if l == nil || l.max <= 0 {
 		return req, nil
 	}
-	estimate := requestInputBytes(req)
+	estimate := estimateInputTokens(req)
+	// 父账本余额只作为额外上限提示，先读后加锁，避免父子账本锁嵌套。
+	parentRemaining := math.MaxInt
+	if l.parent != nil {
+		parentRemaining = l.parent.remaining()
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	remaining := l.max - l.accounted - l.reservations
+	if parentRemaining < remaining {
+		remaining = parentRemaining
+	}
 	if remaining <= 0 {
 		return req, fmt.Errorf("%w: token budget exhausted", ErrBudgetExhausted)
 	}
 	output := req.MaxTokens
 	if estimate >= remaining {
-		return req, fmt.Errorf("%w: input estimate exceeds remaining token budget", ErrBudgetExhausted)
+		return req, fmt.Errorf("%w: estimated input of %d tokens exceeds remaining token budget of %d", ErrBudgetExhausted, estimate, remaining)
 	}
 	// MaxTokens 为 0 表示不发送输出上限：只预留输入，实际用量仍由 Record 记账。
 	// 单次输出无法在请求前封顶，超量只会在后续请求被拒。
@@ -112,29 +137,50 @@ func (l *ledger) Admit(req Request) (Request, error) {
 	return req, nil
 }
 
+// Record 先释放 Admit 为本次请求预留的额度，再记录真实消耗。
+// 释放量按同一估算器与 Admit 返回的 MaxTokens 重算；请求在 Admit 之后被修改时两者
+// 允许不同，此时以重算值为准，reservations 只保证不为负。实际消耗永远记账，
+// 即使超过预留也不回滚已完成的请求，只让后续 Admit 失败。
 func (l *ledger) Record(req Request, response Response) {
 	if l == nil || l.max <= 0 {
 		return
 	}
 	charge, estimated := chargeFor(req, response)
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	reserved := requestInputBytes(req) + req.MaxTokens
-	l.reservations = max(0, l.reservations-reserved)
-	l.accounted += charge
+	l.reservations = max(0, l.reservations-(estimateInputTokens(req)+req.MaxTokens))
+	l.mu.Unlock()
+	l.charge(charge, estimated, response.Usage, req.Purpose)
+}
+
+// charge 记录一笔已在别处预留过的实际消耗，并把同一笔消耗上推给父账本。
+func (l *ledger) charge(tokens int, estimated bool, usage openai.Usage, purpose string) {
+	if l == nil || l.max <= 0 {
+		return
+	}
+	l.mu.Lock()
+	l.accounted += tokens
 	l.estimated = l.estimated || estimated
-	addBudgetUsage(&l.reported, response.Usage)
-	switch req.Purpose {
+	addBudgetUsage(&l.reported, usage)
+	switch purpose {
 	case "summary":
-		addBudgetUsage(&l.summary, response.Usage)
+		addBudgetUsage(&l.summary, usage)
 	case "evaluation":
-		addBudgetUsage(&l.evaluation, response.Usage)
+		addBudgetUsage(&l.evaluation, usage)
+	default:
+		addBudgetUsage(&l.main, usage)
+	}
+	parent := l.parent
+	l.mu.Unlock()
+	if parent != nil {
+		parent.charge(tokens, estimated, usage, purpose)
 	}
 }
 
 func (l *ledger) stats(rounds, soft, hard, extensions int, stopReason string) *BudgetStats {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	aux := l.summary
+	addBudgetUsage(&aux, l.evaluation)
 	return &BudgetStats{
 		RoundsUsed:      rounds,
 		SoftLimit:       soft,
@@ -142,6 +188,8 @@ func (l *ledger) stats(rounds, soft, hard, extensions int, stopReason string) *B
 		Extensions:      extensions,
 		AccountedTokens: l.accounted,
 		ReportedUsage:   l.reported,
+		MainUsage:       l.main,
+		AuxUsage:        aux,
 		SummaryUsage:    l.summary,
 		EvaluationUsage: l.evaluation,
 		Estimated:       l.estimated,
@@ -158,13 +206,14 @@ func (l *ledger) accountedTokens() int {
 	return l.accounted
 }
 
-func (l *ledger) reportedUsage() openai.Usage {
+// mainUsage 只返回主请求用量，摘要与评估单独统计。
+func (l *ledger) mainUsage() openai.Usage {
 	if l == nil {
 		return openai.Usage{}
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.reported
+	return l.main
 }
 
 func budgetSnapshot(led *ledger, rounds, soft, hard, extensions int, reason string) *BudgetStats {
@@ -179,31 +228,107 @@ func (l *ledger) remaining() int {
 		return math.MaxInt
 	}
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.max - l.accounted - l.reservations
+	left := l.max - l.accounted - l.reservations
+	l.mu.Unlock()
+	// 子运行的可用量还受父账本余额限制；父账本先读后释放本账本锁。
+	if l.parent != nil {
+		if parentLeft := l.parent.remaining(); parentLeft < left {
+			left = parentLeft
+		}
+	}
+	return left
 }
 
-func requestInputBytes(req Request) int {
-	encoded, err := json.Marshal(struct {
-		Messages []openai.ChatCompletionMessage
-		Tools    []openai.Tool
-		History  map[string][]json.RawMessage
-	}{req.Messages, req.Tools, req.ResponsesHistory})
-	if err != nil {
+// estimateTextTokens 按 UTF-8 字节数向上取整估算 token 数。
+func estimateTextTokens(text string) int {
+	if text == "" {
 		return 0
 	}
-	return len(encoded)
+	return (len(text) + bytesPerToken - 1) / bytesPerToken
 }
 
-// chargeFor 优先使用提供商原始 total，其次 prompt+completion，最后按字节保守估算。
+// estimateSchemaTokens 估算单个 schema 值；字符串与原始 JSON 直接计数，
+// 其他类型只序列化这一个字段，不重新序列化整个请求。
+func estimateSchemaTokens(value any) int {
+	switch typed := value.(type) {
+	case nil:
+		return 0
+	case string:
+		return estimateTextTokens(typed)
+	case json.RawMessage:
+		return estimateTextTokens(string(typed))
+	case []byte:
+		return estimateTextTokens(string(typed))
+	default:
+		encoded, err := json.Marshal(typed)
+		if err != nil {
+			return 0
+		}
+		return estimateTextTokens(string(encoded))
+	}
+}
+
+// estimateMessageTokens 逐字段估算一条消息的 token 数。
+func estimateMessageTokens(message openai.ChatCompletionMessage) int {
+	tokens := estimateTextTokens(message.Role) + estimateTextTokens(message.Content) +
+		estimateTextTokens(message.Refusal) + estimateTextTokens(message.Name) +
+		estimateTextTokens(message.ReasoningContent) + estimateTextTokens(message.ToolCallID)
+	for _, part := range message.MultiContent {
+		tokens += estimateTextTokens(string(part.Type)) + estimateTextTokens(part.Text)
+		if part.ImageURL != nil {
+			tokens += estimateTextTokens(part.ImageURL.URL) + estimateTextTokens(string(part.ImageURL.Detail))
+		}
+	}
+	if message.FunctionCall != nil {
+		tokens += estimateTextTokens(message.FunctionCall.Name) + estimateTextTokens(message.FunctionCall.Arguments)
+	}
+	for _, call := range message.ToolCalls {
+		tokens += estimateTextTokens(string(call.Type)) + estimateTextTokens(call.ID) +
+			estimateTextTokens(call.Function.Name) + estimateTextTokens(call.Function.Arguments)
+	}
+	return tokens
+}
+
+// estimateToolTokens 估算一个工具定义（名称、描述与参数 schema）。
+func estimateToolTokens(tool openai.Tool) int {
+	tokens := estimateTextTokens(string(tool.Type))
+	if tool.Function != nil {
+		tokens += estimateTextTokens(tool.Function.Name) + estimateTextTokens(tool.Function.Description) +
+			estimateSchemaTokens(tool.Function.Parameters)
+	}
+	for key, value := range tool.Parameters {
+		tokens += estimateTextTokens(key) + estimateSchemaTokens(value)
+	}
+	return tokens
+}
+
+// estimateInputTokens 估算一次请求的输入 token 数，覆盖消息、工具定义与保留的推理历史。
+func estimateInputTokens(req Request) int {
+	tokens := 0
+	for _, message := range req.Messages {
+		tokens += estimateMessageTokens(message)
+	}
+	for _, tool := range req.Tools {
+		tokens += estimateToolTokens(tool)
+	}
+	for key, payloads := range req.ResponsesHistory {
+		tokens += estimateTextTokens(key)
+		for _, payload := range payloads {
+			tokens += estimateTextTokens(string(payload))
+		}
+	}
+	return tokens
+}
+
+// chargeFor 优先使用提供商原始 total，其次 prompt+completion，最后按同一估算器估算。
 func chargeFor(req Request, response Response) (int, bool) {
 	usage := response.Usage
 	if usage.TotalTokens > 0 || usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
 		return max(usage.TotalTokens, usage.PromptTokens+usage.CompletionTokens), false
 	}
-	charge := requestInputBytes(req) + len(response.Content) + len(response.Thinking)
+	charge := estimateInputTokens(req) + estimateTextTokens(response.Content) + estimateTextTokens(response.Thinking)
 	for _, call := range response.ToolCalls {
-		charge += len(call.Function.Name) + len(call.Function.Arguments)
+		charge += estimateTextTokens(call.Function.Name) + estimateTextTokens(call.Function.Arguments)
 	}
 	return charge, true
 }

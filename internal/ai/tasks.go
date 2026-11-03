@@ -336,7 +336,7 @@ func (s *Service) taskOperation(ctx context.Context, identity chat.Identity, act
 		}
 		if t.Result.Budget != nil {
 			budget := t.Result.Budget
-			text += fmt.Sprintf("\n轮次：%d/%d（软限 %d，追加 %d 次，用量 %d）", budget.RoundsUsed, budget.HardLimit, budget.SoftLimit, budget.Extensions, budget.AccountedTokens)
+			text += fmt.Sprintf("\n轮次：%d/%d（软限 %d，追加 %d 次，用量 %d tokens）", budget.RoundsUsed, budget.HardLimit, budget.SoftLimit, budget.Extensions, budget.AccountedTokens)
 			if budget.StopReason != "" {
 				text += "\n预算停止原因：" + budget.StopReason
 			}
