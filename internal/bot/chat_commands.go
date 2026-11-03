@@ -11,10 +11,22 @@ import (
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/command"
 	"rua.plus/saber/internal/matrix"
+	"rua.plus/saber/internal/platform"
 )
 
-func (s *appState) commandCapabilities(platform string) map[string]bool {
-	return map[string]bool{"file": platform == "matrix", "image": platform == "matrix"}
+func (s *appState) commandCapabilities(platformName string) map[string]bool {
+	p, ok := s.services.platforms.Lookup(platformName)
+	if !ok {
+		return nil
+	}
+	delivery, ok := p.(platform.TaskDelivery)
+	if !ok {
+		return nil
+	}
+	adapter := delivery.DeliveryAdapter()
+	_, file := adapter.(chat.FileAdapter)
+	_, image := adapter.(chat.ImageAdapter)
+	return map[string]bool{"file": file, "image": image}
 }
 
 func (s *appState) handleChat(ctx context.Context, message chat.Message, adapter chat.Adapter) (agent.Result, error) {

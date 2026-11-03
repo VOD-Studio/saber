@@ -4,6 +4,8 @@
 > 范围：出站（saber → violet）+ 入站（violet 用户图片 → saber 模型）。
 > 不含：图片消息的流式生成编辑、分片上传、秒传。
 
+状态：Saber 的图片收发与共享 `/meme` 命令已实现，入站回复包装保留图片能力，命令目录按 adapter 实际能力生成。真实站点联调仍需单独验收；第 2 节保留改造前基线，不代表当前 Saber 缺口。
+
 ## 1. 目标与决策
 
 | 决策点 | 选择 | 理由 |
@@ -12,7 +14,7 @@
 | 入站图片解析 | 与出站一起做 | 一次到位双向打通；violet `/uploads/*` 公开可读，下载无鉴权问题 |
 | 图片消息编辑 | 不支持，一次性发送 | 图片无流式生成语义；`bot_reply` 状态机只挂文本生成 |
 
-## 2. 现状基线
+## 2. 改造前基线
 
 ### violet 侧（`api/`）已就绪
 - `domain/chat/entity.go:42` 已有 `MessageImage` 类型；`Message.mediaIDs []shared.ID`（`entity.go:280`）；`NewImageMessage`（`entity.go:337`）。

@@ -1,6 +1,6 @@
 # 通用聊天命令与 Violet 接入方案
 
-状态：通用文本命令已实施；Violet 媒体能力与真实平台验收待完成。本文记录 Saber 侧的命令定义、执行和目录发布约定；Violet 侧的接口、存储与聊天框交互见其仓库 `docs/prd/0030-saber-slash-commands.md`。两份文档共同定义跨仓库协议。
+状态：通用文本命令及 Violet 图片命令已实施；Violet 通用文件发送尚不支持，真实平台验收待完成。本文记录 Saber 侧的命令定义、执行和目录发布约定；Violet 侧的接口、存储与聊天框交互见其仓库 `docs/prd/0030-saber-slash-commands.md`。两份文档共同定义跨仓库协议。
 
 ## 目标与现状
 
@@ -30,9 +30,9 @@ Describe(platform string, capabilities CommandCapabilities) []Descriptor
 | `schedule once/every/weekdays/list/status/pause/delete` | 定时计划 | 创建和修改继续检查当前执行授权 |
 | `persona list/set/clear/status/new/del` | 人格读写 | 当前键是 Matrix 房间 ID，回复由 Matrix 发送 |
 | `mcp list` | MCP 信息查询 | 按启用状态和允许披露的内容生成目录 |
-| `task logs`、`meme` | 命令语义可共用 | Violet Bot API 尚无文件或图片上传发送能力 |
+| `task logs`、`meme` | 命令语义可共用 | Violet 已支持图片上传发送与 `meme`，但没有通用文件能力，因此不公开 `task logs` |
 
-文本命令完成通用化后，`task logs`、`meme` 仍需单独补齐 Violet 媒体能力。在补齐之前，Violet 的目录不发布这些命令；手工输入要得到明确的“该平台暂不支持”回执。
+帮助、目录和分发从已注册平台的出站 adapter 推导 `image` / `file` 能力，不按平台名硬编码。启用 Meme 服务后，Violet 公开并执行 `meme`；`task logs` 仍不进入其目录，手工输入返回“该平台暂不支持”。入站回复包装保留图片接口，且图片发送成功后不再因后续错误补发失败卡片。
 
 ## 语法与兼容
 

@@ -357,12 +357,21 @@ func (p *Platform) handle(ctx context.Context, item inbound) {
 
 // responseTracker 避免共享聊天链路已创建回复后，再为同一次错误发送第二张卡片。
 type responseTracker struct {
-	chat.Adapter
+	*Adapter
 	sent bool
 }
 
 func (a *responseTracker) Send(ctx context.Context, reply chat.Reply) (string, error) {
 	id, err := a.Adapter.Send(ctx, reply)
+	if err == nil {
+		a.sent = true
+	}
+	return id, err
+}
+
+// SendImage 保留入站回复的图片能力，并在发送成功后阻止额外失败卡片。
+func (a *responseTracker) SendImage(ctx context.Context, reply chat.Reply, data []byte, mimeType, filename string, width, height int) (string, error) {
+	id, err := a.Adapter.SendImage(ctx, reply, data, mimeType, filename, width, height)
 	if err == nil {
 		a.sent = true
 	}

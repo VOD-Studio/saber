@@ -134,6 +134,37 @@ func TestPlatform_HandlerFailureReturnsCard(t *testing.T) {
 	}
 }
 
+// TestPlatform_ImageReplyDoesNotSendSecondCard 验证入站图片回复可发送，发送后的错误不再产生第二张卡片。
+func TestPlatform_ImageReplyDoesNotSendSecondCard(t *testing.T) {
+	fake := newFakeViolet(t)
+	p := New(newTestConfig(fake.endpoint()))
+	p.setIdentity(botProfileDTO{UserID: testBotUserID, Username: testBotUsername})
+	p.handler = func(ctx context.Context, message chat.Message, adapter chat.Adapter) (agent.Result, error) {
+		image, ok := adapter.(chat.ImageAdapter)
+		if !ok {
+			return agent.Result{}, errors.New("入站回复缺少图片能力")
+		}
+		_, err := image.SendImage(ctx, chat.Reply{Session: message.Session, ReplyTo: message.ID, TransactionID: "image-reply", Text: "猫图"}, []byte("gif-bytes"), "image/gif", "cat.gif", 40, 30)
+		if err != nil {
+			return agent.Result{}, err
+		}
+		return agent.Result{}, errors.New("发送完成后的回执存储失败")
+	}
+	message := fake.pushMessage(testDirectRoom, "user-1", "alice", "/meme cat", time.Now())
+	p.handle(context.Background(), inbound{conversationID: testDirectRoom, message: message})
+	sent := fake.sentMessages()
+	uploads := fake.uploadedMediaRecords()
+	if len(sent) != 1 || len(uploads) != 1 || len(fake.editRecords()) != 0 {
+		t.Fatalf("图片回复应独立完成且无失败卡片：发送=%+v 上传=%+v 编辑=%+v", sent, uploads, fake.editRecords())
+	}
+	fake.mu.Lock()
+	stored := fake.history[testDirectRoom][0]
+	fake.mu.Unlock()
+	if stored.Type != "image" || len(stored.Media) != 1 || stored.Media[0].ID != uploads[0].ID || sent[0].ReplyTo != message.ID {
+		t.Fatalf("入站图片回复的来源与媒体引用丢失：%+v", stored)
+	}
+}
+
 func TestPlatform_ModelFailureDoesNotSendSecondCard(t *testing.T) {
 	fake := newFakeViolet(t)
 	p := New(newTestConfig(fake.endpoint()))
