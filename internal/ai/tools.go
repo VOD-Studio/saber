@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/sashabaranov/go-openai"
+	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/execution"
 	"rua.plus/saber/internal/memory"
@@ -156,16 +157,18 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 		}
 	}
 	if te.service.mcpManager == nil || !te.service.mcpManager.IsEnabled() {
+		tools = te.exposeDelegate(ctx, tools)
 		return tools, len(tools) > 0
 	}
 
 	mcpTools := te.service.mcpManager.ListTools()
 	if len(mcpTools) == 0 {
+		tools = te.exposeDelegate(ctx, tools)
 		return tools, len(tools) > 0
 	}
 
 	for _, mcpTool := range mcpTools {
-		if execution.LocalTool(mcpTool.Name) || mcpTool.Name == "saber_task" || mcpTool.Name == "saber_schedule" || mcpTool.Name == "saber_memory" || mcpTool.Name == "saber_history" || mcpTool.Name == "saber_skill" || mcpTool.Name == "saber_task_state" {
+		if execution.LocalTool(mcpTool.Name) || mcpTool.Name == "saber_task" || mcpTool.Name == "saber_schedule" || mcpTool.Name == "saber_memory" || mcpTool.Name == "saber_history" || mcpTool.Name == "saber_skill" || mcpTool.Name == "saber_task_state" || mcpTool.Name == agent.DelegateTool {
 			continue
 		}
 		server := te.service.mcpManager.GetServerForTool(mcpTool.Name)
@@ -182,6 +185,7 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 		})
 	}
 
+	tools = te.exposeDelegate(ctx, tools)
 	slog.Debug("启用工具调用", "tool_count", len(tools))
 	return tools, len(tools) > 0
 }

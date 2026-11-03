@@ -189,3 +189,61 @@ func TestAgentConfigValidate_TaskDeliveryMaxAttempts(t *testing.T) {
 		t.Error("负数应被拒绝")
 	}
 }
+
+// TestAgentConfigSubagents 验证子代理配置零值等于默认值、可显式关闭并拒绝越界范围。
+func TestAgentConfigSubagents(t *testing.T) {
+	zero := AgentConfig{}
+	if err := zero.Subagents.Validate(); err != nil {
+		t.Fatalf("零值子代理配置应合法: %v", err)
+	}
+	if !zero.Subagents.IsEnabled() {
+		t.Error("零值应默认开启 delegate")
+	}
+	if zero.Subagents.MaxRounds != DefaultSubagentMaxRounds || zero.Subagents.MaxParallel != DefaultSubagentMaxParallel {
+		t.Errorf("零值未回落到默认上限: %+v", zero.Subagents)
+	}
+	if zero.Subagents.MaxTotalTokens != 0 {
+		t.Error("max_total_tokens 零值表示只受父账本约束")
+	}
+
+	disabled := false
+	cfg := DefaultAgentConfig()
+	cfg.Subagents.Enabled = &disabled
+	if err := cfg.Validate(); err != nil || cfg.Subagents.IsEnabled() {
+		t.Errorf("显式关闭应生效: err=%v config=%+v", err, cfg.Subagents)
+	}
+
+	for _, testCase := range []struct {
+		name   string
+		change func(*SubagentsConfig)
+	}{
+		{"rounds 超上限", func(c *SubagentsConfig) { c.MaxRounds = SubagentMaxRoundsLimit + 1 }},
+		{"rounds 负数", func(c *SubagentsConfig) { c.MaxRounds = -1 }},
+		{"parallel 超上限", func(c *SubagentsConfig) { c.MaxParallel = SubagentMaxParallelLimit + 1 }},
+		{"parallel 负数", func(c *SubagentsConfig) { c.MaxParallel = -1 }},
+		{"tokens 负数", func(c *SubagentsConfig) { c.MaxTotalTokens = -1 }},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			cfg := DefaultAgentConfig()
+			testCase.change(&cfg.Subagents)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("越界子代理配置应被拒绝")
+			}
+		})
+	}
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("agent:\n  subagents:\n    max_rounds: 5\n    max_parallel: 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := loaded.Agent.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Agent.Subagents.MaxRounds != 5 || loaded.Agent.Subagents.MaxParallel != 2 || !loaded.Agent.Subagents.IsEnabled() {
+		t.Fatalf("yaml 子代理配置未生效: %+v", loaded.Agent.Subagents)
+	}
+}

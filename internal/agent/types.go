@@ -242,6 +242,10 @@ const (
 	BudgetExtended EventKind = "budget_extended"
 	// BudgetStopped 表示预算停止并给出可观察原因。
 	BudgetStopped EventKind = "budget_stopped"
+	// SubagentStarted 表示顶层运行已启动一个子代理。
+	SubagentStarted EventKind = "subagent_started"
+	// SubagentFinished 表示子代理已结束，结果与用量对父任务可见。
+	SubagentFinished EventKind = "subagent_finished"
 )
 
 // Event 由 Run 串行发送；回调应快速返回，不得修改引用的响应数据。
@@ -267,6 +271,8 @@ type Event struct {
 	Checkpoint *Checkpoint
 	// Budget 是预算追加或停止时的快照。
 	Budget *BudgetStats
+	// Subagent 是子代理生命周期事件的最小事实。
+	Subagent *SubagentInfo
 	// Error 是运行终止原因。
 	Error error
 }

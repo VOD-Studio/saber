@@ -104,6 +104,7 @@ type AgentConfig struct {
 	ToolCallingConfig       `yaml:",inline"`
 	Context                 ContextConfig        `yaml:"context"`                    // 上下文管理配置
 	Budget                  BudgetConfig         `yaml:"budget"`                     // 自适应轮数与用量预算
+	Subagents               SubagentsConfig      `yaml:"subagents"`                  // 子代理 delegate 工具与运行上限
 	StreamEnabled           bool                 `yaml:"stream"`                     // 是否启用流式响应
 	TaskReceiptEnabled      bool                 `yaml:"task_receipt_enabled"`       // 是否在任务入库后发送接收回执
 	TaskDeliveryMaxAttempts int                  `yaml:"task_delivery_max_attempts"` // 任务结果投递最大尝试次数（含首次），零值用默认 20
@@ -327,6 +328,7 @@ func DefaultAgentConfig() AgentConfig {
 	return AgentConfig{
 		Context:                 DefaultContextConfig(),
 		Budget:                  DefaultBudgetConfig(),
+		Subagents:               DefaultSubagentsConfig(),
 		StreamEnabled:           true,
 		TaskReceiptEnabled:      false,
 		TaskDeliveryMaxAttempts: DefaultTaskDeliveryMaxAttempts,
@@ -626,6 +628,9 @@ func (a *AgentConfig) Validate() error {
 	}
 	if a.Budget.InitialRounds < 0 || a.Budget.InitialRounds > a.MaxIterations {
 		return fmt.Errorf("budget.initial_rounds must be 0 or between 1 and max_rounds")
+	}
+	if err := a.Subagents.Validate(); err != nil {
+		return err
 	}
 	if a.Retry.MaxRetries < 0 || a.Retry.InitialDelayMs < 0 || a.Retry.MaxDelayMs < a.Retry.InitialDelayMs || int64(a.Retry.MaxDelayMs) > 9223372036854 || a.Retry.BackoffFactor < 1 {
 		return fmt.Errorf("invalid retry limits")
@@ -1005,6 +1010,11 @@ agent:
     initial_rounds: 0 # 0 = min(5, max_rounds)
     extension_rounds: 5 # 每次评估通过后追加
     max_total_tokens: 200000 # 全任务保守用量上限，包含摘要与评估；0 表示不设上限
+  subagents: # 内置 delegate 工具：顶层任务可把独立子目标交给子代理并行完成
+    enabled: true # 默认开启；显式 false 可从顶层工具集中移除 delegate
+    max_rounds: 12 # 单个子代理的轮数上限，范围 1..40
+    max_parallel: 4 # 同一轮并发子代理数，范围 1..16
+    max_total_tokens: 0 # 子代理独立用量上限；0 表示只受父任务账本约束
   context:
     enabled: true
     max_messages: 50

@@ -40,7 +40,7 @@ Runtime 检查工具是否在本次请求提供的工具列表中，并解析 JS
 
 ## 事件与记录
 
-Run 串行发送事件：`run_started`、`model_started`、`attempt_started`、`text_delta`、`attempt_finished`、`model_completed`、`tool_started`、`tool_finished`、`run_finished`。
+Run 串行发送事件：`run_started`、`model_started`、`attempt_started`、`text_delta`、`attempt_finished`、`model_completed`、`tool_started`、`tool_finished`、`subagent_started`、`subagent_finished`、`run_finished`。
 每次 Run 只发出一个 `run_finished`。`tool_started` 是派发前事件，事件消费者在此取消仍可阻止调用。
 
 `Result.Rounds` 保存每轮完整或部分响应、每次请求尝试、原始工具参数、截断后的工具结果、错误与耗时。
@@ -53,6 +53,29 @@ Run 串行发送事件：`run_started`、`model_started`、`attempt_started`、`
 
 取消在每次模型请求及每个工具派发前后检查，包括重试等待。运行时不通过遗留后台 goroutine 模拟取消；不遵守 context 的工具必须在其 adapter 内修复。
 
+## 子代理（delegate）
+
+顶层任务在 `agent.subagents.enabled: true`（默认开启）且本次已有至少一个可用工具时会额外获得内置 `delegate` 工具；没有任何工具时委派不带来新能力，不会暴露：
+
+```yaml
+agent:
+  subagents:
+    enabled: true # 默认开启；显式 false 会从顶层工具集中移除 delegate
+    max_rounds: 12 # 单个子代理的轮数上限，范围 1..40
+    max_parallel: 4 # 同一轮并发子代理数，范围 1..16
+    max_total_tokens: 0 # 子代理独立用量上限；0 表示只受父账本约束
+```
+
+`delegate` 参数为 `{goal: string, tools?: []string}`。`goal` 必填、非空、最多 8192 字节；`tools` 可选，必须是父请求当时工具集的子集：本地执行工具与 MCP 工具会按当前 `executor.Check`/`CheckMCP` 重新筛选，越权或未知名称按参数错误拒绝。子代理看不到 `delegate`，委派深度固定为 1，不能递归。
+
+每个 delegate 都是一次完整子 Runtime：全新上下文，只有一条 system（说明它是子代理、只完成 goal、不得请求 delegate）和一条 user（goal 原文），不继承父聊天历史、工作状态或工具结果；沿用父请求的模型名、采样参数、重试、上下文策略、摘要与时限，轮数上限来自 `max_rounds`。
+
+同一轮返回多个 delegate 时按 `max_parallel` 并发执行，子代理的模型请求彼此并行；工具执行按工作区（任务目录，缺失时用任务编号）建立的租约串行，父任务的 exec/process 不会与子代理并发操作同一环境。结果按模型给出的调用顺序回填，事件经运行时的串行出口发送，顺序可预测；其他工具保持原有串行语义。
+
+子运行的用量经嵌套账本上推父账本，父余额同时限制子运行准入；`max_total_tokens: 0` 表示子运行不自建账本，直接受父账本约束。父取消会立即停止所有子代理；单个子代理失败、超时或取消只产生结构化工具结果 `{status, error, content, usage, rounds}`，父模型据此决定下一步，结果仍受 `MaxToolOutputBytes` 截断。
+
+`ai` 层把每次委派的启动/结束写入 `tasks.db` 的 `task_subagents`（懒创建，父任务失败或取消后仍可查），并通过 `subagent_started`、`subagent_finished` 事件写入 `task_events`，SSE 与 `!task logs` 可见。
+
 ## 验收
 
 纯内存、不连接模型或聊天平台：
@@ -60,6 +83,7 @@ Run 串行发送事件：`run_started`、`model_started`、`attempt_started`、`
 ```sh
 go test -v -tags goolm ./internal/agent
 go test -race -tags goolm ./internal/agent
+go test -race -tags goolm ./internal/agent ./internal/ai ./internal/task ./internal/config
 ```
 
 真实客户端的本地 HTTP/MCP 协议与展示 adapter 回归（仅 httptest，本地模拟服务）：
@@ -69,6 +93,6 @@ go test -v -tags goolm ./internal/model -run TestAgentModel
 go test -v -tags goolm ./internal/ai -run 'TestService_RunAgent|TestService_HandleChat'
 ```
 
-覆盖工具失败后修正参数、流式与非流式一致性、取消后不派发第二个工具、超时与轮数预算、输出截断、模型重试不重放工具、MCP 协议失败和展示失败不重跑任务。
+覆盖工具失败后修正参数、流式与非流式一致性、取消后不派发第二个工具、超时与轮数预算、输出截断、模型重试不重放工具、MCP 协议失败和展示失败不重跑任务；子代理覆盖顶层暴露与工具子集、深度 1 拒绝递归、并行结果顺序、预算上推与父余额拒绝、取消传播、工作区互斥以及 `task_subagents`/事件落盘。
 
 通用消息与平台接入契约见 [聊天 adapter](chat-adapters.md)。

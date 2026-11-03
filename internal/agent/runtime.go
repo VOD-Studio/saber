@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -30,6 +31,10 @@ type Runtime struct {
 	Evaluate BudgetEvaluator
 	// RunningProcesses 返回当前任务仍在运行的后台作业数。
 	RunningProcesses func() int
+	// ParallelTool 返回同名工具在同一轮的并发上限；<=1（默认）表示按模型顺序串行执行。
+	// 只有返回 >1 的工具会被批量并发执行，结果仍按模型给出的调用顺序回填；
+	// 其余工具保持原有串行语义与事件顺序。
+	ParallelTool func(name string) int
 }
 
 // Run 顺序执行模型与工具，任何终态都返回已有记录并发出一次 RunFinished。
@@ -40,6 +45,17 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 	if emit == nil {
 		emit = func(Event) {}
 	}
+	// 并行工具与子代理事件可能来自多个 goroutine，事件出口必须串行；
+	// 串行化后仍按调用顺序回填工具结果，事件顺序可预测。
+	raw := emit
+	var emitMu sync.Mutex
+	serialized := func(event Event) {
+		emitMu.Lock()
+		defer emitMu.Unlock()
+		raw(event)
+	}
+	emit = serialized
+	ctx = withEmitter(ctx, serialized)
 	result.Status = Failed
 	var finalState *TaskState
 	var checkpoint *Checkpoint
@@ -250,26 +266,65 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 		req.Messages = append(req.Messages, openai.ChatCompletionMessage{
 			Role: openai.ChatMessageRoleAssistant, Content: response.Content, ToolCalls: response.ToolCalls,
 		})
-		for _, call := range response.ToolCalls {
+		// 子代理事件统一带上当前轮次，事件消费者无需推断所属轮。
+		ctx = withEmitter(ctx, func(event Event) {
+			if event.Round == 0 {
+				event.Round = number
+			}
+			serialized(event)
+		})
+		for index := 0; index < len(response.ToolCalls); {
 			if err := ctx.Err(); err != nil {
 				return stop(err)
 			}
-			emit(Event{Kind: ToolStarted, Round: number, Tool: ToolRecord{Call: call}})
+			call := response.ToolCalls[index]
+			parallel := r.parallelLimit(call.Function.Name)
+			if parallel <= 1 {
+				emit(Event{Kind: ToolStarted, Round: number, Tool: ToolRecord{Call: call}})
+				if err := ctx.Err(); err != nil {
+					return stop(err)
+				}
+				var record ToolRecord
+				if call.Function.Name == "saber_task_state" && req.State != nil {
+					record = r.callStateTool(ctx, call, &req.State, number, limits.MaxToolOutputBytes, emit)
+				} else {
+					record = r.callTool(ctx, call, allowed, limits.MaxToolOutputBytes)
+				}
+				finalState = req.State
+				result.Rounds[number-1].Tools = append(result.Rounds[number-1].Tools, record)
+				req.Messages = append(req.Messages, openai.ChatCompletionMessage{
+					Role: openai.ChatMessageRoleTool, ToolCallID: call.ID, Content: record.Content,
+				})
+				emit(Event{Kind: ToolFinished, Round: number, Tool: record})
+				if err := ctx.Err(); err != nil {
+					return stop(err)
+				}
+				index++
+				continue
+			}
+			// 同一轮连续的同类并行调用一起派发；结果按模型给出的顺序回填。
+			end := index + 1
+			for end < len(response.ToolCalls) && response.ToolCalls[end].Function.Name == call.Function.Name &&
+				r.parallelLimit(response.ToolCalls[end].Function.Name) > 1 {
+				end++
+			}
+			batch := response.ToolCalls[index:end]
+			index = end
+			for _, item := range batch {
+				emit(Event{Kind: ToolStarted, Round: number, Tool: ToolRecord{Call: item}})
+			}
 			if err := ctx.Err(); err != nil {
 				return stop(err)
 			}
-			var record ToolRecord
-			if call.Function.Name == "saber_task_state" && req.State != nil {
-				record = r.callStateTool(ctx, call, &req.State, number, limits.MaxToolOutputBytes, emit)
-			} else {
-				record = r.callTool(ctx, call, allowed, limits.MaxToolOutputBytes)
-			}
+			records := r.callToolBatch(ctx, batch, allowed, limits.MaxToolOutputBytes, parallel)
 			finalState = req.State
-			result.Rounds[number-1].Tools = append(result.Rounds[number-1].Tools, record)
-			req.Messages = append(req.Messages, openai.ChatCompletionMessage{
-				Role: openai.ChatMessageRoleTool, ToolCallID: call.ID, Content: record.Content,
-			})
-			emit(Event{Kind: ToolFinished, Round: number, Tool: record})
+			for offset, record := range records {
+				result.Rounds[number-1].Tools = append(result.Rounds[number-1].Tools, record)
+				req.Messages = append(req.Messages, openai.ChatCompletionMessage{
+					Role: openai.ChatMessageRoleTool, ToolCallID: batch[offset].ID, Content: record.Content,
+				})
+				emit(Event{Kind: ToolFinished, Round: number, Tool: record})
+			}
 			if err := ctx.Err(); err != nil {
 				return stop(err)
 			}
@@ -297,6 +352,33 @@ func ValidateResponse(response Response) error {
 		seen[call.ID] = true
 	}
 	return nil
+}
+
+// parallelLimit 返回工具在同一轮的并发上限；状态工具与未声明并行的工具始终串行。
+func (r Runtime) parallelLimit(name string) int {
+	if name == "saber_task_state" || r.ParallelTool == nil {
+		return 1
+	}
+	return r.ParallelTool(name)
+}
+
+// callToolBatch 并发执行同名工具调用，最多 parallel 个同时运行；结果按入参顺序返回。
+// 事件出口已由 Run 串行化，工具内部只能通过 ctx 携带的出口发事件。
+func (r Runtime) callToolBatch(ctx context.Context, calls []openai.ToolCall, allowed map[string]bool, limit, parallel int) []ToolRecord {
+	records := make([]ToolRecord, len(calls))
+	semaphore := make(chan struct{}, max(1, parallel))
+	var wait sync.WaitGroup
+	for index, call := range calls {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+			records[index] = r.callTool(ctx, call, allowed, limit)
+		}()
+	}
+	wait.Wait()
+	return records
 }
 
 func (r Runtime) callTool(ctx context.Context, call openai.ToolCall, allowed map[string]bool, limit int) ToolRecord {

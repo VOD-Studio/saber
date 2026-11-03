@@ -36,24 +36,42 @@ func (s *Service) runAgent(ctx context.Context, req agent.Request, emit func(age
 		}
 		return s.getClient(model)
 	}
+	modelFunc := model.AgentModel(getClient, retry)
+	execute := func(ctx context.Context, name string, args map[string]any) (agent.ToolOutput, error) {
+		value, err := s.toolExecutor.ExecuteToolCall(ctx, name, args)
+		output := agent.ToolOutput{Value: value}
+		if result, ok := value.(*mcpsdk.CallToolResult); ok && result != nil {
+			output.IsError = result.IsError
+		}
+		if result, ok := value.(execution.Result); ok {
+			output.IsError = result.ExitCode != 0 || result.Error != ""
+			output.OutputID = result.OutputID
+			output.Structured = true
+		}
+		return output, err
+	}
 	runtime := agent.Runtime{
 		Context:   s.contextPolicy(),
 		Summarize: s.summarizer(req.Model),
 		Limits:    limits,
-		Model:     model.AgentModel(getClient, retry),
-		Execute: func(ctx context.Context, name string, args map[string]any) (agent.ToolOutput, error) {
-			value, err := s.toolExecutor.ExecuteToolCall(ctx, name, args)
-			output := agent.ToolOutput{Value: value}
-			if result, ok := value.(*mcpsdk.CallToolResult); ok && result != nil {
-				output.IsError = result.IsError
+		Model:     modelFunc,
+		Execute:   execute,
+	}
+	// 子代理只挂在顶层运行：子运行的 Execute 是父 execute 的租约包装，
+	// 工具集也已去掉 delegate，因此不可能递归委派。
+	if delegator := s.subagentDelegator(ctx, req, limits, modelFunc, execute); delegator != nil {
+		runtime.ParallelTool = func(name string) int {
+			if name == agent.DelegateTool {
+				return delegator.Policy.MaxParallel
 			}
-			if result, ok := value.(execution.Result); ok {
-				output.IsError = result.ExitCode != 0 || result.Error != ""
-				output.OutputID = result.OutputID
-				output.Structured = true
+			return 1
+		}
+		runtime.Execute = func(ctx context.Context, name string, args map[string]any) (agent.ToolOutput, error) {
+			if name == agent.DelegateTool {
+				return delegator.Delegate(ctx, args)
 			}
-			return output, err
-		},
+			return execute(ctx, name, args)
+		}
 	}
 	if budget.Enabled {
 		runtime.Evaluate = s.budgetEvaluator(req.Model)
