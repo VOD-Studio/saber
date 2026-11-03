@@ -498,12 +498,27 @@ func (s *Service) handleChat(ctx context.Context, message chat.Message, reply ch
 			return agent.Result{}, fmt.Errorf("AI请求速率限制: %w", err)
 		}
 	}
+	// 共享命令注册表已经处理过的正文不会到达这里；剩余正文中首词为 `/name`
+	// 且当前可信空间存在同名技能时，把技能正文作为运行时指令直接执行。
+	var invocation skillInvocation
+	invoked := false
+	if allowNaturalControl {
+		invocation, invoked = s.lookupSkillInvocation(ctx, message)
+		if invoked {
+			// 技能正文只进入本次运行的 RuntimeContext；持久化请求只保留用户参数或技能描述。
+			userText := invocation.userText()
+			message.Text, message.ControlText = userText, &userText
+		}
+	}
 	if len(message.Attachments) > 0 && s.config.AI.MediaModel != "" {
 		modelName = s.config.AI.MediaModel
 	}
 	req, err := s.taskRequest(message, modelName)
 	if err != nil {
 		return agent.Result{}, err
+	}
+	if invoked {
+		req = appendRuntimeContext(req, invocation.runtimeInstruction(s.skillInvokeBudget()))
 	}
 	identity := chat.Identity{Session: message.Session, SenderID: message.SenderID, Direct: message.Direct}
 	toolCtx := chat.WithIdentity(ctx, identity)

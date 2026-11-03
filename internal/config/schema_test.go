@@ -247,3 +247,57 @@ func TestAgentConfigSubagents(t *testing.T) {
 		t.Fatalf("yaml 子代理配置未生效: %+v", loaded.Agent.Subagents)
 	}
 }
+
+// TestSkillsConfigValidate 验证 memory.skills 目录约束：绝对路径、存在性、上限与导出父目录。
+func TestSkillsConfigValidate(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "file")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tooMany := make([]string, MaxSkillDirs+1)
+	for i := range tooMany {
+		tooMany[i] = root
+	}
+	tests := []struct {
+		name    string
+		config  SkillsConfig
+		wantErr bool
+	}{
+		{name: "默认配置", config: DefaultSkillsConfig()},
+		{name: "合法只读目录", config: SkillsConfig{Dirs: []string{root}}},
+		{name: "相对路径", config: SkillsConfig{Dirs: []string{"skills"}}, wantErr: true},
+		{name: "空目录项", config: SkillsConfig{Dirs: []string{""}}, wantErr: true},
+		{name: "目录不存在", config: SkillsConfig{Dirs: []string{filepath.Join(root, "missing")}}, wantErr: true},
+		{name: "路径是文件", config: SkillsConfig{Dirs: []string{file}}, wantErr: true},
+		{name: "重复目录", config: SkillsConfig{Dirs: []string{root, root}}, wantErr: true},
+		{name: "超过目录上限", config: SkillsConfig{Dirs: tooMany}, wantErr: true},
+		{name: "导出目录合法", config: SkillsConfig{ExportDir: filepath.Join(root, "export")}},
+		{name: "导出目录已存在", config: SkillsConfig{ExportDir: root}},
+		{name: "导出目录相对路径", config: SkillsConfig{ExportDir: "export"}, wantErr: true},
+		{name: "导出父目录不存在", config: SkillsConfig{ExportDir: filepath.Join(root, "missing", "export")}, wantErr: true},
+		{name: "导出目录是文件", config: SkillsConfig{ExportDir: file}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() err = %v, wantErr = %v", err, tt.wantErr)
+			}
+		})
+	}
+
+	cfg := DefaultMemoryConfig()
+	cfg.Enabled = false
+	cfg.Skills = SkillsConfig{Dirs: []string{"relative"}}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("记忆关闭时也应校验技能目录配置")
+	}
+	cfg.Skills = DefaultSkillsConfig()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("默认记忆配置应合法: %v", err)
+	}
+	if !strings.Contains(ExampleConfig(), "skills:") || !strings.Contains(ExampleConfig(), "export_dir:") {
+		t.Fatal("示例配置应说明 memory.skills")
+	}
+}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"rua.plus/saber/internal/chat"
@@ -132,9 +134,143 @@ func (s *Service) SkillCommand(ctx context.Context, message chat.Message, adapte
 		}
 		return commandReply(ctx, message, adapter, fmt.Sprintf("已拒绝技能建议 #%d（%s）。", change.ID, change.Name))
 
+	case "files":
+		if strings.TrimSpace(raw) != "" {
+			return commandReply(ctx, message, adapter, "用法：/skill files")
+		}
+		dirs := s.memory.SkillDirs()
+		if len(dirs) == 0 {
+			return commandReply(ctx, message, adapter, "未配置外部技能目录：请在 memory.skills.dirs 中添加绝对路径后重启。")
+		}
+		listings, errs := memory.ListSkillFiles(dirs)
+		var b strings.Builder
+		b.WriteString("外部技能目录（只读，未写入当前空间）：")
+		for i, dir := range dirs {
+			fmt.Fprintf(&b, "\n%d. %s", i+1, dir)
+		}
+		if len(listings) == 0 {
+			b.WriteString("\n（没有发现可导入的 <name>/SKILL.md）")
+		}
+		for _, item := range listings {
+			fmt.Fprintf(&b, "\n- %s：%s（%s）", item.Name, item.Description, item.RelPath)
+		}
+		for _, err := range errs {
+			fmt.Fprintf(&b, "\n错误：%s", err)
+		}
+		return commandReply(ctx, message, adapter, b.String())
+
+	case "import":
+		dirArg, rest, err := splitSkillDirArg(raw)
+		if err != nil || rest != "" {
+			return commandReply(ctx, message, adapter, "用法：/skill import [--dir <目录索引或绝对路径>]")
+		}
+		configured, single, err := s.skillImportTarget(dirArg)
+		if err != nil {
+			return commandReply(ctx, message, adapter, err.Error())
+		}
+		if single == "" && len(configured) == 0 {
+			return commandReply(ctx, message, adapter, "未配置外部技能目录：请在 memory.skills.dirs 中添加绝对路径，或用 --dir 指定目录。")
+		}
+		var result memory.SkillImportResult
+		if single != "" {
+			result, err = s.memory.ImportSkills(ctx, identity, single)
+		} else {
+			result, err = s.memory.SyncExternalSkills(ctx, identity, configured)
+		}
+		if err != nil {
+			return commandReply(ctx, message, adapter, "导入技能失败："+err.Error())
+		}
+		return commandReply(ctx, message, adapter, skillImportSummary(result))
+
+	case "export":
+		dirArg, rest, err := splitSkillDirArg(raw)
+		if err != nil {
+			return commandReply(ctx, message, adapter, "用法：/skill export <名称> [--dir <绝对路径>]")
+		}
+		name := strings.TrimSpace(rest)
+		if name == "" || strings.ContainsAny(name, " \t\r\n") {
+			return commandReply(ctx, message, adapter, "用法：/skill export <名称> [--dir <绝对路径>]")
+		}
+		target := dirArg
+		if target == "" {
+			target = s.memory.SkillExportDir()
+		}
+		if target == "" {
+			return commandReply(ctx, message, adapter, "未配置导出目录：请设置 memory.skills.export_dir，或用 --dir 指定绝对路径。")
+		}
+		path, err := s.memory.ExportSkill(ctx, identity, name, target)
+		if err != nil {
+			return commandReply(ctx, message, adapter, "导出技能失败："+err.Error())
+		}
+		return commandReply(ctx, message, adapter, fmt.Sprintf("技能 %s 已导出到 %s", name, path))
+
 	default:
-		return commandReply(ctx, message, adapter, "用法：/skill list/show/add/edit/delete/pending/approve/reject")
+		return commandReply(ctx, message, adapter, "用法：/skill list/show/add/edit/delete/pending/approve/reject/import/export/files")
 	}
+}
+
+// splitSkillDirArg 提取 `--dir <值>` 或 `--dir=<值>` 选项，返回剩余参数。
+func splitSkillDirArg(raw string) (dir, rest string, err error) {
+	fields := strings.Fields(raw)
+	var others []string
+	for i := 0; i < len(fields); i++ {
+		switch {
+		case fields[i] == "--dir":
+			if i+1 >= len(fields) {
+				return "", "", errors.New("--dir 需要目录参数")
+			}
+			dir = fields[i+1]
+			i++
+		case strings.HasPrefix(fields[i], "--dir="):
+			dir = strings.TrimPrefix(fields[i], "--dir=")
+		default:
+			others = append(others, fields[i])
+		}
+	}
+	dir = strings.TrimSpace(dir)
+	if dir == "" && strings.Contains(raw, "--dir") {
+		return "", "", errors.New("--dir 需要目录参数")
+	}
+	return dir, strings.Join(others, " "), nil
+}
+
+// skillImportTarget 解析导入目标：空值表示全部已配置目录，数字为目录索引（从 1 开始），
+// 其他值必须是绝对路径目录。
+func (s *Service) skillImportTarget(dirArg string) (configured []string, single string, err error) {
+	configured = s.memory.SkillDirs()
+	if dirArg == "" {
+		return configured, "", nil
+	}
+	if idx, err := strconv.Atoi(dirArg); err == nil {
+		if idx < 1 || idx > len(configured) {
+			return nil, "", fmt.Errorf("目录索引 %d 超出范围（已配置 %d 个目录）", idx, len(configured))
+		}
+		return nil, configured[idx-1], nil
+	}
+	if !filepath.IsAbs(dirArg) {
+		return nil, "", errors.New("--dir 需要使用已配置目录的索引或绝对路径")
+	}
+	return nil, filepath.Clean(dirArg), nil
+}
+
+// skillImportSummary 汇总导入结果；只展示相对路径与技能名，不泄露目录正文。
+func skillImportSummary(result memory.SkillImportResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "技能导入完成：新增 %d，更新 %d，跳过 %d。", result.Imported, result.Updated, result.Skipped)
+	if result.Suggested > 0 {
+		fmt.Fprintf(&b, "另有 %d 项转为待确认建议（群空间无写权限），需管理员审批后才生效。", result.Suggested)
+	}
+	if len(result.Errors) > 0 {
+		fmt.Fprintf(&b, "\n失败 %d 项：", len(result.Errors))
+		for i, err := range result.Errors {
+			if i >= 10 {
+				b.WriteString("\n- …")
+				break
+			}
+			fmt.Fprintf(&b, "\n- %s", err)
+		}
+	}
+	return b.String()
 }
 
 func parseSkillAddArgs(raw string) (name, desc, content string, err error) {

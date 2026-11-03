@@ -268,6 +268,24 @@ func TestMemoryProfile_ToolReadOnly(t *testing.T) {
 	require.Equal(t, int32(0), atomic.LoadInt32(&fake.calls), "只读查看不得请求模型")
 }
 
+// TestMemoryProfile_InjectionBudget 验证画像注入不超过 1024 字节且保持片段可读。
+func TestMemoryProfile_InjectionBudget(t *testing.T) {
+	fake := newProfileModelServer(t)
+	svc, mem := newProfileTestService(t, fake.URL, nil)
+	alice := personalIdentity("@alice:example.com")
+	ctx := chat.WithIdentity(context.Background(), alice)
+	scope, ok := memory.Space(alice)
+	require.True(t, ok)
+	_, err := mem.SaveProfile(ctx, scope, strings.Repeat("偏好", 400), "")
+	require.NoError(t, err)
+
+	got := svc.augmentMemory(ctx, agent.Request{})
+	require.Len(t, got.RuntimeContext, 1, "无条目时只注入画像")
+	require.LessOrEqual(t, len(got.RuntimeContext[0].Content), memory.ProfileInjectBytes)
+	require.Contains(t, got.RuntimeContext[0].Content, "【用户画像")
+	require.Contains(t, got.RuntimeContext[0].Content, "【画像结束】")
+}
+
 // TestMemoryReview_TriggersProfileRefresh 验证后台复盘成功后触发一次画像刷新且不阻塞复盘。
 func TestMemoryReview_TriggersProfileRefresh(t *testing.T) {
 	fake := newProfileModelServer(t, "复盘后画像：用户偏好精炼回答")

@@ -33,6 +33,9 @@ func validateSkillName(name string) error {
 	return nil
 }
 
+// ValidateSkillName 校验技能标识名，规则与数据库写入、SKILL.md 解析共用。
+func ValidateSkillName(name string) error { return validateSkillName(name) }
+
 // ListSkills 列出当前空间内的所有技能元信息。
 //
 // 返回按技能名称升序排序的技能列表。

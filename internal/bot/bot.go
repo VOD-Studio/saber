@@ -344,9 +344,11 @@ func (s *appState) initServices() error {
 	// 长期记忆默认关闭；群空间写权限复用命令授权配置，不跟随模型参数。
 	if s.cfg.Memory.Enabled {
 		memorySvc, err := memory.Open(filepath.Join(configDir, "memory.db"), memory.Config{
-			MaxChars:    s.cfg.Memory.MaxChars,
-			InjectBytes: s.cfg.Memory.InjectMaxBytes,
-			GroupWriter: s.cfg.Commands.CanWriteSession,
+			MaxChars:       s.cfg.Memory.MaxChars,
+			InjectBytes:    s.cfg.Memory.InjectMaxBytes,
+			GroupWriter:    s.cfg.Commands.CanWriteSession,
+			SkillDirs:      s.cfg.Memory.Skills.Dirs,
+			SkillExportDir: s.cfg.Memory.Skills.ExportDir,
 		})
 		if err != nil {
 			return fmt.Errorf("长期记忆初始化失败: %w", err)

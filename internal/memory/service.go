@@ -21,6 +21,10 @@ type Config struct {
 	// GroupWriter 判定群空间直接写入权限，由命令授权配置提供。
 	// 为 nil 时群空间的写入请求一律形成待确认建议。
 	GroupWriter func(chat.Identity) bool
+	// SkillDirs 是只读外部技能目录，供 !skill files 与 !skill import 使用。
+	SkillDirs []string
+	// SkillExportDir 是默认技能导出目录；空值禁用 !skill export 的默认目标。
+	SkillExportDir string
 }
 
 // Service 是长期记忆的唯一读写入口，隐藏作用域判断、容量与版本冲突。
@@ -29,6 +33,8 @@ type Service struct {
 	maxChars    int
 	injectBytes int
 	groupWriter func(chat.Identity) bool
+	skillDirs   []string
+	skillExport string
 }
 
 // Open 打开或创建记忆数据库，并返回服务实例。
@@ -46,8 +52,15 @@ func Open(path string, cfg Config) (*Service, error) {
 	if cfg.InjectBytes <= 0 {
 		cfg.InjectBytes = DefaultInjectBytes
 	}
-	return &Service{store: st, maxChars: cfg.MaxChars, injectBytes: cfg.InjectBytes, groupWriter: cfg.GroupWriter}, nil
+	return &Service{store: st, maxChars: cfg.MaxChars, injectBytes: cfg.InjectBytes, groupWriter: cfg.GroupWriter,
+		skillDirs: cfg.SkillDirs, skillExport: cfg.SkillExportDir}, nil
 }
+
+// SkillDirs 返回配置的只读外部技能目录，调用方不得修改返回切片。
+func (s *Service) SkillDirs() []string { return s.skillDirs }
+
+// SkillExportDir 返回默认技能导出目录，空值表示未配置导出。
+func (s *Service) SkillExportDir() string { return s.skillExport }
 
 // Close 关闭数据库连接。
 func (s *Service) Close() error { return s.store.Close() }

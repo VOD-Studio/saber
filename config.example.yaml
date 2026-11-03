@@ -91,5 +91,8 @@ memory:
   enabled: false # 长期记忆；启用后按用户与群作用域隔离保存，默认关闭
   max_chars: 2200 # 每个空间的存储上限（Unicode 字符）
   inject_max_bytes: 8192 # 单次注入字节上限，同时不超过总输入预算的四分之一
+  skills: # SKILL.md 技能文件：显式 /skill import 才会写库，启动不产生副作用
+    dirs: [] # 只读外部技能目录（绝对路径，最多 8 个，每个目录下的 <name>/SKILL.md）
+    export_dir: "" # 技能导出目录（绝对路径，父目录需存在）；空值禁用 /skill export
 shutdown:
   timeout_seconds: 30

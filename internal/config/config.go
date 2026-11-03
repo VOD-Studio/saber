@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -54,6 +55,71 @@ type MemoryConfig struct {
 	MaxGlobalReviews int `yaml:"max_global_reviews"`
 	// MaxGlobalTokens 限制全局累计复盘 token 上限；0 为不设限。
 	MaxGlobalTokens int `yaml:"max_global_tokens"`
+	// Skills 控制 SKILL.md 技能文件的导入导出目录。
+	Skills SkillsConfig `yaml:"skills"`
+}
+
+// MaxSkillDirs 是 memory.skills.dirs 允许配置的目录数量上限。
+const MaxSkillDirs = 8
+
+// SkillsConfig 存储 SKILL.md 技能文件的导入导出配置。
+type SkillsConfig struct {
+	// Dirs 是只读外部技能目录；必须是绝对路径，启动时校验存在且为目录。
+	Dirs []string `yaml:"dirs"`
+	// ExportDir 是技能导出目录；必须是绝对路径且父目录存在，空值禁用导出。
+	ExportDir string `yaml:"export_dir"`
+}
+
+// DefaultSkillsConfig 返回技能文件默认配置：不导入外部目录，禁用导出。
+func DefaultSkillsConfig() SkillsConfig {
+	return SkillsConfig{Dirs: nil, ExportDir: ""}
+}
+
+// Validate 校验技能文件目录配置；目录必须真实存在，避免启动后才在命令里失败。
+func (c SkillsConfig) Validate() error {
+	if len(c.Dirs) > MaxSkillDirs {
+		return fmt.Errorf("memory.skills.dirs 最多允许 %d 个目录", MaxSkillDirs)
+	}
+	seen := make(map[string]bool, len(c.Dirs))
+	for i, raw := range c.Dirs {
+		dir := filepath.Clean(raw)
+		if strings.TrimSpace(raw) == "" {
+			return fmt.Errorf("memory.skills.dirs[%d] 不能为空", i)
+		}
+		if !filepath.IsAbs(dir) {
+			return fmt.Errorf("memory.skills.dirs[%d] 必须是绝对路径", i)
+		}
+		if seen[dir] {
+			return fmt.Errorf("memory.skills.dirs 包含重复目录 %q", dir)
+		}
+		seen[dir] = true
+		info, err := os.Stat(dir)
+		if err != nil {
+			return fmt.Errorf("memory.skills.dirs[%d] 不可用: %w", i, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("memory.skills.dirs[%d] 不是目录", i)
+		}
+	}
+	if strings.TrimSpace(c.ExportDir) == "" {
+		return nil
+	}
+	dir := filepath.Clean(c.ExportDir)
+	if !filepath.IsAbs(dir) {
+		return fmt.Errorf("memory.skills.export_dir 必须是绝对路径")
+	}
+	parent := filepath.Dir(dir)
+	info, err := os.Stat(parent)
+	if err != nil {
+		return fmt.Errorf("memory.skills.export_dir 的父目录不可用: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("memory.skills.export_dir 的父目录不是目录")
+	}
+	if info, err := os.Stat(dir); err == nil && !info.IsDir() {
+		return fmt.Errorf("memory.skills.export_dir 已存在但不是目录")
+	}
+	return nil
 }
 
 // MatrixConfig 存储 Matrix 连接配置
@@ -490,6 +556,7 @@ func DefaultMemoryConfig() MemoryConfig {
 		InjectMaxBytes: 8192,
 		AutoLearn:      true,
 		ReviewInterval: 5,
+		Skills:         DefaultSkillsConfig(),
 	}
 }
 
@@ -689,6 +756,9 @@ func (s *ShutdownConfig) Validate() error {
 
 // Validate 验证长期记忆配置是否有效。
 func (m *MemoryConfig) Validate() error {
+	if err := m.Skills.Validate(); err != nil {
+		return err
+	}
 	if !m.Enabled {
 		return nil
 	}
@@ -1066,6 +1136,9 @@ memory:
   enabled: false # 长期记忆；启用后按用户与群作用域隔离保存，默认关闭
   max_chars: 2200 # 每个空间的存储上限（Unicode 字符）
   inject_max_bytes: 8192 # 单次注入字节上限，同时不超过总输入预算的四分之一
+  skills: # SKILL.md 技能文件：显式 /skill import 才会写库，启动不产生副作用
+    dirs: [] # 只读外部技能目录（绝对路径，最多 8 个，每个目录下的 <name>/SKILL.md）
+    export_dir: "" # 技能导出目录（绝对路径，父目录需存在）；空值禁用 /skill export
 shutdown:
   timeout_seconds: 30
 `
