@@ -568,6 +568,12 @@ func (m *model) applyEvent(event task.Record) {
 		}
 	case agent.ContextCompacted:
 		m.stage = "上下文已压缩"
+	case agent.Steered:
+		// 补充要求只占用状态行，不插入流式正文，已有文本增量保持不变。
+		m.stage = "已注入补充要求"
+		if event.Text != "" {
+			m.stage += "：" + clipped(event.Text, 40)
+		}
 	case agent.TaskStateUpdated:
 		m.stage = "任务状态已更新"
 	case agent.BudgetExtended:

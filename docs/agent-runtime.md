@@ -10,6 +10,8 @@ runtime := agent.Runtime{
     Model: modelFunc,
     Execute: toolFunc,
     Limits: agent.Limits{MaxRounds: 5, Timeout: 120 * time.Second, MaxToolOutputBytes: 32768},
+    // 可选：每轮上下文压缩之后、发送模型请求之前返回补充要求。
+    Steering: func() []string { return []string{"先看部署配置"} },
 }
 result, err := runtime.Run(ctx, request, emit)
 ```
@@ -17,6 +19,8 @@ result, err := runtime.Run(ctx, request, emit)
 `ModelFunc` 接收当前历史并返回一轮完整响应，流式 adapter 先拼接工具参数，同时发出文本增量。
 `ToolFunc` 顺序执行单个工具，返回数据、协议失败标记或 Go error。模型和工具 adapter 必须遵守 context。
 Runtime 检查工具是否在本次请求提供的工具列表中，并解析 JSON 对象参数；具体参数 schema 和执行授权仍由工具实现检查。
+
+`Steering` 用于运行中转向：每条非空文本以 `{"role":"user","content":"[运行中补充要求] <文本>"}` 追加到本轮请求，并发出带轮次与原文的 `steered` 事件。注入点在 `prepareContext` 压缩完成之后、`model_started` 之前，因此补充要求不会被压缩器当作历史摘要的输入，也不改变并行工具与子代理的事件顺序。同一运行内相同文本只注入一次（回调未消费时不会跨轮重复），空文本不产生事件；子代理沿用父 ctx 但不读取转向，避免抢占父任务的补充要求。没有显式字段时可改用 `agent.WithSteering(ctx, fn)`，供只能在 context 上挂载依赖的执行器接线。
 
 `ai.Service.RunAgent` 接入现有模型客户端和 MCP，返回完整轨迹，可以在 Matrix 为 nil 时调用。
 调用真实 MCP 使用 `chat.WithIdentity` 设置平台、账号、会话和发送者；通用聊天处理器会自动注入。
@@ -40,8 +44,9 @@ Runtime 检查工具是否在本次请求提供的工具列表中，并解析 JS
 
 ## 事件与记录
 
-Run 串行发送事件：`run_started`、`model_started`、`attempt_started`、`text_delta`、`attempt_finished`、`model_completed`、`tool_started`、`tool_finished`、`subagent_started`、`subagent_finished`、`run_finished`。
+Run 串行发送事件：`run_started`、`model_started`、`steered`、`attempt_started`、`text_delta`、`attempt_finished`、`model_completed`、`tool_started`、`tool_finished`、`subagent_started`、`subagent_finished`、`run_finished`。
 每次 Run 只发出一个 `run_finished`。`tool_started` 是派发前事件，事件消费者在此取消仍可阻止调用。
+`steered` 在对应轮次的 `model_started` 之前出现，携带该轮注入的补充要求原文（不含固定前缀）。
 
 `Result.Rounds` 保存每轮完整或部分响应、每次请求尝试、原始工具参数、截断后的工具结果、错误与耗时。
 运行失败也返回已有轨迹。文本增量不单独保存在轨迹中，工具记录与模型收到的内容一致。

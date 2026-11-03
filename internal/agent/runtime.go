@@ -35,6 +35,10 @@ type Runtime struct {
 	// 只有返回 >1 的工具会被批量并发执行，结果仍按模型给出的调用顺序回填；
 	// 其余工具保持原有串行语义与事件顺序。
 	ParallelTool func(name string) int
+	// Steering 在每轮上下文压缩完成后、发送模型请求前返回本轮补充要求。
+	// 每条文本以 user 消息追加到本轮请求并发出一条 Steered 事件；空文本忽略，
+	// 同一运行内相同文本只注入一次。为空时改用 WithSteering 绑定的来源。
+	Steering func() []string
 }
 
 // Run 顺序执行模型与工具，任何终态都返回已有记录并发出一次 RunFinished。
@@ -145,6 +149,17 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 	// 新建切片防止追加历史覆盖调用方预留的容量。
 	req.Messages = append([]openai.ChatCompletionMessage(nil), req.Messages...)
 	req.ResponsesHistory = maps.Clone(req.ResponsesHistory)
+	steering := r.Steering
+	// 子代理沿用父 ctx，不能消费父任务的补充要求或复用其事件轮次。
+	if SubagentDepth(ctx) == 0 {
+		if steering == nil {
+			steering, _ = SteeringFromContext(ctx)
+		}
+	} else {
+		steering = nil
+	}
+	// injected 记录本次运行已注入的文本，回调未消费时也不会跨轮重复。
+	injected := make(map[string]bool)
 	finalState = req.State
 	compacted := 0
 	var pendingCheckpoint *Checkpoint
@@ -174,6 +189,11 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 		if pendingCheckpoint != nil {
 			checkpoint = pendingCheckpoint
 			pendingCheckpoint = nil
+		}
+		// 压缩完成后再注入转向，补充要求不会被当作历史摘要的输入；
+		// 注入位置固定在发送模型之前，子代理与并行工具的事件顺序保持不变。
+		if steering != nil {
+			req.Messages = injectSteering(req.Messages, number, steering(), injected, emit)
 		}
 		emit(Event{Kind: ModelStarted, Round: number})
 		if err := ctx.Err(); err != nil {
@@ -331,6 +351,40 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 		}
 	}
 	return stop(ErrBudgetExhausted)
+}
+
+// injectSteering 把本轮补充要求追加到模型历史并发出一条 Steered 事件。
+// 空文本不注入也不产生事件；同一运行内已注入的文本只注入一次。
+func injectSteering(messages []openai.ChatCompletionMessage, round int, texts []string, injected map[string]bool, emit func(Event)) []openai.ChatCompletionMessage {
+	for _, text := range texts {
+		text = strings.TrimSpace(text)
+		if text == "" || injected[text] {
+			continue
+		}
+		injected[text] = true
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role: openai.ChatMessageRoleUser, Content: "[运行中补充要求] " + text,
+		})
+		emit(Event{Kind: Steered, Round: round, Text: text})
+	}
+	return messages
+}
+
+type steeringKey struct{}
+
+// WithSteering 给 ctx 绑定运行中补充要求的读取回调；Runtime.Steering 为空时使用。
+// 用于只能在 ctx 上挂载依赖的调用方，多个运行互不共享状态。
+func WithSteering(ctx context.Context, steering func() []string) context.Context {
+	if steering == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, steeringKey{}, steering)
+}
+
+// SteeringFromContext 读取 WithSteering 绑定的回调。
+func SteeringFromContext(ctx context.Context) (func() []string, bool) {
+	steering, ok := ctx.Value(steeringKey{}).(func() []string)
+	return steering, ok && steering != nil
 }
 
 // ValidateResponse 校验模型响应的完整性及工具调用身份，运行和历史恢复共用同一协议规则。

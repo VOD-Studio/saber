@@ -2,8 +2,6 @@ package ai
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -120,6 +118,18 @@ func (s *Service) TaskCommand(ctx context.Context, message chat.Message, adapter
 	if action == "run" {
 		return s.ChatCommand(ctx, message, adapter, s.GetModelRegistry().GetDefault(), raw)
 	}
+	identity := chat.Identity{Session: message.Session, SenderID: message.SenderID}
+	if action == "redirect" {
+		taskID, text, ok := parseTaskRedirect(raw)
+		if !ok {
+			return commandReply(ctx, message, adapter, "用法：/task redirect <id> <补充要求>")
+		}
+		replyText, err := s.taskRedirect(ctx, identity, taskID, text)
+		if err != nil {
+			replyText = taskOperationError(err)
+		}
+		return commandReply(ctx, message, adapter, replyText)
+	}
 	var id int64
 	if action != "list" && action != "" {
 		fields := strings.Fields(raw)
@@ -132,11 +142,9 @@ func (s *Service) TaskCommand(ctx context.Context, message chat.Message, adapter
 	} else if strings.TrimSpace(raw) != "" {
 		return commandReply(ctx, message, adapter, "用法：/task list")
 	}
-	text, err := s.taskOperation(ctx, chat.Identity{Session: message.Session, SenderID: message.SenderID}, action, id, message.ID)
-	if errors.Is(err, sql.ErrNoRows) {
-		text = "本会话不存在该任务"
-	} else if err != nil {
-		text = "任务操作失败：" + err.Error()
+	text, err := s.taskOperation(ctx, identity, action, id, message.ID)
+	if err != nil {
+		text = taskOperationError(err)
 	}
 	return commandReply(ctx, message, adapter, text)
 }

@@ -109,6 +109,18 @@ func (s *Service) EnableTasks(path string) error {
 		if err := s.core.WaitForRateLimit(ctx); err != nil {
 			return agent.Result{}, err
 		}
+		// 持久任务在每轮模型请求前消费一次补充要求；读取与标记同事务，重启不会重复注入。
+		if taskID := task.ID(ctx); taskID > 0 {
+			manager, runCtx := s.tasks, ctx
+			ctx = agent.WithSteering(runCtx, func() []string {
+				texts, err := manager.ConsumeSteering(runCtx, taskID, task.MaxPendingSteering)
+				if err != nil {
+					slog.Warn("读取运行中补充要求失败", "task", taskID, "error", err)
+					return nil
+				}
+				return texts
+			})
+		}
 		progress := s.newTaskStream(ctx)
 		if progress != nil {
 			defer progress.close()
@@ -281,10 +293,18 @@ func (s *Service) submitTask(ctx context.Context, message chat.Message, req agen
 
 var naturalTaskID = regexp.MustCompile(`^(查看|查询|取消)任务\s*#?([0-9]+)\s*(?:的状态)?[。！!？?]?$`)
 
+// naturalTaskRedirect 匹配「重定向任务 #12 <文本>」与「补充任务 #12 <文本>」。
+var naturalTaskRedirect = regexp.MustCompile(`^(?:重定向|补充)任务\s*#?([0-9]+)(?:\s+|[:：]\s*)([\s\S]+)$`)
+
 func naturalTaskCommand(text string) (string, int64, bool) {
 	text = strings.TrimSpace(text)
 	if text == "列出任务" || text == "查看任务列表" || text == "任务列表" {
 		return "list", 0, true
+	}
+	if match := naturalTaskRedirect.FindStringSubmatch(text); match != nil {
+		if taskID, err := strconv.ParseInt(match[1], 10, 64); err == nil && taskID > 0 && strings.TrimSpace(match[2]) != "" {
+			return "redirect", taskID, true
+		}
 	}
 	match := naturalTaskID.FindStringSubmatch(text)
 	if match == nil {
@@ -301,14 +321,73 @@ func naturalTaskCommand(text string) (string, int64, bool) {
 	return action, taskID, true
 }
 
-func (s *Service) replyTaskCommand(ctx context.Context, message chat.Message, reply chat.Adapter, action string, taskID int64) error {
-	text, err := s.taskOperation(ctx, chat.Identity{Session: message.Session, SenderID: message.SenderID}, action, taskID)
+// naturalRedirectText 返回自然语言重定向命令中的补充要求正文。
+func naturalRedirectText(text string) (string, bool) {
+	match := naturalTaskRedirect.FindStringSubmatch(strings.TrimSpace(text))
+	if match == nil {
+		return "", false
+	}
+	taskID, err := strconv.ParseInt(match[1], 10, 64)
+	if err != nil || taskID <= 0 {
+		return "", false
+	}
+	payload := strings.TrimSpace(match[2])
+	return payload, payload != ""
+}
+
+// parseTaskRedirect 从命令正文解析任务编号与补充要求，正文保留原始空格与换行。
+func parseTaskRedirect(raw string) (int64, string, bool) {
+	head, rest := commandField(raw)
+	taskID, err := strconv.ParseInt(strings.TrimPrefix(head, "#"), 10, 64)
+	rest = strings.TrimSpace(rest)
+	if err != nil || taskID <= 0 || rest == "" {
+		return 0, "", false
+	}
+	return taskID, rest, true
+}
+
+// taskRedirect 把补充要求排队到目标任务；身份与群只取当前消息上下文。
+func (s *Service) taskRedirect(ctx context.Context, identity chat.Identity, taskID int64, text string) (string, error) {
+	if s.tasks == nil {
+		return "", errors.New("任务服务未启用")
+	}
+	t, err := s.tasks.Redirect(ctx, identity, taskID, text)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			text = "本群不存在该任务"
-		} else {
-			text = "任务操作失败：" + err.Error()
+		return "", err
+	}
+	if t.Status == "running" {
+		return fmt.Sprintf("已排队补充要求，任务 #%d 将在下一轮模型请求前生效。", t.ID), nil
+	}
+	return fmt.Sprintf("已排队补充要求，任务 #%d 开始时生效。", t.ID), nil
+}
+
+// taskOperationError 把内部错误转成用户可读回执，终态任务直接给出续接建议。
+func taskOperationError(err error) string {
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return "本群不存在该任务"
+	case errors.Is(err, task.ErrTaskFinished):
+		return err.Error()
+	default:
+		return "任务操作失败：" + err.Error()
+	}
+}
+
+func (s *Service) replyTaskCommand(ctx context.Context, message chat.Message, reply chat.Adapter, action string, taskID int64) error {
+	identity := chat.Identity{Session: message.Session, SenderID: message.SenderID}
+	var text string
+	var err error
+	if action == "redirect" {
+		payload, ok := naturalRedirectText(message.CommandText())
+		if !ok {
+			return commandReply(ctx, message, reply, "用法：重定向任务 #<编号> <补充要求>")
 		}
+		text, err = s.taskRedirect(ctx, identity, taskID, payload)
+	} else {
+		text, err = s.taskOperation(ctx, identity, action, taskID)
+	}
+	if err != nil {
+		text = taskOperationError(err)
 	}
 	_, sendErr := reply.Send(ctx, chat.Reply{Session: message.Session, ReplyTo: message.ID, Text: taskText(text)})
 	return sendErr
@@ -342,6 +421,9 @@ func (s *Service) taskOperation(ctx context.Context, identity chat.Identity, act
 			return "", err
 		}
 		text := fmt.Sprintf("任务 #%d：%s\n发起人：%s\n工作目录：%s\n来源消息：%s\n话题：%s\n取消请求：%t\n执行记录：%d 条\n结果投递：%s（尝试 %d 次）", t.ID, t.Status, t.Message.SenderID, t.WorkDir, t.Message.ID, t.Message.Session.Thread, t.CancelRequested, len(events), t.Delivery, t.DeliveryAttempts)
+		if pending, pendingErr := s.tasks.PendingSteering(ctx, identity.Session, taskID); pendingErr == nil {
+			text += fmt.Sprintf("\n补充要求待生效：%d 条", pending)
+		}
 		if t.Message.Session.Platform == "matrix" {
 			text += "\nhttps://matrix.to/#/" + t.Message.Session.Conversation + "/" + t.Message.ID
 		}
@@ -383,7 +465,7 @@ func (s *Service) taskOperation(ctx context.Context, identity chat.Identity, act
 		}
 		return task.Report(t), nil
 	default:
-		return "用法：!task run <内容> | !task list | !task status <ID> | !task cancel <ID> | !task logs <ID>", nil
+		return "用法：!task run <内容> | !task list | !task status <ID> | !task cancel <ID> | !task redirect <ID> <补充要求> | !task logs <ID>", nil
 	}
 }
 

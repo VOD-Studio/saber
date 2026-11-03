@@ -181,6 +181,7 @@ func (s *appState) buildCommands() error {
 			{"list", "列出当前会话任务", "", nil},
 			{"status", "查看任务状态", "", []command.Argument{{Name: "id", Type: "integer", Required: true}}},
 			{"cancel", "取消自己或获授权的任务", "", []command.Argument{{Name: "id", Type: "integer", Required: true}}},
+			{"redirect", "补充运行中任务的要求，下一轮生效", "", []command.Argument{{Name: "id", Type: "integer", Required: true}, {Name: "text", Type: "string", Required: true}}},
 			{"logs", "下载任务完整日志", "file", []command.Argument{{Name: "id", Type: "integer", Required: true}}},
 		} {
 			action := sub.name
@@ -193,7 +194,7 @@ func (s *appState) buildCommands() error {
 		}
 		if err := add("task.help", []string{"task"}, "任务命令用法", "conversation", nil, nil, "", nil,
 			func(ctx context.Context, m chat.Message, a chat.Adapter, _ string) error {
-				return reply(ctx, m, a, "用法：/task run/list/status/cancel/logs")
+				return reply(ctx, m, a, "用法：/task run/list/status/cancel/redirect/logs")
 			}); err != nil {
 			return err
 		}
@@ -389,7 +390,7 @@ func (s *appState) statusReport(message chat.Message) string {
 // onceCommand 标记有副作用的命令，重复投递只重试回执，不重做写入。
 func onceCommand(id string) bool {
 	switch id {
-	case "ai.clear", "ai.switch", "task.cancel", "schedule.pause", "schedule.delete", "meme",
+	case "ai.clear", "ai.switch", "task.cancel", "task.redirect", "schedule.pause", "schedule.delete", "meme",
 		"exec.approve", "exec.deny",
 		"memory.add", "memory.edit", "memory.forget", "memory.approve", "memory.reject", "memory.pause", "memory.resume",
 		"skill.add", "skill.edit", "skill.delete", "skill.approve", "skill.reject":

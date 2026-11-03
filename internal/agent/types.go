@@ -242,6 +242,8 @@ const (
 	BudgetExtended EventKind = "budget_extended"
 	// BudgetStopped 表示预算停止并给出可观察原因。
 	BudgetStopped EventKind = "budget_stopped"
+	// Steered 表示本轮已注入运行中补充要求，Text 为补充原文，Round 为生效轮次。
+	Steered EventKind = "steered"
 	// SubagentStarted 表示顶层运行已启动一个子代理。
 	SubagentStarted EventKind = "subagent_started"
 	// SubagentFinished 表示子代理已结束，结果与用量对父任务可见。

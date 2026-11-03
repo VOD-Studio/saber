@@ -123,7 +123,12 @@ func openStore(path string) (*store, error) {
  );
  CREATE TABLE IF NOT EXISTS task_runtime_state (
   task_id INTEGER PRIMARY KEY REFERENCES tasks(id), state BLOB, checkpoint BLOB
- );` + scheduleSchema)
+ );
+ CREATE TABLE IF NOT EXISTS task_steering (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL REFERENCES tasks(id),
+  text TEXT NOT NULL, created_at INTEGER NOT NULL, delivered_at INTEGER
+ );
+ CREATE INDEX IF NOT EXISTS task_steering_pending ON task_steering(task_id, delivered_at);` + scheduleSchema)
 	if err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
