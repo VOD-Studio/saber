@@ -111,6 +111,14 @@ func (s *appState) buildCommands() error {
 	}
 	if aiSvc := s.services.aiService; aiSvc != nil {
 		r.SetReceipts(aiSvc.Tasks())
+		// 未命中任何命令路径的 `/词` 只在该词对应当前可信空间的技能时交给 AI；
+		// 其余正文仍由注册表回复「未知命令」，不会被静默吞掉。
+		r.SetFallback(func(ctx context.Context, message chat.Message, reply chat.Adapter) (bool, error) {
+			if !aiSvc.CanInvokeSkill(ctx, message) {
+				return false, nil
+			}
+			return true, aiSvc.InvokeSkillCommand(ctx, message, reply)
+		})
 		// 审批命令与 Matrix、terminal/violet 共用同一注册表；身份只取自消息入口。
 		for _, op := range []struct {
 			id, name, description string
