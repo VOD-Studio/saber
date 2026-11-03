@@ -5,8 +5,11 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"os"
+
+	"rua.plus/saber/internal/acp"
 
 	// 注册 SQLite 驱动 (纯 Go 实现)
 	_ "rua.plus/saber/internal/db"
@@ -25,6 +28,15 @@ var (
 )
 
 func main() {
+	// acp 是独立的 stdio 协议入口，不启动 Matrix 机器人。
+	// 用户可见的错误由 acp 写入 stderr，这里只负责设置退出码。
+	if len(os.Args) > 1 && os.Args[1] == "acp" {
+		if err := acp.Run(context.Background(), os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
+
 	err := bot.Run(matrix.BuildInfo{
 		Version:       version,
 		GitCommit:     gitCommit,
