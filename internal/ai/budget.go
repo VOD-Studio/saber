@@ -17,10 +17,12 @@ const budgetSystemPrompt = `你是任务预算评估器。判断当前任务是�
 2. 如果仍有明确、互不重复的下一步，可建议继续；如果陷入重复、已无必要或风险过高，建议停止。
 3. 只输出严格 JSON：{"continue":true|false,"reason":"简短原因","remaining_steps":["下一步"]}`
 
-// budgetEvaluator 用主模型做一次无工具、非流式、512 token、10 秒的预算评估。
+// budgetEvaluator 用主模型做一次无工具、非流式的预算评估。
+// 输出上限沿用模型生成预算、时限与摘要一致：推理模型的思考 token 同样计入
+// 输出上限，固定小额度会在 JSON 产出前被截断，评估失败即终止任务。
 func (s *Service) budgetEvaluator(modelName string) agent.BudgetEvaluator {
 	return func(ctx context.Context, progress agent.BudgetProgress) (agent.BudgetDecision, error) {
-		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, auxiliaryRequestTimeout)
 		defer cancel()
 		var body strings.Builder
 		fmt.Fprintf(&body, "已用轮次 %d/%d（软限 %d），账号用量 %d，运行中进程 %d，已用时 %s。\n",
@@ -49,7 +51,7 @@ func (s *Service) budgetEvaluator(modelName string) agent.BudgetEvaluator {
 			Model:     modelName,
 			Messages:  []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleSystem, Content: budgetSystemPrompt}, {Role: openai.ChatMessageRoleUser, Content: body.String()}},
 			Stream:    false,
-			MaxTokens: 512,
+			MaxTokens: s.auxiliaryMaxTokens(modelName),
 			Purpose:   "evaluation",
 		}
 		retry := &RetryConfigWrapper{MaxRetries: 0}

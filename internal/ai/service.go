@@ -201,6 +201,20 @@ func (s *Service) getClient(modelName string) (*Client, error) {
 	return s.core.GetClient(modelName)
 }
 
+// auxiliaryRequestTimeout 是评估、摘要等辅助模型请求的时限。
+// 推理模型要先把思考 token 写完才会给出结论，过短的时限会与截断一样让任务误判预算耗尽。
+const auxiliaryRequestTimeout = 30 * time.Second
+
+// auxiliaryMaxTokens 返回评估、摘要等辅助请求的输出上限。
+// 与主请求一致沿用模型自身的生成预算：Responses 的 max_output_tokens 和推理模型的
+// completion tokens 都包含思考 token，固定小额度会在结论或 JSON 产出前被上游截断。
+func (s *Service) auxiliaryMaxTokens(modelName string) int {
+	if cfg, ok := s.core.GetConfig().GetModelConfig(modelName); ok && cfg.MaxTokens > 0 {
+		return cfg.MaxTokens
+	}
+	return config.DefaultAIConfig().MaxTokens
+}
+
 // IsEnabled 检查 AI 服务是否已启用。
 //
 // 返回值:

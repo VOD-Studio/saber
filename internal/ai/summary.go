@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"github.com/sashabaranov/go-openai"
 	"rua.plus/saber/internal/agent"
@@ -21,7 +20,7 @@ const summarySystemPrompt = `你是任务上下文压缩器。把给定的历史
 // summarizer 用当前主模型执行一次无工具、非流式、固定短超时的摘要请求。
 func (s *Service) summarizer(modelName string) agent.SummaryFunc {
 	return func(ctx context.Context, input agent.SummaryInput) (agent.SummaryOutput, error) {
-		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, auxiliaryRequestTimeout)
 		defer cancel()
 		var body strings.Builder
 		if input.Previous != "" {
@@ -48,7 +47,7 @@ func (s *Service) summarizer(modelName string) agent.SummaryFunc {
 			Model:     modelName,
 			Messages:  []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleSystem, Content: summarySystemPrompt}, {Role: openai.ChatMessageRoleUser, Content: body.String()}},
 			Stream:    false,
-			MaxTokens: 1024,
+			MaxTokens: s.auxiliaryMaxTokens(modelName),
 			Purpose:   "summary",
 		}
 		retry := &RetryConfigWrapper{MaxRetries: 0}

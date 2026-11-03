@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 预算评估与摘要请求的输出上限原本固定为 512/1024 token，而推理模型的思考 token 同样计入 `max_output_tokens`（Responses）或 completion tokens，思考一旦超过上限，上游就以 `incomplete: max_output_tokens` 截断；评估失败随后被当成「轮数预算耗尽」终止任务，用户只能看到底层模型错误。现在两类辅助请求沿用模型自身的 `max_tokens`，评估时限也与摘要统一为 30 秒，避免推理模型先写思考时被过早判死。
+
 ## [0.5.0] - 2026-11-03
 
 ### Added
