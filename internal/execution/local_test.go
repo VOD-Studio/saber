@@ -45,6 +45,31 @@ func TestLocalExecution_PersistsTMPDIRAndClosesEnvironment(t *testing.T) {
 	require.Equal(t, envClosed, record.State)
 }
 
+func TestLocalExecution_LongOutputReplay(t *testing.T) {
+	e, ctx, _ := fileFixture(t)
+	result, err := e.Run(ctx, "exec", map[string]any{"command": "head -c 70000 /dev/zero | tr '\\0' x; printf '\\nP0_OUTPUT_END_7439\\n'"})
+	require.NoError(t, err)
+	require.Equal(t, 0, result.ExitCode)
+	require.NotEmpty(t, result.OutputID)
+	var collected strings.Builder
+	offset := 0
+	for pages := 0; ; pages++ {
+		require.Less(t, pages, 100)
+		page, err := e.Run(ctx, "read_output", map[string]any{"output_id": result.OutputID, "offset": float64(offset), "limit": float64(4096)})
+		require.NoError(t, err)
+		data := page.Data.(map[string]any)
+		next := data["next_offset"].(int)
+		require.Greater(t, next, offset, "byte cursor must advance")
+		collected.WriteString(data["text"].(string))
+		offset = next
+		if data["eof"].(bool) {
+			break
+		}
+	}
+	require.Contains(t, collected.String(), "P0_OUTPUT_END_7439")
+	require.NoError(t, e.CloseTask(ctx, 7))
+}
+
 func TestLocalExecution_CancelKillsProcessGroup(t *testing.T) {
 	e, ctx, dir := fileFixture(t)
 	cancelCtx, cancel := context.WithTimeout(ctx, 400*time.Millisecond)
