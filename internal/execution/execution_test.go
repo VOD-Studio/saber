@@ -23,9 +23,9 @@ func fixture(t *testing.T) (config.ExecutionConfig, chat.Identity) {
 
 func TestPolicy_TrustedScopeAndSeparateCapabilities(t *testing.T) {
 	cfg, identity := fixture(t)
-	cfg.MCPRequirements = map[string][]string{"mcp:release:push": {"publish"}, "mcp:deploy:run": {"deploy"}, "mcp:files:read": {"cross_directory"}}
-	cfg.Grants[0].Tools = append(cfg.Grants[0].Tools, "mcp:release:push", "mcp:deploy:run", "mcp:files:read")
-	cfg.Grants[0].Capabilities = []string{"external", "publish"}
+	cfg.MCPRequirements = map[string][]string{"mcp:release:push": {}, "mcp:deploy:run": {}}
+	cfg.Grants[0].Tools = append(cfg.Grants[0].Tools, "mcp:release:push", "mcp:deploy:run")
+	cfg.Grants[0].Capabilities = []string{"external"}
 	e, err := New(cfg, nil, nil)
 	require.NoError(t, err)
 	dir, err := e.Workspace(identity)
@@ -34,8 +34,6 @@ func TestPolicy_TrustedScopeAndSeparateCapabilities(t *testing.T) {
 	require.NoError(t, e.Check(ctx, "exec"))
 	require.Len(t, e.Tools(ctx), 5)
 	require.NoError(t, e.CheckMCP(ctx, "release", "push"))
-	require.Error(t, e.CheckMCP(ctx, "deploy", "run"))
-	require.Error(t, e.CheckMCP(ctx, "files", "read"))
 	require.Error(t, e.CheckMCP(ctx, "unknown", "tool"))
 	require.Error(t, e.Check(context.Background(), "exec"))
 	require.Error(t, e.Check(WithTask(ctx, 42, t.TempDir()), "exec"))
@@ -46,13 +44,26 @@ func TestPolicy_TrustedScopeAndSeparateCapabilities(t *testing.T) {
 	other.Session.Account = "other"
 	require.Error(t, e.Check(chat.WithIdentity(ctx, other), "exec"))
 	// 修改原配置对象和工具内容不会改变编译后的权限。
-	cfg.Grants[0].Capabilities[0] = "deploy"
-	cfg.MCPRequirements["mcp:deploy:run"][0] = "publish"
-	require.Error(t, e.CheckMCP(ctx, "deploy", "run"))
+	cfg.Grants[0].Capabilities[0] = "publish"
+	cfg.MCPRequirements["mcp:deploy:run"] = []string{"publish"}
+	require.NoError(t, e.CheckMCP(ctx, "deploy", "run"))
 	_, err = e.Run(ctx, "exec", map[string]any{"command": "true", "workspace": "/", "capabilities": []string{"deploy"}})
 	require.Error(t, err)
 	e.blocked.Store(dir, true)
 	require.Error(t, e.Check(ctx, "exec"))
+	require.Error(t, e.CheckMCP(ctx, "release", "push"))
+}
+
+// TestPolicy_MCPRequiresExternalCapability 验证 MCP 工具必须单独授予 external。
+func TestPolicy_MCPRequiresExternalCapability(t *testing.T) {
+	cfg, identity := fixture(t)
+	cfg.MCPRequirements = map[string][]string{"mcp:release:push": {}}
+	cfg.Grants[0].Tools = append(cfg.Grants[0].Tools, "mcp:release:push")
+	e, err := New(cfg, nil, nil)
+	require.NoError(t, err)
+	dir, err := e.Workspace(identity)
+	require.NoError(t, err)
+	ctx := WithTask(chat.WithIdentity(context.Background(), identity), 7, dir)
 	require.Error(t, e.CheckMCP(ctx, "release", "push"))
 }
 
@@ -96,8 +107,13 @@ func TestPolicy_RejectsSecretsAndUnsafeRoots(t *testing.T) {
 }
 
 // TestPolicy_GrantWildcards 验证会话与成员通配授权的命中范围，以及精确授权优先。
+//
+// 通配授权只在 docker 后端合法（local 不是沙箱），而这里只验证授权键的优先级，
+// 因此关闭执行器以免探测 Docker daemon。
 func TestPolicy_GrantWildcards(t *testing.T) {
 	cfg, identity := fixture(t)
+	cfg.Enabled = false
+	cfg.Backend = "docker"
 	tools := cfg.Grants[0].Tools
 	cfg.Workspaces["exact"] = config.WorkspaceConfig{Path: t.TempDir()}
 	cfg.Workspaces["room"] = config.WorkspaceConfig{Path: t.TempDir()}
@@ -141,16 +157,13 @@ func TestPolicy_GrantWildcards(t *testing.T) {
 		{"账号必须精确匹配", otherAccount, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dir, err := e.Workspace(tc.identity)
+			grant, ok := e.grant(tc.identity)
 			if tc.want == "" {
-				require.Error(t, err)
+				require.False(t, ok)
 				return
 			}
-			require.NoError(t, err)
-			// New() 会解析符号链接，比较时同样取真实路径。
-			want, wantErr := filepath.EvalSymlinks(cfg.Workspaces[tc.want].Path)
-			require.NoError(t, wantErr)
-			require.Equal(t, want, dir)
+			require.True(t, ok)
+			require.Equal(t, tc.want, grant.Workspace)
 		})
 	}
 }

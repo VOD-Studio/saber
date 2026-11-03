@@ -103,7 +103,7 @@ func ValidateConfig(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets
 		}
 		for _, capability := range v {
 			if !validCapability(capability) {
-				return cfg, fmt.Errorf("unknown capability %q", capability)
+				return cfg, capabilityError(capability)
 			}
 		}
 	}
@@ -184,8 +184,17 @@ func ValidateConfig(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets
 		grant.Capabilities = slices.Clone(grant.Capabilities)
 		for _, capability := range grant.Capabilities {
 			if !validCapability(capability) {
-				return cfg, fmt.Errorf("unknown capability %q", capability)
+				return cfg, capabilityError(capability)
 			}
+		}
+		// 通配授权把工作区交给会话内任意成员，而 local 后端以宿主用户身份运行、不是沙箱：
+		// 只有 docker 的挂载与进程隔离才能兜住这类授权。
+		backend, err := cfg.BackendFor(grant.Workspace)
+		if err != nil {
+			return cfg, fmt.Errorf("workspace %q: %w", grant.Workspace, err)
+		}
+		if backend == "local" && (grant.Room == "*" || slices.Contains(grant.Users, "*")) {
+			return cfg, fmt.Errorf("workspace %q cannot grant wildcard room/users on the local backend: local execution is not a sandbox; use backend: docker", grant.Workspace)
 		}
 		for _, tool := range grant.Tools {
 			if !LocalTool(tool) {
@@ -327,8 +336,15 @@ func ValidateEnvironment(env map[string]string, forbiddenSecrets []string) error
 	return nil
 }
 
+// validCapability 只承认本构建真正检查的能力：MCP 调用额外要求 external；
+// publish、deploy、cross_directory 没有对应检查，配置它们会让人误以为已受保护。
 func validCapability(capability string) bool {
-	return slices.Contains([]string{"external", "publish", "deploy", "cross_directory"}, capability)
+	return capability == "external"
+}
+
+// capabilityError 说明能力不被支持，避免把未实施的名称当成已生效的授权。
+func capabilityError(capability string) error {
+	return fmt.Errorf("capability %q is not enforced by this build (only external is supported)", capability)
 }
 func within(root, path string) bool {
 	rel, err := filepath.Rel(root, path)

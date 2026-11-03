@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 预算评估与摘要请求的输出上限原本固定为 512/1024 token，而推理模型的思考 token 同样计入 `max_output_tokens`（Responses）或 completion tokens，思考一旦超过上限，上游就以 `incomplete: max_output_tokens` 截断；评估失败随后被当成「轮数预算耗尽」终止任务，用户只能看到底层模型错误，前半段回复也没有任何实际动作。现在两类辅助请求沿用模型自身的 `max_tokens`，时限沿用请求超时，并遵守 `agent.retry` 的瞬时错误重试，一次 5xx 不再直接判死整次任务。
 
+### Security
+
+- 只接受真正被检查的授权：`capabilities` 里的 `publish`、`deploy`、`cross_directory` 从未有对应检查，现在启动时直接报 `capability "publish" is not enforced by this build (only external is supported)`，不再让配置看起来像已生效的保护；`room: "*"` 或成员 `"*"` 的通配授权只允许配在 `docker` 后端，`local` 下发通配会在启动时被拒绝并提示 `local execution is not a sandbox`。
+
 ## [0.5.0] - 2026-11-03
 
 ### Added

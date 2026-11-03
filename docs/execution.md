@@ -47,7 +47,7 @@
 
 ## local 隔离限制
 
-`local` 不是安全沙箱：命令可读取 Saber 用户可访问的配置密钥、任务/记忆数据库和其他工作区；程序层个人/群隔离不构成 OS 隔离。没有恶意 daemon 防护、断网或资源配额；主动 `setsid`/daemon 逃逸无法强制约束；Saber 被 SIGKILL 后也不能保证清理所有 local 孤儿进程。取消验收只覆盖 Saber 持有并管理的普通命令与派生进程。不要把 `local` 授权发给不可信群成员；需要强隔离或断网时使用 `backend: docker`。
+`local` 不是安全沙箱：命令可读取 Saber 用户可访问的配置密钥、任务/记忆数据库和其他工作区；程序层个人/群隔离不构成 OS 隔离。没有恶意 daemon 防护、断网或资源配额；主动 `setsid`/daemon 逃逸无法强制约束；Saber 被 SIGKILL 后也不能保证清理所有 local 孤儿进程。取消验收只覆盖 Saber 持有并管理的普通命令与派生进程。不要把 `local` 授权发给不可信群成员；需要强隔离或断网时使用 `backend: docker`。因此 `local` 后端不接受 `room: "*"` 或成员 `"*"` 的通配授权，启动时直接拒绝。
 
 `local` 支持 Darwin/Linux/FreeBSD/OpenBSD 并使用 `/bin/sh`；其他平台保持二进制可编译，活动 local 工作区含 `exec`/`process` 授权时明确报错 `local execution is unsupported on this platform; configure backend: docker`。`network: false` 对 local 不生效，配置时会拒绝启动（`local backend cannot enforce network isolation`）。
 
@@ -83,20 +83,18 @@ execution:
   mcp_requirements: {}
 ```
 
-`task_admins` 只授予同群任务取消、日志读取与计划暂停/删除，不授予执行工具。工作区必须是现有绝对路径，不得包含 Saber 配置、任务/人格/记忆数据库或执行日志；不同工作区不可嵌套。启动时会克隆并冻结授权，恢复任务时重新核对目录与工具权限。
+`task_admins` 只授予同群任务取消、日志读取与计划暂停/删除，不授予执行工具。`room` 或 `users` 使用 `"*"` 通配时，该工作区的有效后端必须是 `docker`；`local` 会直接拒绝启动并提示 `workspace "..." cannot grant wildcard room/users on the local backend`。工作区必须是现有绝对路径，不得包含 Saber 配置、任务/人格/记忆数据库或执行日志；不同工作区不可嵌套。启动时会克隆并冻结授权，恢复任务时重新核对目录与工具权限。
 
 Docker 部署还要求 Saber 与 Docker CLI/daemon 在同一宿主用户会话中，镜像预装 `/usr/bin/env`、Python 3 与 `/bin/sh`。生产环境建议固定镜像 digest。现有 Distroless 运行镜像只适用于 `execution.enabled: false`。
 
 ## MCP 与外部能力
 
-所有 MCP 实际调用都经过同一权限检查，默认拒绝未知工具、未授权成员、账号/群不符和缺少能力的调用。每个 MCP 工具都需要 `external`；发布、部署、跨目录分别要求 `publish`、`deploy`、`cross_directory`，不信任服务端自报的只读描述。
+所有 MCP 实际调用都经过同一权限检查，默认拒绝未知工具、未授权成员、账号/群不符和缺少能力的调用。本构建只实施 `external` 一种能力：每个 MCP 工具都必须在 `mcp_requirements` 声明，并在授权里单独授予 `external`，不信任服务端自报的只读描述。`publish`、`deploy`、`cross_directory` 没有任何对应检查，配置它们会在启动时报 `capability "publish" is not enforced by this build (only external is supported)`，不会静默当作已保护。
 
 ```yaml
 execution:
   mcp_requirements:
-    "mcp:release:publish": ["publish"]
-    "mcp:production:deploy": ["deploy"]
-    "mcp:archive:read": ["cross_directory"]
+    "mcp:release:publish": []
   grants:
     - platform: "matrix"
       account: "@saber:example.org"
@@ -104,7 +102,7 @@ execution:
       users: ["@alice:example.org"]
       workspace: "project"
       tools: ["exec", "read_file", "mcp:release:publish"]
-      capabilities: ["external", "publish"]
+      capabilities: ["external"]
 ```
 
 stdio MCP 仍要求原有命令白名单，其子进程只得到 `PATH` 和显式 `env`。
