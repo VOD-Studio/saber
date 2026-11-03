@@ -392,7 +392,7 @@ func TestContextManager_GetContextSize(t *testing.T) {
 				cm.AddMessage(roomID, RoleUser, "Hi", userID)
 			},
 			wantCount: 1,
-			minTokens: 1, // len("Hi") = 2, tokens ~= 2/0.75 = 2.67 -> 2
+			minTokens: 1, // len("Hi") = 2 字节，按 4 字节 1 token 向上取整为 1
 		},
 		{
 			name: "多条消息",
@@ -401,7 +401,7 @@ func TestContextManager_GetContextSize(t *testing.T) {
 				cm.AddMessage(roomID, RoleAssistant, "Hi there!", userID)
 			},
 			wantCount: 2,
-			minTokens: 10, // Combined length ~20 chars, tokens ~= 26
+			minTokens: 6, // 11 + 9 = 20 字节，按 4 字节 1 token 向上取整为 3 + 3
 		},
 		{
 			name: "长消息",
@@ -410,7 +410,7 @@ func TestContextManager_GetContextSize(t *testing.T) {
 				cm.AddMessage(roomID, RoleUser, longMsg, userID)
 			},
 			wantCount: 1,
-			minTokens: 100, // 100 chars / 0.75 = 133 tokens
+			minTokens: 25, // 100 字节 / 4 = 25 token
 		},
 	}
 
@@ -500,7 +500,7 @@ func TestContextManager_TokenTruncation(t *testing.T) {
 	roomID := chat.SessionID("!test:example.com")
 	userID := string("@user:example.com")
 
-	// 每个 "test message" 约 14 个字符 = ~18 tokens
+	// 每条 "test message N" 为 14 字节，按 4 字节 1 token 估算为 4 token，共 40 token。
 	// 我们创建多个消息来测试截断
 
 	tests := []struct {
@@ -517,13 +517,13 @@ func TestContextManager_TokenTruncation(t *testing.T) {
 		},
 		{
 			name:        "small token limit",
-			maxTokens:   50, // ~2-3 messages
+			maxTokens:   12, // 3 messages
 			msgCount:    10,
-			wantMaxMsgs: 3, // Truncated to fit within 50 tokens
+			wantMaxMsgs: 3, // Truncated to fit within 12 tokens
 		},
 		{
 			name:        "very small token limit",
-			maxTokens:   20, // ~1 message
+			maxTokens:   5, // 1 message
 			msgCount:    10,
 			wantMaxMsgs: 1,
 		},
@@ -575,9 +575,9 @@ func TestContextManager_MessageAndTokenLimit(t *testing.T) {
 		{
 			name:        "token limit is stricter",
 			maxMessages: 100, // Very high
-			maxTokens:   30,  // ~1-2 messages
+			maxTokens:   9,   // 3 messages
 			msgCount:    10,
-			wantMaxMsgs: 2,
+			wantMaxMsgs: 3,
 		},
 		{
 			name:        "both limits same effect",
@@ -1228,15 +1228,15 @@ func TestContextManager_TokenEstimationAccuracy(t *testing.T) {
 	}{
 		{
 			name:      "simple ascii",
-			content:   "Hello World", // 11 chars
-			minTokens: 10,            // 11/0.75 = 14.67 -> 14
-			maxTokens: 20,
+			content:   "Hello World", // 11 字节
+			minTokens: 2,             // 11 字节按 4 字节 1 token 向上取整为 3
+			maxTokens: 5,
 		},
 		{
 			name:      "long message",
-			content:   strings.Repeat("a", 100), // 100 chars
-			minTokens: 100,                      // 100/0.75 = 133
-			maxTokens: 150,
+			content:   strings.Repeat("a", 100), // 100 字节
+			minTokens: 20,                       // 100/4 = 25
+			maxTokens: 30,
 		},
 		{
 			name:      "empty message",

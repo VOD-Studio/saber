@@ -70,9 +70,15 @@ func NewContextManager(config config.ContextConfig) *ContextManager {
 	return cm
 }
 
-// estimateTokens 估算文本的 token 数量。
+// bytesPerToken 与 agent 预算使用同一保守比率：4 个 UTF-8 字节视为 1 token。
+const bytesPerToken = 4
+
+// estimateTokens 按 UTF-8 字节数向上取整估算文本 token 数。
 func estimateTokens(text string) int {
-	return int(float64(len(text)) / 0.75)
+	if text == "" {
+		return 0
+	}
+	return (len(text) + bytesPerToken - 1) / bytesPerToken
 }
 
 // startBackgroundCleanup 启动后台清理 goroutine。

@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -62,7 +61,7 @@ func TestRuntime_CompactsAndKeepsConstraintsAndToolProtocol(t *testing.T) {
 	var compactEvents int
 	runtime := Runtime{
 		Limits:  Limits{MaxRounds: 12, Timeout: 10 * time.Second, MaxToolOutputBytes: 4096},
-		Context: ContextPolicy{Enabled: true, MaxMessages: 1000, MaxInputTokens: 3000, Compaction: CompactionPolicy{Enabled: true, TriggerRatio: 0.5, TargetRatio: 0.2}},
+		Context: ContextPolicy{Enabled: true, MaxMessages: 1000, MaxInputTokens: 750, Compaction: CompactionPolicy{Enabled: true, TriggerRatio: 0.5, TargetRatio: 0.2}},
 		Summarize: func(_ context.Context, input SummaryInput) (SummaryOutput, error) {
 			summaries++
 			require.NotEmpty(t, input.Messages)
@@ -126,7 +125,7 @@ func TestRuntime_CompactionFailureDoesNotCommitCheckpoint(t *testing.T) {
 	var checkpoint *Checkpoint
 	runtime := Runtime{
 		Limits:  Limits{MaxRounds: 4, Timeout: 5 * time.Second, MaxToolOutputBytes: 4096},
-		Context: ContextPolicy{Enabled: true, MaxMessages: 1000, MaxInputTokens: 600, Compaction: CompactionPolicy{Enabled: true, TriggerRatio: 0.5, TargetRatio: 0.2}},
+		Context: ContextPolicy{Enabled: true, MaxMessages: 1000, MaxInputTokens: 150, Compaction: CompactionPolicy{Enabled: true, TriggerRatio: 0.5, TargetRatio: 0.2}},
 		Summarize: func(context.Context, SummaryInput) (SummaryOutput, error) {
 			return SummaryOutput{}, errors.New("summary backend down")
 		},
@@ -199,9 +198,11 @@ func TestCloneTaskStateIsDeep(t *testing.T) {
 func TestContextSizeUsesRenderedInput(t *testing.T) {
 	state := &TaskState{Instructions: []Instruction{{TaskID: 1, Text: "约束"}}}
 	req := Request{Messages: []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "约束"}}, State: state, RuntimeContext: []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleSystem, Content: "运行时资料"}}}
-	messages, tokens, err := ContextSize(req)
-	require.NoError(t, err)
+	messages, tokens := ContextSize(req)
 	require.Equal(t, 2, messages)
-	encoded, _ := json.Marshal("约束")
-	require.Greater(t, tokens, len(encoded))
+	withoutRuntime := req
+	withoutRuntime.RuntimeContext = nil
+	_, baseTokens := ContextSize(withoutRuntime)
+	require.Greater(t, tokens, baseTokens, "token 估算必须覆盖渲染注入的运行时资料")
+	require.Less(t, tokens, 100, "token 估算不能退化为字节数")
 }

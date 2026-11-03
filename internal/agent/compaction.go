@@ -76,10 +76,7 @@ func (r Runtime) prepareContext(ctx context.Context, req Request, round, maxRoun
 		updated, err := TrimContext(req, policy)
 		return updated, compacted, nil, err
 	}
-	messages, tokens, err := ContextSize(req)
-	if err != nil {
-		return req, compacted, nil, err
-	}
+	messages, tokens := ContextSize(req)
 	maxTokens := policy.MaxInputTokens
 	triggerTokens := 0
 	if maxTokens > 0 {
@@ -114,7 +111,7 @@ func (r Runtime) prepareContext(ctx context.Context, req Request, round, maxRoun
 		return req, compacted, nil, nil
 	}
 	if hard {
-		if _, tokens, sizeErr := ContextSize(updated); sizeErr == nil && tokens > maxTokens {
+		if _, tokens := ContextSize(updated); tokens > maxTokens {
 			return req, compacted, nil, fmt.Errorf("%w: 压缩后渲染输入仍超过预算（%d tokens）", ErrBudgetExhausted, tokens)
 		}
 	}
@@ -123,10 +120,7 @@ func (r Runtime) prepareContext(ctx context.Context, req Request, round, maxRoun
 
 // compact 摘要最早的可压缩批次，保留最近两个完整批次与最新用户消息。
 func (r Runtime) compact(ctx context.Context, req Request, round int, emit func(Event), compaction CompactionPolicy) (Request, *Checkpoint, error) {
-	_, oldTokens, err := ContextSize(req)
-	if err != nil {
-		return req, nil, err
-	}
+	_, oldTokens := ContextSize(req)
 	pinned := 0
 	for pinned < len(req.Messages) {
 		role := req.Messages[pinned].Role
@@ -162,7 +156,7 @@ func (r Runtime) compact(ctx context.Context, req Request, round int, emit func(
 		probe.Messages = append([]openai.ChatCompletionMessage(nil), req.Messages[:pinned]...)
 		probe.Messages = append(probe.Messages, req.Messages[pinned+batches[preserveFrom].start:]...)
 		probe.Summary = ""
-		if _, tokens, err := ContextSize(probe); err == nil && tokens > r.Context.MaxInputTokens {
+		if _, tokens := ContextSize(probe); tokens > r.Context.MaxInputTokens {
 			for i := len(batches) - 1; i >= 0; i-- {
 				if batches[i].assistant {
 					preserveFrom = i
@@ -180,6 +174,7 @@ func (r Runtime) compact(ctx context.Context, req Request, round int, emit func(
 	if len(candidates) == 0 {
 		return req, nil, nil
 	}
+	// 摘要分批同样按 token 估算，与 MaxInputTokens 保持同一单位。
 	chunkBudget := 0
 	if r.Context.MaxInputTokens > 0 {
 		chunkBudget = int(float64(r.Context.MaxInputTokens) * 0.7)
@@ -193,20 +188,17 @@ func (r Runtime) compact(ctx context.Context, req Request, round int, emit func(
 	size := 0
 	for _, batch := range candidates {
 		part := req.Messages[pinned+batch.start : pinned+batch.end]
-		encoded, marshalErr := json.Marshal(part)
-		if marshalErr != nil {
-			return req, nil, marshalErr
-		}
-		if chunkBudget > 0 && size > 0 && size+len(encoded) > chunkBudget {
+		partTokens := estimateMessagesTokens(part)
+		if chunkBudget > 0 && size > 0 && size+partTokens > chunkBudget {
 			chunks = append(chunks, current)
 			current, size = chunk{}, 0
 		}
-		if chunkBudget > 0 && size == 0 && len(encoded) > chunkBudget {
+		if chunkBudget > 0 && size == 0 && partTokens > chunkBudget {
 			return req, nil, errors.New("context_compaction_failed: irreplaceable batch exceeds summary budget")
 		}
 		current.messages = append(current.messages, part...)
 		current.end = batch.end
-		size += len(encoded)
+		size += partTokens
 	}
 	if len(current.messages) > 0 {
 		chunks = append(chunks, current)
@@ -234,10 +226,7 @@ func (r Runtime) compact(ctx context.Context, req Request, round int, emit func(
 	newReq.Messages = append(newReq.Messages, req.Messages[pinned+compressedEnd:]...)
 	newReq.Summary = summary
 	newReq.ResponsesHistory = pruneResponses(req.ResponsesHistory, newReq.Messages)
-	_, newTokens, err := ContextSize(newReq)
-	if err != nil {
-		return req, nil, err
-	}
+	_, newTokens := ContextSize(newReq)
 	if newTokens >= oldTokens {
 		return req, nil, errors.New("context_compaction_failed: context did not shrink")
 	}
@@ -246,10 +235,7 @@ func (r Runtime) compact(ctx context.Context, req Request, round int, emit func(
 		if newTokens > target {
 			withoutSummary := newReq
 			withoutSummary.Summary = ""
-			_, preservedTokens, err := ContextSize(withoutSummary)
-			if err != nil {
-				return req, nil, err
-			}
+			_, preservedTokens := ContextSize(withoutSummary)
 			if preservedTokens <= target {
 				return req, nil, errors.New("context_compaction_failed: context did not fall to target")
 			}

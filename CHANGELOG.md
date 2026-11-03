@@ -9,12 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `agent.context.max_input_tokens` 与房间历史截断改用真正的 token 近似（4 个 UTF-8 字节折算 1 token），不再把序列化 JSON 的字节数直接当 token：此前 `max_input_tokens: 32768` 实际只相当于约 8k token，压缩触发得比配置值早约 4 倍。按字节调过参的部署应把该值除以约 4（例如改为 `8192`）以保持原有触发时机；`max_input_tokens` 现在逐字段统计消息正文、工具定义与保留的推理数据。
 - 支持不设输出上限：全局 `ai.max_tokens: 0` 时主请求、评估与摘要请求都省略 `max_output_tokens`/`max_tokens`，交由模型或上游默认，避免推理模型的思考 token 被固定上限截断；任务仍按实际用量记账，超过 `agent.budget.max_total_tokens` 后拒绝后续请求。模型级 `max_tokens: 0` 仍表示继承全局。
 - `agent.budget.max_total_tokens: 0` 表示不设任务用量上限：不再创建预算账本，实际用量仍汇总在任务结果中；`max_rounds`、`agent.timeout_seconds` 与单次输出上限继续生效。
 - 同时执行的任务数从硬编码的 4 改为 `agent.max_concurrent_tasks`（默认 4，范围 1 到 64；省略或 0 使用默认值，越界启动时报 `agent.max_concurrent_tasks 必须在 1 到 64 之间`）。工作目录互斥不变，仍只有不同目录的任务能并行到该上限。
 
 ### Fixed
 
+- 预算账本此前混用两种单位：预留按序列化字节扣减 `max_total_tokens`，记账在提供商返回 usage 时又按真实 token 累加，同一个整数里既有字节又有 token，长任务会在不可预期的位置提前耗尽。现在账本只保留 token 单位，预留与记账共用同一估算器；实际消耗超过预留时完整计入，只让后续请求失败。嵌套运行（子代理）不再替换 ctx 中的父账本，而是保留自己的上限并把每笔消耗上推父账本，父账本余额同时限制子运行的准入——此前每个子运行都有独立的 `max_total_tokens`，总开销随子运行数量成倍放大且父任务完全看不到。`BudgetStats` 新增 `main_usage`/`aux_usage` 拆分，`Result.Usage` 只表示主请求用量，任务状态里的「用量」补上 token 单位。
 - 预算评估与摘要请求的输出上限原本固定为 512/1024 token，而推理模型的思考 token 同样计入 `max_output_tokens`（Responses）或 completion tokens，思考一旦超过上限，上游就以 `incomplete: max_output_tokens` 截断；评估失败随后被当成「轮数预算耗尽」终止任务，用户只能看到底层模型错误，前半段回复也没有任何实际动作。现在两类辅助请求沿用模型自身的 `max_tokens`，时限沿用请求超时，并遵守 `agent.retry` 的瞬时错误重试，一次 5xx 不再直接判死整次任务。
 
 ### Security

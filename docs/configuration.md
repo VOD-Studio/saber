@@ -97,13 +97,13 @@ agent:
 
 `max_rounds` 是硬上限，包含最终回答；默认 40。`timeout_seconds` 覆盖整次任务的模型请求、重试等待与工具执行，不会被预算追加动态延长。`execution.timeout_seconds` 单独限制一次前台执行工具调用。
 
-`budget.enabled` 开启自适应轮数：到达 `initial_rounds`（0 表示 `min(5, max_rounds)`）后，程序先做确定性否决（取消/截止、用量不足、三次同名同参数且实质输出相同），再用主模型做一次无工具评估；只有程序决定才按 `extension_rounds` 追加，封顶 `max_rounds`。`max_total_tokens` 是任务级保守用量上限，覆盖主请求、重试、摘要和评估，设为 0 表示不设上限（仍受 `max_rounds`、`timeout_seconds` 与单次输出上限约束）；`admit` 在真实 HTTP 请求前收紧输出预算（全局 `max_tokens: 0` 时不发送输出上限，只预留输入，实际用量照常记账），无 usage 时按输入/输出字节估算。关闭自适应时仍按 `max_rounds` 固定执行并遵守用量上限。
+`budget.enabled` 开启自适应轮数：到达 `initial_rounds`（0 表示 `min(5, max_rounds)`）后，程序先做确定性否决（取消/截止、用量不足、三次同名同参数且实质输出相同），再用主模型做一次无工具评估；只有程序决定才按 `extension_rounds` 追加，封顶 `max_rounds`。`max_total_tokens` 是任务级保守用量上限，覆盖主请求、重试、摘要和评估，设为 0 表示不设上限（仍受 `max_rounds`、`timeout_seconds` 与单次输出上限约束）；`admit` 在真实 HTTP 请求前收紧输出预算（全局 `max_tokens: 0` 时不发送输出上限，只预留输入，实际用量照常记账）。预留按 4 个 UTF-8 字节折算 1 token 的保守估算，实际消耗以提供商 usage 为准；没有 usage 时按同一估算器记账，超量不会回滚已完成的请求，只会拒绝后续请求。关闭自适应时仍按 `max_rounds` 固定执行并遵守用量上限。
 
 `max_rounds > 100` 会提示成本风险，默认 40 不告警。
 
 上下文在每次模型请求前按渲染后的输入计算预算。任务请求的原始用户指令逐字保留为 user 资料；工作状态与滚动摘要作为 assistant 工作资料注入发送副本，不写回数据库。超过软触发比例（`trigger_ratio`，按 `max_input_tokens`）或 `max_messages` 时，按完整模型批次压缩已完成历史：assistant 工具调用、全部匹配结果与 ResponsesHistory 不拆分；保留最近两个完整批次与最新用户消息。摘要失败、不减体积或保留区仍超硬限时明确失败，不提交检查点、不删除原始轨迹。`enabled: false` 表示新任务不继承前序任务历史/状态，当前任务内的工具循环与压缩不受影响。
 
-`max_input_tokens` 使用序列化 input 的字节数保守估算，包含工具定义和保留的推理数据，并非提供商 tokenizer 的精确计数。`max_messages` 包含系统提示、用户、助手及工具消息。这些限制只影响发给模型的上下文，不删除 `tasks.db` 中的消息、任务、事件和结果。
+`max_input_tokens` 与渲染后输入的 token 估算比较：4 个 UTF-8 字节折算 1 token，并逐字段统计消息正文、工具定义与保留的推理数据，不是提供商 tokenizer 的精确计数。旧版本把同一字段当作序列化字节数使用，按字节调参的部署应把数值除以约 4（例如 `32768` 改为 `8192`）以保持原来的触发时机。`max_messages` 包含系统提示、用户、助手及工具消息。这些限制只影响发给模型的上下文，不删除 `tasks.db` 中的消息、任务、事件和结果。
 
 ## 服务端和可选能力
 

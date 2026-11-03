@@ -25,7 +25,7 @@ func TestTrimContext(t *testing.T) {
 		policy ContextPolicy
 	}{
 		{"messages", ContextPolicy{Enabled: true, MaxMessages: 4}},
-		{"tokens", ContextPolicy{Enabled: true, MaxInputTokens: 200}},
+		{"tokens", ContextPolicy{Enabled: true, MaxInputTokens: 20}},
 		{"disabled_history", ContextPolicy{MaxMessages: 50}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -52,7 +52,8 @@ func TestRuntime_ContextBudget(t *testing.T) {
 	}{{"initial input", false}, {"tool result", true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
-			r := Runtime{Context: ContextPolicy{Enabled: true, MaxInputTokens: 1000}, Model: func(context.Context, Request, func(Event)) (Response, error) {
+			// 2000 字节正文约为 500 token，250 token 预算必须在请求前拒绝。
+			r := Runtime{Context: ContextPolicy{Enabled: true, MaxInputTokens: 250}, Model: func(context.Context, Request, func(Event)) (Response, error) {
 				calls++
 				return Response{FinishReason: "tool_calls", ToolCalls: []openai.ToolCall{{ID: "call", Type: openai.ToolTypeFunction, Function: openai.FunctionCall{Name: "lookup", Arguments: "{}"}}}}, nil
 			}, Execute: func(context.Context, string, map[string]any) (ToolOutput, error) {

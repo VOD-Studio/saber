@@ -150,17 +150,10 @@ func renderWorkState(state *TaskState, summary string) string {
 }
 
 // ContextSize 按实际渲染后的输入估算消息数与保守 token 数。
-func ContextSize(req Request) (messages int, estimatedTokens int, err error) {
+// token 数是按 UTF-8 字节折算的近似值，用于与 MaxInputTokens 比较，不是提供商计数。
+func ContextSize(req Request) (messages int, estimatedTokens int) {
 	rendered := renderRequest(req)
-	input, err := json.Marshal(struct {
-		Messages  []openai.ChatCompletionMessage
-		Tools     []openai.Tool
-		Reasoning map[string][]json.RawMessage
-	}{rendered.Messages, rendered.Tools, rendered.ResponsesHistory})
-	if err != nil {
-		return 0, 0, fmt.Errorf("estimate context: %w", err)
-	}
-	return len(rendered.Messages), len(input), nil
+	return len(rendered.Messages), estimateInputTokens(rendered)
 }
 
 // TrimContext 保留系统提示及当前轮，按完整用户轮次移除旧历史和对应推理数据。
@@ -195,20 +188,13 @@ func TrimContext(req Request, policy ContextPolicy) (Request, error) {
 				}
 			}
 		}
-		input, err := json.Marshal(struct {
-			Messages  []openai.ChatCompletionMessage
-			Tools     []openai.Tool
-			Reasoning map[string][]json.RawMessage
-		}{candidate.Messages, candidate.Tools, candidate.ResponsesHistory})
-		if err != nil {
-			return req, fmt.Errorf("estimate context: %w", err)
-		}
-		over := policy.MaxMessages > 0 && len(candidate.Messages) > policy.MaxMessages || policy.MaxInputTokens > 0 && len(input) > policy.MaxInputTokens
+		inputTokens := estimateInputTokens(candidate)
+		over := policy.MaxMessages > 0 && len(candidate.Messages) > policy.MaxMessages || policy.MaxInputTokens > 0 && inputTokens > policy.MaxInputTokens
 		if !over && (policy.Enabled || len(turns) <= 1) {
 			return candidate, nil
 		}
 		if len(turns) <= 1 {
-			return req, fmt.Errorf("%w: 当前输入、系统提示或工具定义超过 agent.context 预算（%d 条消息，保守估算 %d tokens），请缩短输入或提高限制", ErrBudgetExhausted, len(candidate.Messages), len(input))
+			return req, fmt.Errorf("%w: 当前输入、系统提示或工具定义超过 agent.context 预算（%d 条消息，估算 %d tokens），请缩短输入或提高限制", ErrBudgetExhausted, len(candidate.Messages), inputTokens)
 		}
 		turns = turns[1:]
 	}

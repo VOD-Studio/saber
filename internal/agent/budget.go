@@ -302,12 +302,18 @@ func estimateToolTokens(tool openai.Tool) int {
 	return tokens
 }
 
-// estimateInputTokens 估算一次请求的输入 token 数，覆盖消息、工具定义与保留的推理历史。
-func estimateInputTokens(req Request) int {
+// estimateMessagesTokens 估算一组消息的 token 数。
+func estimateMessagesTokens(messages []openai.ChatCompletionMessage) int {
 	tokens := 0
-	for _, message := range req.Messages {
+	for _, message := range messages {
 		tokens += estimateMessageTokens(message)
 	}
+	return tokens
+}
+
+// estimateInputTokens 估算一次请求的输入 token 数，覆盖消息、工具定义与保留的推理历史。
+func estimateInputTokens(req Request) int {
+	tokens := estimateMessagesTokens(req.Messages)
 	for _, tool := range req.Tools {
 		tokens += estimateToolTokens(tool)
 	}
