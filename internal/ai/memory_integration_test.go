@@ -13,10 +13,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"maunium.net/go/mautrix"
+	"maunium.net/go/mautrix/id"
 	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
 	chatmemory "rua.plus/saber/internal/chat/memory"
 	"rua.plus/saber/internal/config"
+	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/memory"
 )
 
@@ -90,4 +93,96 @@ func TestTasks_MemorySnapshotInjectedAndScoped(t *testing.T) {
 		require.NotContains(t, message.Content, "她希望被称呼为 Alice")
 	}
 	require.False(t, strings.Contains(groupReq.Messages[len(groupReq.Messages)-1].Content, "【长期记忆"))
+}
+
+// TestTasks_MatrixPrivateMemory 验证私聊命令保存的记忆进入自动回复，但不泄露给其他用户或群聊。
+func TestTasks_MatrixPrivateMemory(t *testing.T) {
+	ctx := context.Background()
+	requests := make(chan agent.Request, 3)
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req agent.Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+			return
+		}
+		requests <- req
+		if err := json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "ok"}, "finish_reason": "stop"}}}); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer modelServer.Close()
+	matrixServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/state"):
+			members := []string{"@bot:test", "@alice:test"}
+			if strings.Contains(r.URL.Path, "!bob:test") {
+				members[1] = "@bob:test"
+			}
+			if strings.Contains(r.URL.Path, "!group:test") {
+				members = append(members, "@bob:test")
+			}
+			state := make([]map[string]any, 0, len(members))
+			for _, member := range members {
+				state = append(state, map[string]any{"type": "m.room.member", "state_key": member, "content": map[string]any{"membership": "join"}})
+			}
+			if err := json.NewEncoder(w).Encode(state); err != nil {
+				t.Error(err)
+			}
+		case strings.Contains(r.URL.Path, "/send/"):
+			if err := json.NewEncoder(w).Encode(map[string]string{"event_id": "$reply"}); err != nil {
+				t.Error(err)
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer matrixServer.Close()
+	client, err := mautrix.NewClient(matrixServer.URL, "@bot:test", "test")
+	require.NoError(t, err)
+	commands := matrix.NewCommandService(client, "@bot:test", nil)
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: modelServer.URL}}
+	cfg.AI.DefaultModel = "openai.local"
+	cfg.Agent.StreamEnabled = false
+	mem := newTestMemory(t, memory.Config{})
+	service, err := NewService(&cfg, WithMemory(mem))
+	require.NoError(t, err)
+	defer service.Stop()
+	require.NoError(t, service.EnableTasks(filepath.Join(t.TempDir(), "tasks.db")))
+	adapter := matrix.NewChatAdapter(commands, nil, config.MediaConfig{}, false, service.HandleChat)
+	require.NoError(t, service.RegisterTaskDelivery("matrix", adapter))
+	saved := chat.Message{Session: adapter.Session(ctx, "!alice:test"), ID: "$save", SenderID: "@alice:test", Direct: true}
+	require.NoError(t, service.MemoryCommand(ctx, saved, adapter, "add", "Alice 的个人暗号是紫色海豚"))
+	entries, err := mem.List(ctx, chat.Identity{Session: saved.Session, SenderID: saved.SenderID, Direct: true})
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+
+	for _, tc := range []struct {
+		name   string
+		room   id.RoomID
+		sender id.UserID
+		want   bool
+	}{
+		{"本人私聊", "!alice:test", "@alice:test", true},
+		{"其他用户私聊", "!bob:test", "@bob:test", false},
+		{"本人在群聊", "!group:test", "@alice:test", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			messageCtx := matrix.WithEventID(ctx, id.EventID("$"+tc.room))
+			_, err := adapter.Receive(messageCtx, tc.sender, tc.room, "请使用已保存的偏好")
+			require.NoError(t, err)
+			select {
+			case req := <-requests:
+				found := false
+				for _, message := range req.Messages {
+					found = found || strings.Contains(message.Content, "Alice 的个人暗号是紫色海豚")
+				}
+				require.Equal(t, tc.want, found, "个人记忆注入必须与可信私聊身份一致")
+			case <-time.After(3 * time.Second):
+				t.Fatal("未收到模型请求")
+			}
+		})
+	}
 }

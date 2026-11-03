@@ -290,7 +290,6 @@ func (s *appState) buildCommands() error {
 		cs.SetCommandDispatcher(func(ctx context.Context, sender id.UserID, room id.RoomID, body string) (bool, error) {
 			adapter := matrix.NewChatAdapter(cs, s.services.mediaService, s.cfg.Matrix.Media, false, nil)
 			message := adapter.Message(ctx, sender, room, body)
-			message.Direct = cs.IsDirectChat(ctx, room)
 			return r.Dispatch(ctx, message, adapter, s.commandCapabilities("matrix"))
 		})
 	}

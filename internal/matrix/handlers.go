@@ -194,11 +194,6 @@ func (s *CommandService) isDirectChat(ctx context.Context, roomID id.RoomID) boo
 	return joinedCount == 2
 }
 
-// IsDirectChat 只在接入端需要授权私聊写入命令时查询当前成员状态。
-func (s *CommandService) IsDirectChat(ctx context.Context, roomID id.RoomID) bool {
-	return s.isDirectChat(ctx, roomID)
-}
-
 // isReplyToBot 检查回复的目标消息是否是 bot 发送的。
 func (s *CommandService) isReplyToBot(ctx context.Context, roomID id.RoomID, eventID id.EventID) bool {
 	evt, err := s.client.GetEvent(ctx, roomID, eventID)

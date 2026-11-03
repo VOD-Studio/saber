@@ -35,9 +35,10 @@ func (a *ChatAdapter) Session(ctx context.Context, roomID id.RoomID) chat.Sessio
 	return chat.Session{Platform: "matrix", Account: string(a.service.BotID()), Conversation: string(roomID), Thread: string(GetThreadID(ctx))}
 }
 
-// Message 在接入层解析图片和引用关系，核心无需理解 MXC 或 Matrix SDK。
+// Message 在接入层确认私聊身份并解析图片和引用关系，核心无需理解 Matrix SDK。
 func (a *ChatAdapter) Message(ctx context.Context, userID id.UserID, roomID id.RoomID, text string) chat.Message {
 	message := chat.Message{Session: a.Session(ctx, roomID), ID: string(GetEventID(ctx)), SenderID: string(userID), Text: text, ReplyTo: string(GetReplyToID(ctx))}
+	message.Direct = a.service.isDirectChat(ctx, roomID)
 	// 引用机器人消息时，Matrix 会在正文前加上回退引用；控制指令只看用户自己写的那部分。
 	if control, ok := a.controlText(ctx, text); ok {
 		message.ControlText = &control
