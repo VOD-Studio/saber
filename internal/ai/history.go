@@ -95,6 +95,7 @@ func (s *Service) executeHistoryTool(ctx context.Context, args map[string]any) (
 		if err != nil {
 			return nil, err
 		}
+		res.Summary = s.summarizeHistory(ctx, res)
 		return formatHistorySearchResult(res), nil
 
 	case "context":
@@ -151,6 +152,72 @@ func formatHistorySearchResult(res memory.HistorySearchResult) string {
 		fmt.Fprintf(&b, "\n[还有更多历史记录，可使用 action=\"search\", cursor=%d 继续翻页；使用 action=\"context\", id=<记录ID> 可查看完整对话原文与前后文]", res.NextCursor)
 	} else {
 		fmt.Fprintf(&b, "\n[使用 action=\"context\", id=<记录ID> 可查看完整对话原文与前后文]")
+	}
+	if res.Summary != "" {
+		fmt.Fprintf(&b, "\n【摘要】%s", res.Summary)
+	}
+	return b.String()
+}
+
+// historySummaryPrompt 约束摘要只复述本页已授权命中的记录。
+const historySummaryPrompt = `你是历史对话摘要助手。
+请只根据用户给出的检索命中记录，概括与检索关键词相关的信息：
+1. 说明相关事件、发生时间与仍未完成的待办，用中文，不超过 600 字。
+2. 只使用给定记录中的事实，不得推测、补充或引用其他来源。
+3. 保留关键结论、时间点与待办事项；记录之间没有关联时简短说明即可。
+4. 若记录不足以回答，直接说明命中的信息有限。`
+
+// summarizeHistory 为一次已授权检索生成摘要，命中缓存时不重复请求模型。
+//
+// 输入只包含本次检索到的记录，每条截断且总输入不超过 12 KiB；
+// 模型不可用、失败或返回空内容时返回空串，调用方降级为仅返回原文。
+func (s *Service) summarizeHistory(ctx context.Context, res memory.HistorySearchResult) string {
+	if len(res.Records) == 0 || s.memory == nil || s.config == nil || !s.config.Memory.Enabled || !s.IsEnabled() {
+		return ""
+	}
+	lastRecordID := res.Records[0].ID
+	if cached, ok, err := s.memory.CachedHistorySummary(ctx, res.Scope, res.QueryHash, lastRecordID); err != nil {
+		slog.Warn("读取历史摘要缓存失败", "error", err)
+	} else if ok {
+		return cached.Summary
+	}
+	input := buildHistorySummaryInput(res.Records)
+	if input == "" {
+		return ""
+	}
+	modelName := ""
+	if s.config != nil {
+		modelName = s.config.Memory.ReviewModel
+	}
+	callCtx, cancel := context.WithTimeout(ctx, profileModelTimeout)
+	defer cancel()
+	text, err := s.GenerateSimpleResponseWithModel(callCtx, modelName, profileTemperature, historySummaryPrompt, input)
+	if err != nil {
+		slog.Debug("生成历史摘要失败，降级为仅返回原文", "error", err)
+		return ""
+	}
+	text = truncateProfileRunes(strings.TrimSpace(text), memory.MaxHistorySummaryRunes)
+	if text == "" {
+		return ""
+	}
+	if err := s.memory.SaveHistorySummary(ctx, res.Scope, res.QueryHash, lastRecordID, text); err != nil {
+		slog.Warn("写入历史摘要缓存失败", "error", err)
+	}
+	return text
+}
+
+// buildHistorySummaryInput 拼接摘要输入，只使用本次命中的记录并限制总字节数。
+func buildHistorySummaryInput(records []memory.HistoryRecord) string {
+	var b strings.Builder
+	b.WriteString("检索命中记录（按时间倒序）：\n")
+	for _, r := range records {
+		entry := fmt.Sprintf("\n#%d 时间 %s 发送人 %s\n用户: %s\nSaber: %s\n",
+			r.ID, r.CreatedAt.Format("2006-01-02 15:04"), r.SenderID,
+			truncateSnippet(r.UserText, 450), truncateSnippet(r.AssistantText, 450))
+		if b.Len()+len(entry) > memory.HistorySummaryInputBytes {
+			break
+		}
+		b.WriteString(entry)
 	}
 	return b.String()
 }

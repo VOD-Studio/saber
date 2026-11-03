@@ -131,6 +131,22 @@ CREATE TABLE IF NOT EXISTS skill_changes (
 	decided_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS skill_changes_pending ON skill_changes(scope_key, status, id);
+
+CREATE TABLE IF NOT EXISTS history_summaries (
+	scope_key TEXT NOT NULL,
+	query_hash TEXT NOT NULL,
+	last_record_id INTEGER NOT NULL,
+	summary TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY(scope_key, query_hash, last_record_id)
+);
+
+CREATE TABLE IF NOT EXISTS memory_profiles (
+	scope_key TEXT PRIMARY KEY,
+	content TEXT NOT NULL,
+	source_version TEXT NOT NULL,
+	updated_at INTEGER NOT NULL
+);
 `
 
 // store 独占 memory.db 的表结构与连接。

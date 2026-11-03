@@ -214,5 +214,10 @@ func (s *Service) ReviewScope(ctx context.Context, scope memory.Scope) error {
 		slog.Warn("后台记忆复盘运行异常", "scope", scope.Key(), "error", runErr)
 		return runErr
 	}
-	return s.memory.MarkTasksReviewed(ctx, scope, taskIDs)
+	if err := s.memory.MarkTasksReviewed(ctx, scope, taskIDs); err != nil {
+		return err
+	}
+	// 复盘成功说明记忆条目可能已变化，后台刷新一次画像；失败只记日志，不影响复盘结果。
+	s.triggerProfileRefresh(scope)
+	return nil
 }

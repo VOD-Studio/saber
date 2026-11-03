@@ -32,6 +32,24 @@ const (
 	DefaultInjectBytes = 8192
 )
 
+// 历史摘要与用户画像的容量默认值。
+const (
+	// MaxHistorySummaryRunes 限制一次历史召回摘要的字数上限。
+	MaxHistorySummaryRunes = 600
+	// HistorySummaryInputBytes 限制生成历史摘要时的输入字节上限。
+	HistorySummaryInputBytes = 12 * 1024
+	// HistorySummaryTTL 是历史摘要缓存的存活时间；过期后重新请求模型。
+	HistorySummaryTTL = 10 * time.Minute
+	// ProfileInjectBytes 限制单次画像注入的字节上限。
+	ProfileInjectBytes = 1024
+	// MaxProfileRunes 限制画像正文字数上限。
+	MaxProfileRunes = 800
+	// ProfileSourceEntries 限制生成画像时使用的记忆条目数。
+	ProfileSourceEntries = 50
+	// ProfileSourceBytes 限制生成画像时的条目输入字节上限。
+	ProfileSourceBytes = 8 * 1024
+)
+
 // 变更动作。
 const (
 	// ActionAdd 新增条目。
@@ -262,6 +280,10 @@ type HistorySearchResult struct {
 	NextCursor int64
 	// HasMore 表示是否还有更早的历史记录。
 	HasMore bool
+	// QueryHash 是作用域与查询参数的指纹，供摘要缓存定位。
+	QueryHash string
+	// Summary 是调用方为本页结果追加的模型摘要；为空表示未生成或已降级。
+	Summary string
 }
 
 // HistoryContextOptions 是读取指定记录及其前后文的参数。
@@ -418,4 +440,53 @@ type SkillMutation struct {
 	Suggested bool
 	// Duplicate 为 true 时表示内容已完全相同，未做重复写入。
 	Duplicate bool
+}
+
+// HistorySummary 是一次历史检索结果的模型摘要缓存。
+//
+// 缓存键由作用域、查询参数指纹与命中记录集合的最大 ID 组成；
+// 命中缓存时不再请求模型，过期或记录变化时重新生成。
+type HistorySummary struct {
+	// Scope 是摘要所属的隔离空间。
+	Scope Scope
+	// QueryHash 是作用域与查询参数的指纹。
+	QueryHash string
+	// LastRecordID 是本次命中记录集合中的最大记录编号。
+	LastRecordID int64
+	// Summary 是模型生成的摘要正文。
+	Summary string
+	// CreatedAt 是摘要写入时间。
+	CreatedAt time.Time
+}
+
+// Profile 是一个记忆空间由记忆条目派生的紧凑画像。
+type Profile struct {
+	// Scope 是画像所属空间。
+	Scope Scope
+	// Content 是画像正文。
+	Content string
+	// SourceVersion 是生成画像时使用的条目版本。
+	SourceVersion string
+	// Version 是当前条目版本；与 SourceVersion 不同即表示画像已过期。
+	Version string
+	// UpdatedAt 是画像最后更新时间，零值表示尚未生成。
+	UpdatedAt time.Time
+	// Exists 表示该空间已有画像。
+	Exists bool
+	// Stale 表示画像缺失或已过期，需要刷新。
+	Stale bool
+}
+
+// ProfileSource 是生成画像时允许使用的条目集合。
+type ProfileSource struct {
+	// Scope 是条目所属空间。
+	Scope Scope
+	// Version 是该集合对应的条目版本，用于写入画像时记录来源。
+	Version string
+	// Entries 是本次采用的条目，明确保存的优先。
+	Entries []Entry
+	// Text 是按字节预算截断后的条目文本，可直接作为模型输入。
+	Text string
+	// Truncated 是因条目数或字节预算未采用的条目数。
+	Truncated int
 }

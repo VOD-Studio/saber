@@ -21,9 +21,9 @@ func memoryTool() openai.Tool {
 		Name: "saber_memory",
 		Description: "维护当前会话所属空间的长期记忆：私聊保存本人资料与偏好，群聊保存本群公共约定。" +
 			"身份与作用域由系统提供，不得代其他用户或群操作。只有工具返回成功才是已保存；返回待确认建议表示尚未生效。" +
-			"用户明确要求记住、纠正或忘记时使用；普通闲聊、猜测与临时任务状态不要保存。",
+			"用户明确要求记住、纠正或忘记时使用；普通闲聊、猜测与临时任务状态不要保存。action=profile 只读查看当前空间画像，不接受作用域参数。",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{
-			"action":           map[string]any{"type": "string", "enum": []string{"list", "add", "replace", "remove"}},
+			"action":           map[string]any{"type": "string", "enum": []string{"list", "profile", "add", "replace", "remove"}},
 			"content":          map[string]any{"type": "string", "description": "add 与 replace 的条目正文"},
 			"id":               map[string]any{"type": "integer", "minimum": 1, "description": "replace 与 remove 的目标条目编号"},
 			"expected_version": map[string]any{"type": "integer", "minimum": 1, "description": "replace 与 remove 必须提供列表看到的当前版本，避免覆盖他人修改"},
@@ -58,6 +58,8 @@ func (s *Service) executeMemoryTool(ctx context.Context, args map[string]any) (a
 	switch action {
 	case "list":
 		return s.memoryListText(ctx, identity)
+	case "profile":
+		return s.memoryProfileView(ctx, identity)
 	case "add":
 		var mutation memory.Mutation
 		var err error
@@ -187,8 +189,9 @@ func (s *Service) skillBudget() int {
 
 // augmentMemory 在任务续接恢复之后、Agent 运行之前，把当前作用域的快照追加为运行时上下文。
 //
+// 注入顺序固定为：用户画像、记忆条目快照、技能目录；画像先于条目说明其派生关系。
 // 快照只附加在本次运行的请求上，不写回持久化请求，因此下一次顶层任务会重新读取新版本。
-// 无法证明可信作用域或没有可注入条目时保持原请求不变。
+// 无法证明可信作用域或没有可注入内容时保持原请求不变。
 func (s *Service) augmentMemory(ctx context.Context, req agent.Request) agent.Request {
 	if s.memory == nil {
 		return req
@@ -197,6 +200,21 @@ func (s *Service) augmentMemory(ctx context.Context, req agent.Request) agent.Re
 	if !ok {
 		return req
 	}
+	profile, err := s.memory.Profile(ctx, identity)
+	if err != nil {
+		if !errors.Is(err, memory.ErrScope) {
+			slog.Warn("读取用户画像失败", "error", err)
+		}
+	} else {
+		if text := profileSnapshotText(profile, memory.ProfileInjectBytes); text != "" {
+			req = appendRuntimeContext(req, text)
+		}
+		// 画像缺失或已过期时后台刷新；没有条目（版本 "0"）时无需生成。
+		if (!profile.Exists || profile.Stale) && profile.Version != "0" {
+			s.triggerProfileRefresh(profile.Scope)
+		}
+	}
+
 	snapshot, err := s.memory.Snapshot(ctx, identity, s.memoryBudget())
 	if err != nil {
 		if !errors.Is(err, memory.ErrScope) {

@@ -2,10 +2,13 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"rua.plus/saber/internal/chat"
@@ -90,6 +93,7 @@ func (s *Service) SearchHistory(ctx context.Context, identity chat.Identity, opt
 		Records:    records,
 		NextCursor: nextCursor,
 		HasMore:    hasMore,
+		QueryHash:  HashHistoryQuery(scope, query, limit, opts.Cursor),
 	}, nil
 }
 
@@ -223,6 +227,74 @@ func (s *Service) ReadHistoryContext(ctx context.Context, identity chat.Identity
 		Before: before,
 		After:  after,
 	}, nil
+}
+
+// HashHistoryQuery 计算一次检索的查询指纹。
+//
+// 作用域与检索词、条数上限、游标共同参与，避免跨空间或跨参数复用同一份摘要。
+func HashHistoryQuery(scope Scope, query string, limit int, cursor int64) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d\x00%d", scope.Key(), query, limit, cursor)))
+	return hex.EncodeToString(sum[:16])
+}
+
+// CachedHistorySummary 读取未过期的历史摘要缓存。
+//
+// 只有作用域、查询指纹与命中记录集合完全一致且未超过 TTL 时才命中；
+// 缓存缺失或过期返回 ok=false，由调用方决定是否重新生成。
+func (s *Service) CachedHistorySummary(ctx context.Context, scope Scope, queryHash string, lastRecordID int64) (HistorySummary, bool, error) {
+	if err := scope.Validate(); err != nil {
+		return HistorySummary{}, false, err
+	}
+	if queryHash == "" || lastRecordID <= 0 {
+		return HistorySummary{}, false, nil
+	}
+	var summary string
+	var created int64
+	err := s.store.db.QueryRowContext(ctx, `
+		SELECT summary, created_at FROM history_summaries
+		WHERE scope_key=? AND query_hash=? AND last_record_id=?
+	`, scope.Key(), queryHash, lastRecordID).Scan(&summary, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return HistorySummary{}, false, nil
+	}
+	if err != nil {
+		return HistorySummary{}, false, err
+	}
+	at := time.UnixMilli(created)
+	if summary == "" || time.Since(at) > HistorySummaryTTL {
+		return HistorySummary{}, false, nil
+	}
+	return HistorySummary{
+		Scope:        scope,
+		QueryHash:    queryHash,
+		LastRecordID: lastRecordID,
+		Summary:      summary,
+		CreatedAt:    at,
+	}, true, nil
+}
+
+// SaveHistorySummary 写入或刷新一条历史摘要缓存。
+//
+// 摘要正文去空白后为空视为无效输入，直接返回错误而不写入半成品。
+func (s *Service) SaveHistorySummary(ctx context.Context, scope Scope, queryHash string, lastRecordID int64, summary string) error {
+	if err := scope.Validate(); err != nil {
+		return err
+	}
+	if queryHash == "" || lastRecordID <= 0 {
+		return errors.New("历史摘要缓存需要查询指纹与记录编号")
+	}
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return errors.New("历史摘要不能为空")
+	}
+	_, err := s.store.db.ExecContext(ctx, `
+		INSERT INTO history_summaries(scope_key, query_hash, last_record_id, summary, created_at)
+		VALUES(?, ?, ?, ?, ?)
+		ON CONFLICT(scope_key, query_hash, last_record_id) DO UPDATE SET
+			summary = excluded.summary,
+			created_at = excluded.created_at
+	`, scope.Key(), queryHash, lastRecordID, summary, nowMillis())
+	return err
 }
 
 // escapeLike 转义 LIKE 查询中的通配符 %、_ 与转义符自身 \。

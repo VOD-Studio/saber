@@ -95,6 +95,8 @@ func (s *Service) MemoryCommand(ctx context.Context, message chat.Message, adapt
 			return commandReply(ctx, message, adapter, "拒绝失败："+err.Error())
 		}
 		return commandReply(ctx, message, adapter, fmt.Sprintf("已拒绝建议 #%d。", change.ID))
+	case "profile":
+		return s.memoryProfileCommand(ctx, identity, message, adapter, raw)
 	case "pause":
 		if strings.TrimSpace(raw) != "" {
 			return commandReply(ctx, message, adapter, "用法：/memory pause")
@@ -112,7 +114,7 @@ func (s *Service) MemoryCommand(ctx context.Context, message chat.Message, adapt
 		}
 		return commandReply(ctx, message, adapter, "已恢复当前空间的自动记忆学习。")
 	default:
-		return commandReply(ctx, message, adapter, "用法：/memory list/status/add/edit/forget/pending/approve/reject/pause/resume")
+		return commandReply(ctx, message, adapter, "用法：/memory list/status/profile/add/edit/forget/pending/approve/reject/pause/resume")
 	}
 }
 

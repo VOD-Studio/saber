@@ -6,8 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	"rua.plus/saber/internal/agent"
@@ -203,4 +206,123 @@ func TestHistory_SyncPipelineAndBackfill(t *testing.T) {
 	count, err := service.BackfillHistory(ctx, 10)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, count, 1)
+}
+
+// newHistorySummaryService 构造启用记忆与假模型的 AI 服务，返回调用计数指针。
+func newHistorySummaryService(t *testing.T, content string, fail bool) (*Service, *memory.Service, *int32) {
+	t.Helper()
+	var calls int32
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		if fail {
+			http.Error(w, "model unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{
+				"message":       map[string]any{"role": "assistant", "content": content},
+				"finish_reason": "stop",
+			}},
+		})
+	}))
+	t.Cleanup(modelServer.Close)
+
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled = true
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: modelServer.URL, APIKey: "test"}}
+	cfg.AI.DefaultModel = "openai.local"
+	cfg.Memory.Enabled = true
+
+	mem := newTestMemory(t, memory.Config{})
+	svc, err := NewService(&cfg, WithMemory(mem))
+	require.NoError(t, err)
+	t.Cleanup(svc.Stop)
+	return svc, mem, &calls
+}
+
+// recordPublishedHistory 写入一条与「发布流程」相关的历史投影。
+func recordPublishedHistory(t *testing.T, mem *memory.Service, ctx context.Context, identity chat.Identity, taskID int64, text string) {
+	t.Helper()
+	scope, ok := memory.Space(identity)
+	require.True(t, ok)
+	_, err := mem.RecordProjection(ctx, memory.ProjectionInput{
+		TaskID:        taskID,
+		Scope:         scope,
+		Conversation:  identity.Session.Conversation,
+		SenderID:      identity.SenderID,
+		UserMessageID: "msg",
+		UserText:      text,
+		AssistantText: "已确认发布流程",
+		TaskStatus:    "completed",
+		CreatedAt:     time.Now(),
+	})
+	require.NoError(t, err)
+}
+
+// TestHistoryTool_SummaryCacheAndScopeIsolation 验证摘要随原文返回、相同查询复用缓存且不跨作用域共享。
+func TestHistoryTool_SummaryCacheAndScopeIsolation(t *testing.T) {
+	const summary = "摘要：周五发布，先打标签再由 CI 交付，回归清单仍待补。"
+	svc, mem, calls := newHistorySummaryService(t, summary, false)
+	alice := personalIdentity("@alice:example.com")
+	ctx := chat.WithIdentity(context.Background(), alice)
+	recordPublishedHistory(t, mem, ctx, alice, 201, "发布流程是打标签后由 CI 交付")
+	recordPublishedHistory(t, mem, ctx, alice, 202, "发布流程还要补回归清单")
+
+	out, err := svc.executeHistoryTool(ctx, map[string]any{"action": "search", "query": "发布流程"})
+	require.NoError(t, err)
+	text := out.(string)
+	require.Contains(t, text, "打标签后由 CI 交付", "原文片段必须保留")
+	require.Contains(t, text, "【摘要】")
+	require.Contains(t, text, summary)
+	require.Equal(t, int32(1), atomic.LoadInt32(calls))
+
+	// 相同作用域、相同查询与记录集合命中缓存，不再请求模型。
+	_, err = svc.executeHistoryTool(ctx, map[string]any{"action": "search", "query": "发布流程"})
+	require.NoError(t, err)
+	require.Equal(t, int32(1), atomic.LoadInt32(calls), "缓存命中时不得重复请求模型")
+
+	// 查询变化需要新的摘要。
+	_, err = svc.executeHistoryTool(ctx, map[string]any{"action": "search", "query": "回归清单"})
+	require.NoError(t, err)
+	require.Equal(t, int32(2), atomic.LoadInt32(calls))
+
+	// 其他用户的作用域不共享缓存。
+	bob := personalIdentity("@bob:example.com")
+	bobCtx := chat.WithIdentity(context.Background(), bob)
+	recordPublishedHistory(t, mem, bobCtx, bob, 203, "发布流程由值班同学执行")
+	out, err = svc.executeHistoryTool(bobCtx, map[string]any{"action": "search", "query": "发布流程"})
+	require.NoError(t, err)
+	require.Contains(t, out.(string), "值班同学")
+	require.Equal(t, int32(3), atomic.LoadInt32(calls), "不同作用域必须重新生成摘要")
+}
+
+// TestHistoryTool_SummaryDegradesOnModelFailure 验证模型失败时只返回原文，不影响检索结果。
+func TestHistoryTool_SummaryDegradesOnModelFailure(t *testing.T) {
+	svc, mem, calls := newHistorySummaryService(t, "", true)
+	alice := personalIdentity("@alice:example.com")
+	ctx := chat.WithIdentity(context.Background(), alice)
+	recordPublishedHistory(t, mem, ctx, alice, 301, "发布流程需要两人复核")
+
+	out, err := svc.executeHistoryTool(ctx, map[string]any{"action": "search", "query": "发布流程"})
+	require.NoError(t, err)
+	text := out.(string)
+	require.Contains(t, text, "两人复核", "模型失败时检索结果不受影响")
+	require.NotContains(t, text, "【摘要】")
+	require.Equal(t, int32(1), atomic.LoadInt32(calls))
+}
+
+// TestHistoryTool_SummaryTruncated 验证摘要长度被限制在 MaxHistorySummaryRunes 以内。
+func TestHistoryTool_SummaryTruncated(t *testing.T) {
+	svc, mem, _ := newHistorySummaryService(t, strings.Repeat("摘", 700), false)
+	alice := personalIdentity("@alice:example.com")
+	ctx := chat.WithIdentity(context.Background(), alice)
+	recordPublishedHistory(t, mem, ctx, alice, 401, "发布流程由发布同学负责")
+
+	out, err := svc.executeHistoryTool(ctx, map[string]any{"action": "search", "query": "发布流程"})
+	require.NoError(t, err)
+	text := out.(string)
+	idx := strings.Index(text, "【摘要】")
+	require.GreaterOrEqual(t, idx, 0)
+	require.LessOrEqual(t, utf8.RuneCountInString(text[idx+len("【摘要】"):]), memory.MaxHistorySummaryRunes)
 }
