@@ -510,6 +510,7 @@ func (m *ProactiveManager) OnNewMember(ctx context.Context, roomID id.RoomID, us
 
 	// 记录主动消息
 	m.stateTracker.RecordProactiveMessage(roomID)
+	m.markStateDirty()
 	logger.Info("新成员欢迎消息已发送")
 
 	return nil
