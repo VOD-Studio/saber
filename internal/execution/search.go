@@ -29,10 +29,9 @@ const (
 
 // scanStats 汇总一次遍历的跳过原因与硬限状态。
 type scanStats struct {
-	entries      int
-	skipped      map[string]int
-	truncated    bool
-	scannedBytes int64
+	entries   int
+	skipped   map[string]int
+	truncated bool
 }
 
 func newScanStats() *scanStats { return &scanStats{skipped: map[string]int{}} }

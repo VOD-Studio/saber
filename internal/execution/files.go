@@ -241,7 +241,7 @@ func readFilePage(file *os.File, offset, limit, byteOffset int) (string, int, in
 	page.Write(tail)
 	lines := 1
 	nextOffset := offset
-	nextByte := byteOffset + len(tail)
+	var nextByte int
 	if newline {
 		nextOffset, nextByte = offset+1, 0
 	} else {

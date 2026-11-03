@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -94,9 +93,7 @@ func TestReadOutput_RejectsMidRuneOffsetAndForeignHandles(t *testing.T) {
 	require.Error(t, err)
 	_, err = e.Run(ctx, "read_output", map[string]any{"output_id": id, "limit": float64(1)})
 	require.Error(t, err)
-	// 归档缺失与文件缺失都必须显式失败，不能返回空页伪装成功。
-	missing := filepath.Join(e.cfg.LogDir, "task-42", "output-0123456789abcdef0123456789abcdef.log")
-	os.Remove(missing)
+	// 归档文件不存在时必须显式失败，不能返回空页伪装成功。
 	_, err = e.Run(ctx, "read_output", map[string]any{"output_id": "t42-0123456789abcdef0123456789abcdef"})
 	require.ErrorContains(t, err, "does not exist")
 }

@@ -160,7 +160,7 @@ func (m *Manager) restoreContinuationRequest(ctx context.Context, t Task) (agent
 		state = parent.Result.State
 	}
 	messages := []openai.ChatCompletionMessage{}
-	responsesHistory := map[string][]json.RawMessage{}
+	var responsesHistory map[string][]json.RawMessage
 	startRound := 0
 	if checkpoint != nil {
 		messages = append(messages, checkpoint.Request.Messages...)

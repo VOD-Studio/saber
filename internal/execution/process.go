@@ -220,6 +220,9 @@ func (e *Executor) startProcess(ctx context.Context, args map[string]any, run sc
 	result := Result{ExitCode: -1}
 	command, _ := args["command"].(string)
 	identity, ok := chat.IdentityFromContext(ctx)
+	if !ok {
+		return result, errors.New("process requires trusted identity")
+	}
 	grant, ok := e.grant(identity)
 	if !ok {
 		return result, errors.New("process requires a workspace grant")
