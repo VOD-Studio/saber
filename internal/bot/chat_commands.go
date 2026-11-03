@@ -205,6 +205,10 @@ func (s *appState) buildCommands() error {
 			{"once", "创建一次性计划", []command.Argument{{Name: "time", Type: "string", Required: true}, {Name: "timezone", Type: "string", Required: true}, {Name: "goal", Type: "string", Required: true}}},
 			{"every", "创建周期计划", []command.Argument{{Name: "interval", Type: "string", Required: true}, {Name: "timezone", Type: "string", Required: true}, {Name: "goal", Type: "string", Required: true}}},
 			{"weekdays", "创建工作日计划", []command.Argument{{Name: "time", Type: "string", Required: true}, {Name: "timezone", Type: "string", Required: true}, {Name: "goal", Type: "string", Required: true}}},
+			{"cron", "创建 cron 计划（5 段表达式，可用引号包裹）", []command.Argument{{Name: "expression", Type: "string", Required: true}, {Name: "timezone", Type: "string", Required: true}, {Name: "goal", Type: "string", Required: true}}},
+			{"edit", "编辑计划规则、目标或模型", []command.Argument{{Name: "id", Type: "integer", Required: true}, {Name: "rule", Type: "string", Required: true}, {Name: "time", Type: "string", Required: true}, {Name: "timezone", Type: "string", Required: true}, {Name: "goal", Type: "string", Required: true}}},
+			{"run", "立即执行一次计划，不改下次时间", []command.Argument{{Name: "id", Type: "integer", Required: true}}},
+			{"resume", "恢复已暂停的计划并重算下次时间", []command.Argument{{Name: "id", Type: "integer", Required: true}}},
 			{"list", "列出当前会话计划", nil},
 			{"status", "查看计划状态", []command.Argument{{Name: "id", Type: "integer", Required: true}}},
 			{"pause", "暂停自己或获授权的计划", []command.Argument{{Name: "id", Type: "integer", Required: true}}},
@@ -220,7 +224,7 @@ func (s *appState) buildCommands() error {
 		}
 		if err := add("schedule.help", []string{"schedule"}, "计划命令用法", "conversation", nil, nil, "", nil,
 			func(ctx context.Context, m chat.Message, a chat.Adapter, _ string) error {
-				return reply(ctx, m, a, "用法：/schedule once/every/weekdays/list/status/pause/delete")
+				return reply(ctx, m, a, "用法：/schedule once/every/weekdays/cron/edit/run/resume/list/status/pause/delete")
 			}); err != nil {
 			return err
 		}
@@ -317,6 +321,9 @@ func (s *appState) buildCommands() error {
 				{"pending", "查看当前空间待确认技能建议", nil, nil},
 				{"approve", "确认当前空间待确认技能建议", []command.Argument{{Name: "id", Type: "integer", Required: true}}, writer},
 				{"reject", "拒绝当前空间待确认技能建议", []command.Argument{{Name: "id", Type: "integer", Required: true}}, writer},
+				{"import", "从 SKILL.md 目录导入技能；群内无写权限时形成建议", []command.Argument{{Name: "dir", Type: "string", Required: false}}, nil},
+				{"export", "导出技能为 SKILL.md", []command.Argument{{Name: "name", Type: "string", Required: true}, {Name: "dir", Type: "string", Required: false}}, writer},
+				{"files", "列出已配置外部目录中的技能（不写库）", nil, nil},
 			} {
 				action := sub.name
 				if err := add("skill."+action, []string{"skill", action}, sub.description, "conversation", sub.args, nil, "", sub.authorize,
@@ -328,7 +335,7 @@ func (s *appState) buildCommands() error {
 			}
 			if err := add("skill.help", []string{"skill"}, "技能命令用法", "conversation", nil, nil, "", nil,
 				func(ctx context.Context, m chat.Message, a chat.Adapter, _ string) error {
-					return reply(ctx, m, a, "用法：/skill list/show/add/edit/delete/pending/approve/reject")
+					return reply(ctx, m, a, "用法：/skill list/show/add/edit/delete/pending/approve/reject/import/export/files")
 				}); err != nil {
 				return err
 			}
@@ -390,7 +397,7 @@ func (s *appState) statusReport(message chat.Message) string {
 // onceCommand 标记有副作用的命令，重复投递只重试回执，不重做写入。
 func onceCommand(id string) bool {
 	switch id {
-	case "ai.clear", "ai.switch", "task.cancel", "task.redirect", "schedule.pause", "schedule.delete", "meme",
+	case "ai.clear", "ai.switch", "task.cancel", "task.redirect", "schedule.pause", "schedule.delete", "schedule.edit", "schedule.run", "schedule.resume", "meme",
 		"exec.approve", "exec.deny",
 		"memory.add", "memory.edit", "memory.forget", "memory.approve", "memory.reject", "memory.pause", "memory.resume",
 		"skill.add", "skill.edit", "skill.delete", "skill.approve", "skill.reject":

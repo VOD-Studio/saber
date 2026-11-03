@@ -35,7 +35,17 @@ func TestScheduleSpec_Next(t *testing.T) {
 		{"short", ScheduleSpec{Kind: "every", Timezone: "UTC", Every: "1s"}, "", "", true},
 		{"bad clock", ScheduleSpec{Kind: "weekdays", Timezone: "UTC", At: "25:00"}, "", "", true},
 		{"no offset", ScheduleSpec{Kind: "once", Timezone: "UTC", At: "2027-01-01T00:00"}, "", "", true},
-		{"unknown", ScheduleSpec{Kind: "cron", Timezone: "UTC"}, "", "", true},
+		{"cron step", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "*/15 * * * *"}, "2026-01-01T10:07:00Z", "2026-01-01T10:15:00Z", false},
+		{"cron weekday dst", ScheduleSpec{Kind: "cron", Timezone: "America/New_York", Cron: "0 9 * * 1-5"}, "2026-03-06T09:00:00-05:00", "2026-03-09T09:00:00-04:00", false},
+		{"cron month end", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "0 0 31 * *"}, "2026-04-01T00:00:00Z", "2026-05-31T00:00:00Z", false},
+		{"cron month skip february", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "0 0 31 * *"}, "2026-01-31T00:00:00Z", "2026-03-31T00:00:00Z", false},
+		{"cron sunday zero", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "0 12 * * 0"}, "2026-11-03T00:00:00Z", "2026-11-08T12:00:00Z", false},
+		{"cron sunday seven", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "0 12 * * 7"}, "2026-11-03T00:00:00Z", "2026-11-08T12:00:00Z", false},
+		{"cron dom or dow", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "0 12 1 * 1"}, "2026-11-02T12:00:00Z", "2026-11-09T12:00:00Z", false},
+		{"cron dst gap", ScheduleSpec{Kind: "cron", Timezone: "Europe/Berlin", Cron: "30 2 * * *"}, "2026-03-28T03:00:00+01:00", "2026-03-30T02:30:00+02:00", false},
+		{"cron dst repeat", ScheduleSpec{Kind: "cron", Timezone: "Europe/Berlin", Cron: "30 2 * * *"}, "2026-10-25T00:00:00+02:00", "2026-10-25T02:30:00+01:00", false},
+		{"cron empty", ScheduleSpec{Kind: "cron", Timezone: "UTC"}, "", "", true},
+		{"cron with at", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "0 9 * * *", At: "09:00"}, "", "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			after, _ := time.Parse(time.RFC3339, tc.after)
@@ -49,6 +59,206 @@ func TestScheduleSpec_Next(t *testing.T) {
 			require.True(t, want.Equal(got), "want %v got %v", want, got)
 		})
 	}
+}
+
+func TestScheduleSpec_CronValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		spec ScheduleSpec
+	}{
+		{"seconds", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "0 * * * * *"}},
+		{"four fields", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "* * * *"}},
+		{"minute overflow", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "60 * * * *"}},
+		{"hour overflow", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "* 24 * * *"}},
+		{"day zero", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "* * 0 * *"}},
+		{"month overflow", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "* * * 13 *"}},
+		{"weekday overflow", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "* * * * 8"}},
+		{"zero step", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "*/0 * * * *"}},
+		{"reverse range", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "5-1 * * * *"}},
+		{"double dash", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "1-2-3 * * * *"}},
+		{"letters", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "a * * * *"}},
+		{"last", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "0 0 L * *"}},
+		{"weekday hash", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "0 0 * * 1#2"}},
+		{"nearest weekday", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "0 0 15W * *"}},
+		{"step without range", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "5/10 * * * *"}},
+		{"empty item", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "1,,2 * * * *"}},
+		{"impossible date", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "0 0 31 2 *"}},
+		{"every conflict", ScheduleSpec{Kind: "cron", Timezone: "UTC", Cron: "0 9 * * *", Every: "1h"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.spec.next(time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC))
+			require.Error(t, err)
+		})
+	}
+}
+
+// 同一时刻、同一 cron 规则在不同时区落到不同的绝对时间，且都在各自时区的 09:00。
+func TestScheduleSpec_CronTimezoneIndependent(t *testing.T) {
+	after := time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
+	shanghai, err := ScheduleSpec{Kind: "cron", Timezone: "Asia/Shanghai", Cron: "0 9 * * *"}.next(after)
+	require.NoError(t, err)
+	newYork, err := ScheduleSpec{Kind: "cron", Timezone: "America/New_York", Cron: "0 9 * * *"}.next(after)
+	require.NoError(t, err)
+	require.False(t, shanghai.Equal(newYork), "不同时区必须得到不同的绝对时间")
+	require.Equal(t, "2026-11-03T09:00:00+08:00", shanghai.Format(time.RFC3339))
+	require.Equal(t, "2026-11-03T09:00:00-05:00", newYork.Format(time.RFC3339))
+}
+
+// 夏令时重复的墙钟时刻只返回一次，下一次直接到最后一天。
+func TestScheduleSpec_CronDSTRepeatOnce(t *testing.T) {
+	spec := ScheduleSpec{Kind: "cron", Timezone: "Europe/Berlin", Cron: "30 2 * * *"}
+	after, err := time.Parse(time.RFC3339, "2026-10-25T00:00:00+02:00")
+	require.NoError(t, err)
+	first, err := spec.next(after)
+	require.NoError(t, err)
+	require.Equal(t, "2026-10-25T02:30:00+01:00", first.Format(time.RFC3339))
+	second, err := spec.next(first)
+	require.NoError(t, err)
+	require.Equal(t, "2026-10-26T02:30:00+01:00", second.Format(time.RFC3339))
+}
+
+// 编辑、立即执行与恢复：权限、幂等、下次时间与删除终态。
+func TestSchedule_EditRunResumeLifecycle(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	s, err := openStore(filepath.Join(dir, "tasks.db"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, s.db.Close()) }()
+	m := &Manager{store: s, ctx: ctx, authorize: func(chat.Identity, string) error { return nil }}
+	msg := message("lifecycle", "alice")
+	owner := chat.Identity{Session: msg.Session, SenderID: "alice"}
+	plan, err := m.CreateSchedule(ctx, msg, dir, request("goal"), ScheduleSpec{Kind: "every", Timezone: "UTC", Every: "1h"})
+	require.NoError(t, err)
+	bob := chat.Identity{Session: msg.Session, SenderID: "bob"}
+	_, err = m.EditSchedule(ctx, bob, plan.ID, request("x"), plan.Spec)
+	require.Error(t, err)
+	_, err = m.RunSchedule(ctx, bob, plan.ID)
+	require.Error(t, err)
+	_, err = m.ResumeSchedule(ctx, bob, plan.ID)
+	require.Error(t, err)
+	// 暂停后编辑：规则、请求、模型与投递都更新，状态清除为 active。
+	_, err = m.ChangeSchedule(ctx, owner, plan.ID, "pause")
+	require.NoError(t, err)
+	editedRequest := request("edited goal")
+	editedRequest.Model = "openai.mini"
+	editedSpec := ScheduleSpec{Kind: "cron", Timezone: "Asia/Shanghai", Cron: "*/15 9-18 * * 1-5"}
+	edited, err := m.EditSchedule(ctx, owner, plan.ID, editedRequest, editedSpec, WithScheduleDelivery("silent"))
+	require.NoError(t, err)
+	require.Equal(t, "active", edited.Status)
+	require.Equal(t, "cron", edited.Spec.Kind)
+	require.Equal(t, "edited goal", edited.Request.Messages[0].Content)
+	require.Equal(t, "openai.mini", edited.Request.Model)
+	require.Equal(t, "silent", edited.Delivery)
+	require.Equal(t, msg.ID, edited.Message.ID)
+	require.Equal(t, msg.SenderID, edited.Message.SenderID)
+	require.True(t, edited.NextRun.After(time.Now()))
+	// 一次性计划不能编辑到过去。
+	pastSpec := ScheduleSpec{Kind: "once", Timezone: "UTC", At: time.Now().Add(-time.Hour).Format(time.RFC3339)}
+	_, err = m.EditSchedule(ctx, owner, plan.ID, editedRequest, pastSpec)
+	require.Error(t, err)
+	// 立即执行：生成普通任务、保留下次时间，同一毫秒重复调用返回同一条记录。
+	before := edited.NextRun
+	now := time.Now()
+	run, err := m.runSchedule(ctx, owner, plan.ID, now)
+	require.NoError(t, err)
+	require.Equal(t, "created", run.Outcome)
+	require.NotZero(t, run.TaskID)
+	again, err := m.runSchedule(ctx, owner, plan.ID, now)
+	require.NoError(t, err)
+	require.Equal(t, run.TaskID, again.TaskID)
+	current, err := m.GetSchedule(ctx, msg.Session, plan.ID)
+	require.NoError(t, err)
+	require.True(t, current.NextRun.Equal(before))
+	require.Equal(t, run.TaskID, current.LastTask)
+	// 上次任务仍在排队时立即执行返回 skipped，不再建任务。
+	skipped, err := m.runSchedule(ctx, owner, plan.ID, now.Add(time.Second))
+	require.NoError(t, err)
+	require.Equal(t, "skipped", skipped.Outcome)
+	// 排队任务按计划语义进入执行前检查。
+	queued, err := m.Get(ctx, msg.Session, run.TaskID)
+	require.NoError(t, err)
+	scheduled, err := m.checkScheduledTask(ctx, queued)
+	require.NoError(t, err)
+	require.True(t, scheduled)
+	// 恢复：paused → active 并重算下次时间。
+	_, err = m.ChangeSchedule(ctx, owner, plan.ID, "pause")
+	require.NoError(t, err)
+	resumed, err := m.ResumeSchedule(ctx, owner, plan.ID)
+	require.NoError(t, err)
+	require.Equal(t, "active", resumed.Status)
+	require.True(t, resumed.NextRun.After(time.Now()))
+	// 删除后不可编辑、恢复或立即执行。
+	_, err = m.ChangeSchedule(ctx, owner, plan.ID, "delete")
+	require.NoError(t, err)
+	_, err = m.ResumeSchedule(ctx, owner, plan.ID)
+	require.Error(t, err)
+	_, err = m.EditSchedule(ctx, owner, plan.ID, editedRequest, editedSpec)
+	require.Error(t, err)
+	_, err = m.RunSchedule(ctx, owner, plan.ID)
+	require.Error(t, err)
+}
+
+// 立即执行仍按 RequiresExecution 复查授权：撤销时暂停且不建任务，纯聊天计划免授权。
+func TestSchedule_RunRespectsAuthorization(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	s, err := openStore(filepath.Join(dir, "tasks.db"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, s.db.Close()) }()
+	var revoked atomic.Bool
+	m := &Manager{store: s, ctx: ctx, authorize: func(chat.Identity, string) error {
+		if revoked.Load() {
+			return errors.New("owner revoked")
+		}
+		return nil
+	}}
+	msg := message("run-auth", "alice")
+	owner := chat.Identity{Session: msg.Session, SenderID: "alice"}
+	plan, err := m.CreateSchedule(ctx, msg, dir, request("goal"), ScheduleSpec{Kind: "every", Timezone: "UTC", Every: "1h"})
+	require.NoError(t, err)
+	revoked.Store(true)
+	run, err := m.RunSchedule(ctx, owner, plan.ID)
+	require.NoError(t, err)
+	require.Equal(t, "paused", run.Outcome)
+	require.Zero(t, run.TaskID)
+	current, err := m.GetSchedule(ctx, msg.Session, plan.ID)
+	require.NoError(t, err)
+	require.Equal(t, "paused", current.Status)
+	require.Contains(t, current.Reason, "revoked")
+	// 纯聊天计划不检查执行授权，撤销后也能立即执行。
+	revoked.Store(true)
+	chatMsg := message("run-chat", "bob")
+	chatPlan, err := m.CreateSchedule(ctx, chatMsg, dir, request("chat goal"), ScheduleSpec{Kind: "every", Timezone: "UTC", Every: "1h"}, ScheduleRequiresExecution(false))
+	require.NoError(t, err)
+	chatRun, err := m.RunSchedule(ctx, chat.Identity{Session: chatMsg.Session, SenderID: "bob"}, chatPlan.ID)
+	require.NoError(t, err)
+	require.Equal(t, "created", chatRun.Outcome)
+	require.NotZero(t, chatRun.TaskID)
+}
+
+// 立即执行恰好落在到点毫秒时，不得占用自动触发的决策键。
+func TestSchedule_RunDuringDueKeepsTickHealthy(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	s, err := openStore(filepath.Join(dir, "tasks.db"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, s.db.Close()) }()
+	m := &Manager{store: s, ctx: ctx, authorize: func(chat.Identity, string) error { return nil }}
+	msg := message("due-race", "alice")
+	owner := chat.Identity{Session: msg.Session, SenderID: "alice"}
+	plan, err := m.CreateSchedule(ctx, msg, dir, request("goal"), ScheduleSpec{Kind: "every", Timezone: "UTC", Every: "1h"})
+	require.NoError(t, err)
+	run, err := m.runSchedule(ctx, owner, plan.ID, plan.NextRun)
+	require.NoError(t, err)
+	require.Equal(t, "created", run.Outcome)
+	require.NotEqual(t, plan.NextRun.UnixMilli(), run.Due.UnixMilli(), "立即执行必须错开到点毫秒")
+	require.NoError(t, m.tickSchedules(ctx, plan.NextRun))
+	current, err := m.GetSchedule(ctx, msg.Session, plan.ID)
+	require.NoError(t, err)
+	require.True(t, current.NextRun.After(plan.NextRun))
+	runs, err := m.ScheduleRuns(ctx, msg.Session, plan.ID)
+	require.NoError(t, err)
+	require.Len(t, runs, 2)
 }
 
 func TestSchedule_AtomicCatchupOverlapRestartAndPermissions(t *testing.T) {

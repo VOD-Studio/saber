@@ -11,7 +11,6 @@ import (
 
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/memory"
-	"rua.plus/saber/internal/task"
 )
 
 func commandReply(ctx context.Context, message chat.Message, adapter chat.Adapter, text string) error {
@@ -149,38 +148,11 @@ func (s *Service) TaskCommand(ctx context.Context, message chat.Message, adapter
 	return commandReply(ctx, message, adapter, text)
 }
 
-// ScheduleCommand 使用可信消息身份创建或管理持久化计划。
+// ScheduleCommand 使用可信消息身份创建或管理持久化计划；参数解析与工具共用同一套规则。
 func (s *Service) ScheduleCommand(ctx context.Context, message chat.Message, adapter chat.Adapter, action, raw string) error {
-	in := scheduleInput{Action: action}
-	switch action {
-	case "list":
-		if strings.TrimSpace(raw) != "" {
-			return commandReply(ctx, message, adapter, "用法：/schedule list")
-		}
-	case "status", "pause", "delete":
-		fields := strings.Fields(raw)
-		if len(fields) != 1 {
-			return commandReply(ctx, message, adapter, "用法：/schedule "+action+" <id>")
-		}
-		in.ID, _ = strconv.ParseInt(strings.TrimPrefix(fields[0], "#"), 10, 64)
-		if in.ID <= 0 {
-			return commandReply(ctx, message, adapter, "用法：/schedule "+action+" <id>")
-		}
-	case "once", "every", "weekdays":
-		when, rest := commandField(raw)
-		zone, goal := commandField(rest)
-		if when == "" || zone == "" || strings.TrimSpace(goal) == "" {
-			return commandReply(ctx, message, adapter, "用法：/schedule "+action+" <时间或周期> <IANA 时区> <目标>")
-		}
-		in.Action, in.Goal = "create", goal
-		in.Spec = task.ScheduleSpec{Kind: action, Timezone: zone}
-		if action == "every" {
-			in.Spec.Every = when
-		} else {
-			in.Spec.At = when
-		}
-	default:
-		return commandReply(ctx, message, adapter, "用法：/schedule once/every/weekdays/list/status/pause/delete")
+	in, err := parseScheduleInput(action, raw)
+	if err != nil {
+		return commandReply(ctx, message, adapter, err.Error())
 	}
 	text, err := s.scheduleOperation(ctx, message, in)
 	if err != nil {

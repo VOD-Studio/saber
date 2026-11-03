@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/sashabaranov/go-openai"
 	"rua.plus/saber/internal/agent"
@@ -16,13 +18,15 @@ import (
 	"rua.plus/saber/internal/task"
 )
 
-const scheduleUsage = "用法：!schedule once <RFC3339时间> <时区> <目标> | every <周期如1h> <时区> <目标> | weekdays <HH:MM> <时区> <目标> | list | status/pause/delete <ID>"
+const scheduleUsage = "用法：!schedule once <RFC3339时间> <时区> [model=模型] <目标> | every <周期如1h> <时区> [model=模型] <目标> | weekdays <HH:MM> <时区> [model=模型] <目标> | cron \"<分 时 日 月 周>\" <时区> [model=模型] <目标> | edit <ID> <once|every|weekdays|cron> <时间或周期> <时区> [model=模型] <目标> | list | status/run/resume/pause/delete <ID>"
 
 type scheduleInput struct {
 	Action string            `json:"action"`
 	ID     int64             `json:"id,omitempty"`
 	Spec   task.ScheduleSpec `json:"spec,omitempty"`
 	Goal   string            `json:"goal,omitempty"`
+	// Model 是可选模型 ID；创建时冻结到请求快照，编辑时省略表示沿用原模型。
+	Model string `json:"model,omitempty"`
 	// Delivery 是投递目标：origin（默认）或 silent；命令入口用目标末尾的 --silent 表达。
 	Delivery string `json:"delivery,omitempty"`
 }
@@ -68,7 +72,7 @@ func filterChatTools(tools []openai.Tool) []openai.Tool {
 	return kept
 }
 
-// scheduleGoal 解析创建参数：目标末尾的 --silent 与 delivery 字段都表示静默投递，冲突时静默优先。
+// scheduleGoal 解析目标与投递选项：目标末尾的 --silent 表示静默投递，显式 delivery 未给时保持空值。
 func scheduleGoal(raw, delivery string) (string, string, error) {
 	goal := strings.TrimSpace(raw)
 	if strings.HasSuffix(goal, "--silent") {
@@ -76,9 +80,7 @@ func scheduleGoal(raw, delivery string) (string, string, error) {
 		delivery = "silent"
 	}
 	switch delivery {
-	case "":
-		delivery = "origin"
-	case "origin", "silent":
+	case "", "origin", "silent":
 	default:
 		return "", "", fmt.Errorf("未知投递目标 %q，只支持 origin 或 silent", delivery)
 	}
@@ -86,6 +88,22 @@ func scheduleGoal(raw, delivery string) (string, string, error) {
 		return "", "", errors.New("目标不能为空")
 	}
 	return goal, delivery, nil
+}
+
+// scheduleModel 解析计划模型；显式名称必须是已配置模型，空值沿用旧模型或全局默认。
+func (s *Service) scheduleModel(name, fallback string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		// 旧快照与全局默认已在创建时通过 taskRequest 的提供商校验，这里不再重复否决。
+		if fallback = strings.TrimSpace(fallback); fallback != "" {
+			return fallback, nil
+		}
+		return s.GetModelRegistry().GetDefault(), nil
+	}
+	if _, ok := s.core.GetConfig().GetModelConfig(name); !ok {
+		return "", fmt.Errorf("模型 %q 未配置，可用 /ai models 查看", name)
+	}
+	return name, nil
 }
 
 func (s *Service) authorizeSchedule(identity chat.Identity, dir string) error {
@@ -135,7 +153,11 @@ func (s *Service) scheduleOperation(ctx context.Context, msg chat.Message, in sc
 			dir = granted
 		}
 		msg.Text, msg.Attachments = goal, nil
-		req, err := s.taskRequest(msg, s.GetModelRegistry().GetDefault())
+		model, err := s.scheduleModel(in.Model, "")
+		if err != nil {
+			return "", err
+		}
+		req, err := s.taskRequest(msg, model)
 		if err != nil {
 			return "", err
 		}
@@ -145,6 +167,35 @@ func (s *Service) scheduleOperation(ctx context.Context, msg chat.Message, in sc
 			return "", err
 		}
 		return "计划已保存（重复消息返回原计划）：\n" + scheduleText(plan), nil
+	case "edit":
+		goal, delivery, err := scheduleGoal(in.Goal, in.Delivery)
+		if err != nil {
+			return "", err
+		}
+		// 读取原计划只为沿用模型与投递设置；最终权限由任务管理层按负责人/管理员校验。
+		plan, err := s.tasks.GetSchedule(ctx, msg.Session, in.ID)
+		if err != nil {
+			return "", err
+		}
+		model, err := s.scheduleModel(in.Model, plan.Request.Model)
+		if err != nil {
+			return "", err
+		}
+		msg.Text, msg.Attachments = goal, nil
+		req, err := s.taskRequest(msg, model)
+		if err != nil {
+			return "", err
+		}
+		req.Messages = append(req.Messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: msg.Text})
+		var opts []task.ScheduleOption
+		if delivery != "" {
+			opts = append(opts, task.WithScheduleDelivery(delivery))
+		}
+		updated, err := s.tasks.EditSchedule(ctx, identity, in.ID, req, in.Spec, opts...)
+		if err != nil {
+			return "", err
+		}
+		return "计划已更新：\n" + scheduleText(updated), nil
 	case "list":
 		plans, err := s.tasks.ListSchedules(ctx, msg.Session)
 		if err != nil {
@@ -172,6 +223,25 @@ func (s *Service) scheduleOperation(ctx context.Context, msg chat.Message, in sc
 			text += fmt.Sprintf("\n%s：%s，任务 #%d，%s", r.Due.Format(time.RFC3339), r.Outcome, r.TaskID, r.Detail)
 		}
 		return text, nil
+	case "run":
+		run, err := s.tasks.RunSchedule(ctx, identity, in.ID)
+		if err != nil {
+			return "", err
+		}
+		switch run.Outcome {
+		case "created":
+			return fmt.Sprintf("计划 #%d 已立即生成任务 #%d；下次自动执行时间不变。", in.ID, run.TaskID), nil
+		case "skipped":
+			return fmt.Sprintf("计划 #%d 未执行：%s", in.ID, run.Detail), nil
+		default:
+			return fmt.Sprintf("计划 #%d 已暂停：%s", in.ID, run.Detail), nil
+		}
+	case "resume":
+		plan, err := s.tasks.ResumeSchedule(ctx, identity, in.ID)
+		if err != nil {
+			return "", err
+		}
+		return "计划已恢复：\n" + scheduleText(plan), nil
 	case "pause", "delete":
 		plan, err := s.tasks.ChangeSchedule(ctx, identity, in.ID, in.Action)
 		if err != nil {
@@ -185,6 +255,14 @@ func (s *Service) scheduleOperation(ctx context.Context, msg chat.Message, in sc
 
 func scheduleText(s task.Schedule) string {
 	rule := s.Spec.At
+	// 目标以请求快照为准：编辑后消息快照仍保留原事件，只有请求承载新的目标。
+	goal := s.Message.Text
+	for i := len(s.Request.Messages) - 1; i >= 0; i-- {
+		if s.Request.Messages[i].Role == openai.ChatMessageRoleUser {
+			goal = s.Request.Messages[i].Content
+			break
+		}
+	}
 	switch s.Spec.Kind {
 	case "every":
 		rule = "每隔 " + s.Spec.Every
@@ -192,6 +270,8 @@ func scheduleText(s task.Schedule) string {
 		rule = "每个工作日 " + s.Spec.At
 	case "once":
 		rule = "一次性 " + s.Spec.At
+	case "cron":
+		rule = "cron " + s.Spec.Cron
 	}
 	next := "无（计划不再自动触发）"
 	if s.Status == "active" && !s.NextRun.IsZero() {
@@ -208,7 +288,123 @@ func scheduleText(s task.Schedule) string {
 	if !s.RequiresExecution {
 		executionMode = "纯聊天（不申请执行授权，运行时只保留聊天工具）"
 	}
-	return fmt.Sprintf("计划 #%d：%s，%s（%s）\n负责人：%s\n目标：%s\n汇报到：%s\n投递：%s\n执行：%s\n下次执行：%s\n上次任务：#%d", s.ID, rule, s.Spec.Timezone, s.Status, s.Message.SenderID, s.Message.Text, s.Message.Session.Conversation, delivery, executionMode, next, s.LastTask)
+	return fmt.Sprintf("计划 #%d：%s，%s（%s）\n负责人：%s\n目标：%s\n模型：%s\n汇报到：%s\n投递：%s\n执行：%s\n下次执行：%s\n上次任务：#%d", s.ID, rule, s.Spec.Timezone, s.Status, s.Message.SenderID, goal, s.Request.Model, s.Message.Session.Conversation, delivery, executionMode, next, s.LastTask)
+}
+
+// parseScheduleInput 把命令参数解析为计划操作；创建与编辑共用同一套规则解析。
+func parseScheduleInput(action, raw string) (scheduleInput, error) {
+	in := scheduleInput{Action: action}
+	switch action {
+	case "list":
+		if strings.TrimSpace(raw) != "" {
+			return in, errors.New("用法：/schedule list")
+		}
+	case "status", "pause", "delete", "run", "resume":
+		id, ok := parseScheduleID(raw)
+		if !ok {
+			return in, fmt.Errorf("用法：/schedule %s <id>", action)
+		}
+		in.ID = id
+	case "once", "every", "weekdays", "cron":
+		spec, goal, model, err := parseScheduleRule(action, raw)
+		if err != nil {
+			return in, err
+		}
+		in.Action, in.Goal, in.Model, in.Spec = "create", goal, model, spec
+	case "edit":
+		idText, rest := commandField(raw)
+		id, err := strconv.ParseInt(strings.TrimPrefix(idText, "#"), 10, 64)
+		if err != nil || id <= 0 {
+			return in, errors.New("用法：/schedule edit <id> <once|every|weekdays|cron> <时间或周期> <IANA 时区> [model=模型] <目标>")
+		}
+		kind, rest := commandField(rest)
+		spec, goal, model, err := parseScheduleRule(kind, rest)
+		if err != nil {
+			return in, err
+		}
+		in.ID, in.Goal, in.Model, in.Spec = id, goal, model, spec
+	default:
+		return in, errors.New(scheduleUsage)
+	}
+	return in, nil
+}
+
+// parseScheduleID 读取单个计划编号，允许 # 前缀。
+func parseScheduleID(raw string) (int64, bool) {
+	fields := strings.Fields(raw)
+	if len(fields) != 1 {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(strings.TrimPrefix(fields[0], "#"), 10, 64)
+	return id, err == nil && id > 0
+}
+
+// parseScheduleRule 解析“<时间或周期> <IANA 时区> [model=模型] <目标>”片段。
+func parseScheduleRule(kind, raw string) (task.ScheduleSpec, string, string, error) {
+	switch kind {
+	case "once", "every", "weekdays", "cron":
+	default:
+		return task.ScheduleSpec{}, "", "", fmt.Errorf("未知计划规则 %q，只支持 once/every/weekdays/cron", kind)
+	}
+	when, rest := scheduleField(raw)
+	zone, rest := scheduleField(rest)
+	if when == "" || zone == "" || strings.TrimSpace(rest) == "" {
+		return task.ScheduleSpec{}, "", "", fmt.Errorf("用法：/schedule %s <时间或周期> <IANA 时区> [model=模型] <目标>", kind)
+	}
+	spec := task.ScheduleSpec{Kind: kind, Timezone: zone}
+	switch kind {
+	case "every":
+		spec.Every = when
+	case "cron":
+		// cron 表达式含空格，必须整段用引号包裹；段数在此提前拒绝，避免把后半段当成时区。
+		if len(strings.Fields(when)) != 5 {
+			return task.ScheduleSpec{}, "", "", errors.New(`cron 表达式必须用引号包裹 5 段，例如 !schedule cron "*/15 9-18 * * 1-5" Asia/Shanghai 目标`)
+		}
+		spec.Cron = when
+	default:
+		spec.At = when
+	}
+	goal, model, err := splitScheduleModel(rest)
+	if err != nil {
+		return task.ScheduleSpec{}, "", "", err
+	}
+	return spec, goal, model, nil
+}
+
+// scheduleField 读取一个参数；cron 表达式含空格，允许用单引号或双引号包裹。
+func scheduleField(text string) (field, rest string) {
+	text = strings.TrimLeftFunc(text, unicode.IsSpace)
+	if text == "" {
+		return "", ""
+	}
+	if quote := text[0]; quote == '"' || quote == '\'' {
+		if end := strings.IndexByte(text[1:], quote); end >= 0 {
+			return text[1 : end+1], strings.TrimLeftFunc(text[end+2:], unicode.IsSpace)
+		}
+	}
+	return commandField(text)
+}
+
+// splitScheduleModel 提取目标前的 model= 选项；模型名不能为空，重复出现必须一致。
+func splitScheduleModel(raw string) (goal, model string, err error) {
+	for {
+		field, rest := commandField(raw)
+		if !strings.HasPrefix(field, "model=") {
+			if goal = strings.TrimSpace(raw); goal == "" {
+				return "", "", errors.New("目标不能为空")
+			}
+			return goal, model, nil
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(field, "model="))
+		if value == "" {
+			return "", "", errors.New("model 选项不能为空，例如 model=openai.gpt-4o-mini")
+		}
+		if model != "" && model != value {
+			return "", "", errors.New("只能指定一个 model 选项")
+		}
+		model = value
+		raw = rest
+	}
 }
 
 func (s *Service) executeScheduleTool(ctx context.Context, args map[string]any) (any, error) {
@@ -239,17 +435,19 @@ func (s *Service) executeScheduleTool(ctx context.Context, args map[string]any) 
 
 func scheduleTool() openai.Tool {
 	return openai.Tool{Type: openai.ToolTypeFunction, Function: &openai.FunctionDefinition{
-		Name: "saber_schedule", Description: "仅在用户要求定时执行或管理计划时使用。创建、查看、暂停、删除本群持久化计划。身份、工作目录和汇报群由系统绑定；纯聊天计划不需要执行授权。必须明确时区；缺少时间或时区先询问。一次请求最多创建一个计划。delivery 默认 origin（回复原消息），silent 表示不向聊天发送、结果只落库。当前时间：" + time.Now().UTC().Format(time.RFC3339),
+		Name: "saber_schedule", Description: "仅在用户要求定时执行或管理计划时使用。创建、编辑、立即执行、恢复、查看、暂停、删除本群持久化计划。身份、工作目录和汇报群由系统绑定；纯聊天计划不需要执行授权。必须明确时区；缺少时间或时区先询问。一次请求最多创建一个计划。可用 model 指定每个计划使用的模型，缺省使用全局默认。delivery 默认 origin（回复原消息），silent 表示不向聊天发送、结果只落库。当前时间：" + time.Now().UTC().Format(time.RFC3339),
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{
-			"action":   map[string]any{"type": "string", "enum": []string{"create", "list", "status", "pause", "delete"}},
+			"action":   map[string]any{"type": "string", "enum": []string{"create", "edit", "list", "status", "run", "resume", "pause", "delete"}},
 			"id":       map[string]any{"type": "integer", "minimum": 1},
 			"goal":     map[string]any{"type": "string"},
+			"model":    map[string]any{"type": "string", "description": "可选模型 ID，如 openai.gpt-4o-mini；创建时冻结，编辑时省略表示沿用原模型"},
 			"delivery": map[string]any{"type": "string", "enum": []string{"origin", "silent"}, "description": "origin 回复原消息（默认）；silent 不向聊天投递，结果可用任务命令查询"},
 			"spec": map[string]any{"type": "object", "properties": map[string]any{
-				"kind":     map[string]any{"type": "string", "enum": []string{"once", "every", "weekdays"}},
+				"kind":     map[string]any{"type": "string", "enum": []string{"once", "every", "weekdays", "cron"}},
 				"timezone": map[string]any{"type": "string", "description": "IANA 时区，如 Asia/Shanghai"},
 				"at":       map[string]any{"type": "string", "description": "once: 带偏移的 RFC3339；weekdays: HH:MM"},
 				"every":    map[string]any{"type": "string", "description": "every: 周期 1m 到 8760h，例如 1h"},
+				"cron":     map[string]any{"type": "string", "description": "cron: 5 段表达式（分 时 日 月 周），周 0 和 7 都表示周日，例如 \"*/15 9-18 * * 1-5\""},
 			}, "required": []string{"kind", "timezone"}, "additionalProperties": false},
 		}, "required": []string{"action"}, "additionalProperties": false},
 	}}

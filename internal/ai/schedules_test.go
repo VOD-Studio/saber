@@ -439,3 +439,140 @@ func TestPrepareTools_ScheduleVisibleWithoutExecutionGrant(t *testing.T) {
 	require.True(t, scheduleNeedsExecution(svc.executor.Tools(grantedCtx)))
 	require.NotContains(t, toolNames(filterChatTools(append(tools, svc.executor.Tools(grantedCtx)...))), "exec")
 }
+
+// 命令解析：cron 表达式可用引号包裹，model= 选项从目标前提取，编辑复用同一套规则。
+func TestParseScheduleInput(t *testing.T) {
+	in, err := parseScheduleInput("cron", `"*/15 9-18 * * 1-5" Asia/Shanghai model=openai.gpt-4o-mini 检查服务`)
+	require.NoError(t, err)
+	require.Equal(t, "create", in.Action)
+	require.Equal(t, "*/15 9-18 * * 1-5", in.Spec.Cron)
+	require.Equal(t, "Asia/Shanghai", in.Spec.Timezone)
+	require.Equal(t, "openai.gpt-4o-mini", in.Model)
+	require.Equal(t, "检查服务", in.Goal)
+
+	in, err = parseScheduleInput("every", "1h Asia/Shanghai model=openai.gpt-4o-mini 检查服务")
+	require.NoError(t, err)
+	require.Equal(t, "every", in.Spec.Kind)
+	require.Equal(t, "1h", in.Spec.Every)
+	require.Equal(t, "openai.gpt-4o-mini", in.Model)
+	require.Equal(t, "检查服务", in.Goal)
+
+	in, err = parseScheduleInput("weekdays", "09:00 Asia/Shanghai 检查服务 --silent")
+	require.NoError(t, err)
+	require.Empty(t, in.Model)
+	require.Equal(t, "检查服务 --silent", in.Goal)
+
+	in, err = parseScheduleInput("edit", "12 every 1h Asia/Shanghai model=openai.mini 新目标")
+	require.NoError(t, err)
+	require.Equal(t, int64(12), in.ID)
+	require.Equal(t, "every", in.Spec.Kind)
+	require.Equal(t, "openai.mini", in.Model)
+	require.Equal(t, "新目标", in.Goal)
+
+	for _, action := range []string{"status", "pause", "delete", "run", "resume"} {
+		in, err = parseScheduleInput(action, "#7")
+		require.NoError(t, err)
+		require.Equal(t, int64(7), in.ID)
+		require.Equal(t, action, in.Action)
+	}
+
+	for _, tc := range []struct{ action, raw string }{
+		{"list", "extra"},
+		{"run", ""},
+		{"status", "0"},
+		{"edit", "1 every 1h Asia/Shanghai"},
+		{"edit", "1 every 1h Asia/Shanghai model= 目标"},
+		{"edit", "1 unknown 1h Asia/Shanghai 目标"},
+		{"cron", "0 9 * * * Asia/Shanghai 目标"},
+	} {
+		_, err := parseScheduleInput(tc.action, tc.raw)
+		require.Error(t, err, "%s %q", tc.action, tc.raw)
+	}
+}
+
+// per-job 模型冻结到请求快照，同一 cron 规则在不同时区得到不同的下次时间。
+func TestSchedules_CronModelTimezoneAndLifecycle(t *testing.T) {
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{
+			"message": map[string]any{"role": "assistant", "content": "到点"}, "finish_reason": "stop",
+		}}}))
+	}))
+	defer model.Close()
+	cfg := *config.DefaultConfig()
+	cfg.AI.Enabled, cfg.Agent.StreamEnabled = true, false
+	cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: model.URL, APIKey: "test", Models: map[string]config.ModelConfig{"mini": {Model: "gpt-4o-mini"}}}}
+	cfg.AI.DefaultModel = "openai.local"
+	cfg.AI.SystemPrompt = "system"
+	svc, err := NewService(&cfg)
+	require.NoError(t, err)
+	defer svc.Stop()
+	require.NoError(t, svc.EnableTasks(filepath.Join(t.TempDir(), "tasks.db")))
+	ctx := context.Background()
+	session := chat.Session{Platform: "matrix", Account: "@bot:test", Conversation: "!room:test"}
+	message := func(id string) chat.Message {
+		return chat.Message{Session: session, ID: id, SenderID: "@alice:test", Text: id}
+	}
+	cron := func(zone string) task.ScheduleSpec {
+		return task.ScheduleSpec{Kind: "cron", Timezone: zone, Cron: "0 9 * * *"}
+	}
+	_, err = svc.scheduleOperation(ctx, message("$shanghai"), scheduleInput{Action: "create", Goal: "早报 --silent", Model: "openai.mini", Spec: cron("Asia/Shanghai")})
+	require.NoError(t, err)
+	_, err = svc.scheduleOperation(ctx, message("$utc"), scheduleInput{Action: "create", Goal: "早报 --silent", Spec: cron("UTC")})
+	require.NoError(t, err)
+	// 未配置的模型在创建前就报错，不落库。
+	_, err = svc.scheduleOperation(ctx, message("$bad-model"), scheduleInput{Action: "create", Goal: "早报 --silent", Model: "nope.model", Spec: cron("UTC")})
+	require.Error(t, err)
+	plans, err := svc.tasks.ListSchedules(ctx, session)
+	require.NoError(t, err)
+	require.Len(t, plans, 2)
+	byEvent := map[string]task.Schedule{}
+	for _, p := range plans {
+		byEvent[p.Message.ID] = p
+	}
+	shanghai, utc := byEvent["$shanghai"], byEvent["$utc"]
+	require.Equal(t, "openai.mini", shanghai.Request.Model)
+	require.Equal(t, cfg.AI.DefaultModel, utc.Request.Model)
+	require.Equal(t, "cron", shanghai.Spec.Kind)
+	require.False(t, shanghai.NextRun.Equal(utc.NextRun), "不同时区的计划下次时间必须不同")
+	shanghaiLoc, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	require.Equal(t, "09:00", shanghai.NextRun.In(shanghaiLoc).Format("15:04"))
+	require.Equal(t, "09:00", utc.NextRun.In(time.UTC).Format("15:04"))
+	// 编辑：改规则、目标与模型，并清除暂停状态；省略 model 时沿用原模型。
+	_, err = svc.scheduleOperation(ctx, message("$shanghai"), scheduleInput{Action: "pause", ID: shanghai.ID})
+	require.NoError(t, err)
+	text, err := svc.scheduleOperation(ctx, message("$shanghai"), scheduleInput{Action: "edit", ID: shanghai.ID, Goal: "晚报 --silent", Spec: task.ScheduleSpec{Kind: "every", Timezone: "Asia/Shanghai", Every: "2h"}})
+	require.NoError(t, err)
+	require.Contains(t, text, "计划已更新")
+	edited, err := svc.tasks.GetSchedule(ctx, session, shanghai.ID)
+	require.NoError(t, err)
+	require.Equal(t, "active", edited.Status)
+	require.Equal(t, "every", edited.Spec.Kind)
+	require.Equal(t, "早报", edited.Message.Text, "编辑保留原消息快照")
+	require.Equal(t, "晚报", edited.Request.Messages[len(edited.Request.Messages)-1].Content)
+	require.Contains(t, text, "晚报")
+	require.Equal(t, "openai.mini", edited.Request.Model)
+	require.True(t, edited.NextRun.After(time.Now()))
+	// 立即执行：生成任务但不改下次时间。
+	text, err = svc.scheduleOperation(ctx, message("$shanghai"), scheduleInput{Action: "run", ID: shanghai.ID})
+	require.NoError(t, err)
+	require.Contains(t, text, "已立即生成任务")
+	current, err := svc.tasks.GetSchedule(ctx, session, shanghai.ID)
+	require.NoError(t, err)
+	require.True(t, current.NextRun.Equal(edited.NextRun))
+	require.NotZero(t, current.LastTask)
+	// 恢复：暂停后 resume 重算下次时间。
+	_, err = svc.scheduleOperation(ctx, message("$shanghai"), scheduleInput{Action: "pause", ID: shanghai.ID})
+	require.NoError(t, err)
+	text, err = svc.scheduleOperation(ctx, message("$shanghai"), scheduleInput{Action: "resume", ID: shanghai.ID})
+	require.NoError(t, err)
+	require.Contains(t, text, "计划已恢复")
+	resumed, err := svc.tasks.GetSchedule(ctx, session, shanghai.ID)
+	require.NoError(t, err)
+	require.Equal(t, "active", resumed.Status)
+	// 删除后不可恢复。
+	_, err = svc.scheduleOperation(ctx, message("$shanghai"), scheduleInput{Action: "delete", ID: shanghai.ID})
+	require.NoError(t, err)
+	_, err = svc.scheduleOperation(ctx, message("$shanghai"), scheduleInput{Action: "resume", ID: shanghai.ID})
+	require.Error(t, err)
+}
