@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-04
+
 ### Added
 
 - 新增内置工具 `saber_batch` 与批次表：`task_batches` 加 `tasks.batch_id/batch_index`（走既有列迁移与 `tasks_batch` 索引），一次提交 1..20 条独立根任务（单条 text ≤ 8000 字符）。提交是单事务，任一条失败整批回滚；条目 `event` 固定 `batch:<batch_id>:<index>`，不复用真实消息 ID，也不建立 `task_links`。`submit/status/cancel` 只允许批次创建者或本群任务管理员，按 platform+account+room 过滤；`silent` 条目沿用既有投递开关。批次不绕过工作目录互斥与 `agent.max_concurrent_tasks`，同工作区条目自然串行。新增 `batch_submitted`/`batch_finished` 事件（TUI 与 SSE 可见，结束事件在批次全部终态时只写一条）与 `batches` 能力键，doctor 新增 `tasks.batch_index` 索引检查。
@@ -534,7 +536,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 结构化日志
 - 基础命令系统（`!ping`, `!help`）
 
-[Unreleased]: https://github.com/VOD-Studio/saber/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/VOD-Studio/saber/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/VOD-Studio/saber/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/VOD-Studio/saber/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/VOD-Studio/saber/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/VOD-Studio/saber/compare/v0.2.0...v0.3.0
