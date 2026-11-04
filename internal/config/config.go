@@ -35,7 +35,7 @@ type ShutdownConfig struct {
 
 // MemoryConfig 存储长期记忆配置。
 type MemoryConfig struct {
-	// Enabled 控制是否启用长期记忆；默认关闭，升级时不改变现有行为。
+	// Enabled 控制是否启用长期记忆；默认开启，显式设为 false 可关闭。
 	Enabled bool `yaml:"enabled"`
 	// MaxChars 限制每个空间的存储字符数；零值使用默认值。
 	MaxChars int `yaml:"max_chars"`
@@ -551,7 +551,7 @@ func DefaultShutdownConfig() ShutdownConfig {
 // DefaultMemoryConfig 返回带有合理默认值的长期记忆配置。
 func DefaultMemoryConfig() MemoryConfig {
 	return MemoryConfig{
-		Enabled:        false,
+		Enabled:        true,
 		MaxChars:       2200,
 		InjectMaxBytes: 8192,
 		AutoLearn:      true,
@@ -1152,7 +1152,7 @@ commands:
   session_writers: [] # 当前会话上下文和人格修改；按 platform/account/room/users 精确配置
   legacy_persona_account: "" # 确认旧 room_personas 全属此 Matrix bot 时填其完整用户 ID，空值保留待核查
 memory:
-  enabled: false # 长期记忆；启用后按用户与群作用域隔离保存，默认关闭
+  enabled: true # 长期记忆默认开启，按用户与群作用域隔离保存；显式 false 可关闭
   max_chars: 2200 # 每个空间的存储上限（Unicode 字符）
   inject_max_bytes: 8192 # 单次注入字节上限，同时不超过总输入预算的四分之一
   auto_learn: true # 记忆启用后按已完成轮次自动复盘；false 只保留显式写入

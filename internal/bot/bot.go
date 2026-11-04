@@ -307,6 +307,9 @@ func (s *appState) initServices() error {
 	if err := s.cfg.Memory.Validate(); err != nil {
 		return fmt.Errorf("长期记忆配置无效: %w", err)
 	}
+	if err := s.initMemoryService(); err != nil {
+		return err
+	}
 
 	if !s.cfg.AI.Enabled {
 		s.registerTerminalPlatform()
@@ -337,9 +340,6 @@ func (s *appState) initServices() error {
 				return fmt.Errorf("slack 平台配置无效: %w", err)
 			}
 			svc.platforms.Register(slackplatform.New(s.cfg))
-		}
-		if err := s.initMemoryService(); err != nil {
-			return err
 		}
 		if svc.memoryService != nil {
 			// 记忆与技能命令不依赖模型；AI 关闭时也装配服务，保证 /memory 与 /skill

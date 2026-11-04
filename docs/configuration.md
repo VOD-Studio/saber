@@ -158,7 +158,7 @@ MCP 默认关闭，不加载内置或外部服务器。开启后还必须通过 
 
 ```yaml
 memory:
-  enabled: false # 默认关闭；关闭时 /memory 与 /skill 明确提示需启用，工具不注册
+  enabled: true # 默认开启；显式 false 关闭 /memory、/skill 和相关工具
   auto_learn: true # 记忆启用后按轮次自动复盘；关闭则只保留显式写入
   review_interval: 5 # 每多少个已完成轮次触发一次复盘（0 使用默认 5）
   max_chars: 2200
@@ -167,6 +167,8 @@ memory:
     dirs: [] # 只读外部技能目录（绝对路径，最多 8 个，启动时校验存在且为目录）
     export_dir: "" # 技能导出目录（绝对路径，父目录需存在）；空值禁用导出
 ```
+
+省略 `memory` 或 `memory.enabled` 时也默认开启；已有配置显式写入 `enabled: false` 仍保持关闭。启用后在配置目录创建私有 `memory.db`，自动复盘会增加模型调用；不需要自动提炼时将 `auto_learn` 设为 `false`。
 
 个人空间与群空间分别隔离；注入的记忆与技能目录作为运行时资料只进入本次发送副本，不写入任务请求或摘要输入。`saber doctor` 会报告记忆开关与配额、数据库存在性与权限，不创建数据库。
 

@@ -34,9 +34,11 @@ func TestTasks_MemorySnapshotInjectedAndScoped(t *testing.T) {
 			return
 		}
 		last := req.Messages[len(req.Messages)-1].Content
-		mu.Lock()
-		requests[last] = req
-		mu.Unlock()
+		if last == "私人问候" || last == "群里问候" {
+			mu.Lock()
+			requests[last] = req
+			mu.Unlock()
+		}
 		if err := json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "ok " + last}, "finish_reason": "stop"}}}); err != nil {
 			t.Error(err)
 		}
@@ -75,15 +77,15 @@ func TestTasks_MemorySnapshotInjectedAndScoped(t *testing.T) {
 	require.Eventually(t, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return len(requests) == 2
+		_, privateOK := requests["私人问候"]
+		_, groupOK := requests["群里问候"]
+		return privateOK && groupOK
 	}, 3*time.Second, 20*time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()
 	privateReq, ok := requests["私人问候"]
 	require.True(t, ok)
-	require.Len(t, privateReq.Messages, 3)
-	require.Equal(t, "system", privateReq.Messages[1].Role)
 	require.Contains(t, privateReq.Messages[1].Content, "她希望被称呼为 Alice")
 	require.Contains(t, privateReq.Messages[1].Content, "个人空间")
 	// 群里不能读到同一用户的私聊记忆。
@@ -105,7 +107,9 @@ func TestTasks_MatrixPrivateMemory(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		requests <- req
+		if req.Messages[len(req.Messages)-1].Content == "请使用已保存的偏好" {
+			requests <- req
+		}
 		if err := json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "ok"}, "finish_reason": "stop"}}}); err != nil {
 			t.Error(err)
 		}

@@ -80,6 +80,79 @@ func TestCommandCatalog_PlatformMediaCapabilities(t *testing.T) {
 	}
 }
 
+// TestInitServices_MemoryCommandsPersist 验证 AI 开启时命令持久保存、关闭时仍可读取，显式关闭记忆仍生效。
+func TestInitServices_MemoryCommandsPersist(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		ai     bool
+		memory bool
+	}{
+		{"AI开启", true, true},
+		{"AI关闭", false, true},
+		{"记忆显式关闭", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.AI.Enabled = tc.ai
+			cfg.AI.Providers = map[string]config.ProviderConfig{"openai": {Type: "openai", BaseURL: "http://127.0.0.1:1/v1", APIKey: "test"}}
+			cfg.AI.DefaultModel = "openai.local"
+			cfg.Memory.Enabled = tc.memory
+			cfg.Memory.AutoLearn = false
+			dir := t.TempDir()
+			state := &appState{cfg: cfg, flags: &cli.Flags{ConfigPath: filepath.Join(dir, "config.yaml")}, services: &services{}}
+			t.Cleanup(func() { state.shutdown(func() {}) })
+			if err := state.initServices(); err != nil {
+				t.Fatal(err)
+			}
+			identity := chat.Identity{Session: chat.Session{Platform: "memory", Account: "bot", Conversation: "dm"}, SenderID: "user", Direct: true}
+			adapter := memory.New("bot", chat.Capabilities{}, nil)
+			message := chat.Message{Session: identity.Session, ID: "save", SenderID: identity.SenderID, Direct: true, Text: "/memory add 回答使用中文"}
+			wantReply := "已保存"
+			if !tc.ai {
+				rejected := memory.New("bot", chat.Capabilities{}, nil)
+				if _, err := state.handleChat(context.Background(), message, rejected); err != nil {
+					t.Fatal(err)
+				}
+				refused := rejected.Replies()
+				if len(refused) != 1 || !strings.Contains(refused[0].Text, "命令回执存储未启用") {
+					t.Fatalf("无持久回执时写入必须拒绝：%+v", refused)
+				}
+				if _, err := state.services.memoryService.Add(context.Background(), identity, "回答使用中文", memstore.Source{}, true); err != nil {
+					t.Fatal(err)
+				}
+				message.Text = "/memory list"
+				wantReply = "回答使用中文"
+			}
+			if _, err := state.handleChat(context.Background(), message, adapter); err != nil {
+				t.Fatal(err)
+			}
+			replies := adapter.Replies()
+			if len(replies) != 1 {
+				t.Fatalf("记忆命令回执 = %+v", replies)
+			}
+			if !tc.memory {
+				if !strings.Contains(replies[0].Text, "需启用 memory.enabled") {
+					t.Fatalf("关闭记忆时回执 = %q", replies[0].Text)
+				}
+				return
+			}
+			if !strings.Contains(replies[0].Text, wantReply) {
+				t.Fatalf("启用记忆时回执 = %q", replies[0].Text)
+			}
+			state.shutdown(func() {})
+			stored, err := memstore.Open(filepath.Join(dir, "memory.db"), memstore.Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = stored.Close() })
+			entries, err := stored.List(context.Background(), identity)
+			if err != nil || len(entries) != 1 || entries[0].Content != "回答使用中文" {
+				t.Fatalf("重开记忆库后条目 = %+v, error = %v", entries, err)
+			}
+		})
+	}
+}
+
 // TestCommandFallbackInvokesSkill 验证未注册的 `/词` 只在命中当前空间技能时交给 AI，
 // 未命中仍回复「未知命令」，已注册命令不受 fallback 影响。
 func TestCommandFallbackInvokesSkill(t *testing.T) {

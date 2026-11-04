@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- 长期记忆与生成配置默认开启，省略 `memory.enabled` 时也启用；已有显式 `false` 配置仍保持关闭。自动复盘沿用默认每 5 个已完成轮次触发，可用 `memory.auto_learn: false` 关闭。
+
+### Fixed
+
+- 记忆库初始化移到 AI 开关分支之前，修复 AI 开启时即使配置 `memory.enabled: true` 仍无记忆服务的问题；AI 关闭时不再把空任务管理器作为命令回执后端，避免有副作用的记忆命令崩溃。
+
 ## [0.7.0] - 2026-11-04
 
 ### Added

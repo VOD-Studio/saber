@@ -110,7 +110,9 @@ func (s *appState) buildCommands() error {
 		}
 	}
 	if aiSvc := s.services.aiService; aiSvc != nil {
-		r.SetReceipts(aiSvc.Tasks())
+		if tasks := aiSvc.Tasks(); tasks != nil {
+			r.SetReceipts(tasks)
+		}
 		// 未命中任何命令路径的 `/词` 只在该词对应当前可信空间的技能时交给 AI；
 		// 其余正文仍由注册表回复「未知命令」，不会被静默吞掉。
 		r.SetFallback(func(ctx context.Context, message chat.Message, reply chat.Adapter) (bool, error) {
