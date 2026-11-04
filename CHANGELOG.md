@@ -7,10 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-04
+
+### Added
+
+- Violet 新增推文读写端口与 `saber_tweet` 工具，支持发布、引用、评论、点赞、删除、只读查询与工作区配图上传；公开写操作按 `commands.admins` 精确授权。管理员可复用静默定时计划自主发帖，按每日上限与最小间隔限制发布。
+- Violet 新增推文评论与引用事件接入，由 `platforms.violet.tweets.enabled` 单独启用（默认关闭）。自动回复以公开评论一次性发送，不建立持久化任务、不提供工具、不注入长期记忆；正文与配图数量受配置限制。
+- Violet 新增 `saber_emoji` 工具，读取系统表情与 bot 私有表情目录，支持收藏和取消收藏自定义表情；返回的 token 可直接写入聊天正文。入站自定义表情继续作为图片附件投递，并在平台上下文保留引用 token，便于收藏后复用。
+
 ### Fixed
 
 - Responses 流式把上游无 `type` 的 `code`/`message` 错误帧（DashScope 类 200 流内的限流与配额失败）识别为真实错误，不再退化成「responses stream ended before response.completed」；重试错误文案改为报告真实尝试次数（此前固定打印 `max_retries+1`）。
 - 配额耗尽（`Allocated quota exceeded`、`Throttling.AllocationQuota`、`insufficient_quota`）不再按 429 重试，避免任务在额度未恢复时空转 10 次。
+- 修正 Violet 推文追问的上下文标注：人类发布的推文不再被标为机器人自己的推文。
 
 ## [0.6.0] - 2026-11-04
 
@@ -541,7 +550,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 结构化日志
 - 基础命令系统（`!ping`, `!help`）
 
-[Unreleased]: https://github.com/VOD-Studio/saber/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/VOD-Studio/saber/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/VOD-Studio/saber/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/VOD-Studio/saber/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/VOD-Studio/saber/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/VOD-Studio/saber/compare/v0.3.0...v0.4.0
