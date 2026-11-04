@@ -97,7 +97,7 @@ func (s *Service) EnableTasks(path string) error {
 			req = s.augmentMemory(ctx, req)
 		}
 		// 上下文文件只在已授权工作区的持久任务中注入，同一次运行只读取一次。
-		if !(scheduled && !plan.RequiresExecution) {
+		if !scheduled || plan.RequiresExecution {
 			req = s.appendContextFiles(ctx, req)
 		}
 		// 重启恢复时按当前权限重新筛选，旧请求快照不能保留已撤销能力。

@@ -58,7 +58,9 @@ func TestServer_InfoCapabilitiesAndCommands(t *testing.T) {
 	require.Equal(t, "status", info.Commands[0].ID)
 	require.Equal(t, "disabled", info.Capabilities["execution"].State)
 	require.False(t, info.Capabilities["execution"].Sandboxed)
-	require.Len(t, info.Capabilities, 10)
+	require.Len(t, info.Capabilities, 12)
+	require.Contains(t, info.Capabilities, "batches")
+	require.Contains(t, info.Capabilities, "trace_export")
 	require.NotContains(t, recorder.Body.String(), "secret", "info must not echo the server token")
 }
 

@@ -36,14 +36,14 @@ func TestAuxiliaryRequests_UseModelOutputBudget(t *testing.T) {
 		limit, _ := body["max_output_tokens"].(float64)
 		limits = append(limits, int(limit))
 		if int(limit) < modelBudget {
-			fmt.Fprint(w, `{"status":"incomplete","model":"model","incomplete_details":{"reason":"max_output_tokens"},"output":[]}`)
+			_, _ = fmt.Fprint(w, `{"status":"incomplete","model":"model","incomplete_details":{"reason":"max_output_tokens"},"output":[]}`)
 			return
 		}
 		if requests++; requests == 1 {
 			http.Error(w, "upstream unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		fmt.Fprintf(w, `{"status":"completed","model":"model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":%q}]}]}`, `{"continue":true,"reason":"还有未完成的检查"}`)
+		_, _ = fmt.Fprintf(w, `{"status":"completed","model":"model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":%q}]}]}`, `{"continue":true,"reason":"还有未完成的检查"}`)
 	}))
 	defer server.Close()
 
@@ -106,7 +106,7 @@ func TestService_UnlimitedMaxTokensOmitsWireLimit(t *testing.T) {
 			}
 		}
 		requests.Add(1)
-		fmt.Fprintf(w, `{"status":"completed","model":"model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":%q}]}]}`, `{"continue":true,"reason":"继续"}`)
+		_, _ = fmt.Fprintf(w, `{"status":"completed","model":"model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":%q}]}]}`, `{"continue":true,"reason":"继续"}`)
 	}))
 	defer server.Close()
 

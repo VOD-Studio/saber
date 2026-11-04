@@ -116,7 +116,7 @@ func (c *chatClient) probe(ctx context.Context) error {
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxErrorBody))
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return fmt.Errorf("Saber 服务拒绝了令牌（HTTP %d），请确认配置中的 token_file 与服务端一致", resp.StatusCode)
+		return fmt.Errorf("saber 服务拒绝了令牌（HTTP %d），请确认配置中的 token_file 与服务端一致", resp.StatusCode)
 	}
 	return nil
 }

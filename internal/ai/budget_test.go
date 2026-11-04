@@ -95,7 +95,7 @@ func TestBudgetEvaluator_SendsTaskContext(t *testing.T) {
 			return
 		}
 		body = string(raw)
-		fmt.Fprintf(w, `{"status":"completed","model":"model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":%q}]}]}`, `{"continue":true,"reason":"还有下一步"}`)
+		_, _ = fmt.Fprintf(w, `{"status":"completed","model":"model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":%q}]}]}`, `{"continue":true,"reason":"还有下一步"}`)
 	}))
 	defer server.Close()
 
