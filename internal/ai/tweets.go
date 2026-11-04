@@ -157,7 +157,7 @@ func (s *Service) executeTweetTool(ctx context.Context, args map[string]any) (an
 	if !s.tweetToolAvailable(ctx) {
 		return nil, errors.New("推文工具当前不可用：需要启用 platforms.violet.tweets，并使用与配置匹配的 Violet 账号身份")
 	}
-	action := tweetArg(args, "action")
+	action := stringArg(args, "action")
 	switch action {
 	case "get", "comments":
 	case "post", "reply", "like", "unlike", "delete", "delete_comment":
@@ -167,7 +167,7 @@ func (s *Service) executeTweetTool(ctx context.Context, args map[string]any) (an
 	default:
 		return nil, fmt.Errorf("未知的推文动作 %q", action)
 	}
-	tweetID := tweetArg(args, "tweet_id")
+	tweetID := stringArg(args, "tweet_id")
 	switch action {
 	case "post":
 		return s.tweetPost(ctx, args)
@@ -193,7 +193,7 @@ func (s *Service) executeTweetTool(ctx context.Context, args map[string]any) (an
 		}
 		return fmt.Sprintf("已删除推文 %s；删除不可恢复。", tweetID), nil
 	case "delete_comment":
-		commentID := tweetArg(args, "comment_id")
+		commentID := stringArg(args, "comment_id")
 		if tweetID == "" || commentID == "" {
 			return nil, errors.New("delete_comment 需要 tweet_id 与 comment_id")
 		}
@@ -218,7 +218,7 @@ func (s *Service) executeTweetTool(ctx context.Context, args map[string]any) (an
 		if err != nil {
 			return nil, err
 		}
-		comments, err := s.tweetAdapter.ListComments(ctx, tweetID, tweetArg(args, "parent_comment_id"), limit)
+		comments, err := s.tweetAdapter.ListComments(ctx, tweetID, stringArg(args, "parent_comment_id"), limit)
 		if err != nil {
 			return nil, err
 		}
@@ -228,8 +228,8 @@ func (s *Service) executeTweetTool(ctx context.Context, args map[string]any) (an
 
 // tweetPost 发布一条推文：先裁剪正文并检查主动发帖限流，再上传图片、按幂等键发布。
 func (s *Service) tweetPost(ctx context.Context, args map[string]any) (any, error) {
-	content := truncateTweetRunes(strings.TrimSpace(tweetArg(args, "content")), s.config.Platforms.Violet.Tweets.EffectiveMaxContentRunes())
-	quoteOf := tweetArg(args, "quote_of")
+	content := truncateTweetRunes(strings.TrimSpace(stringArg(args, "content")), s.config.Platforms.Violet.Tweets.EffectiveMaxContentRunes())
+	quoteOf := stringArg(args, "quote_of")
 	imagePaths, err := tweetArgList(args, "images")
 	if err != nil {
 		return nil, err
@@ -268,8 +268,8 @@ func (s *Service) tweetReply(ctx context.Context, tweetID string, args map[strin
 	if tweetID == "" {
 		return nil, errors.New("reply 需要 tweet_id")
 	}
-	body := truncateTweetRunes(strings.TrimSpace(tweetArg(args, "body")), s.config.Platforms.Violet.Tweets.EffectiveMaxContentRunes())
-	parentID := tweetArg(args, "parent_comment_id")
+	body := truncateTweetRunes(strings.TrimSpace(stringArg(args, "body")), s.config.Platforms.Violet.Tweets.EffectiveMaxContentRunes())
+	parentID := stringArg(args, "parent_comment_id")
 	imagePaths, err := tweetArgList(args, "images")
 	if err != nil {
 		return nil, err
@@ -518,8 +518,8 @@ func truncateTweetRunes(content string, limit int) string {
 	return string(runes[:limit])
 }
 
-// tweetArg 读取字符串参数；缺失或类型不符时返回空串。
-func tweetArg(args map[string]any, key string) string {
+// stringArg 读取字符串参数；缺失或类型不符时返回空串。
+func stringArg(args map[string]any, key string) string {
 	value, ok := args[key]
 	if !ok {
 		return ""

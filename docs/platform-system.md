@@ -411,6 +411,7 @@ S8 还需要一台真实 Violet 实例（管理端 `/admin/chat-bots` 注册 bot
 7. 如需 `!ai`/`!task` 等聊天命令：实现 `ai.ChatEntrypoint` 并 `aiService.SetChatEntrypoint(...)`。当前它是**单例 setter 且签名带 mautrix `id.UserID`/`id.RoomID`**，同一进程只能挂一个平台（现在是 Matrix）；第二平台要挂命令入口，得先把这个端口改成平台无关并按平台名注册
 8. 如需主动聊天：实现 `ai.ProactiveRooms`（见下文）并在 `initProactiveManager` 注入。没有 notice 语义的平台要么把 `SendNotice` 降级成普通文本，要么像 Violet 一样干脆不接
 9. 如需推文/公开内容互动：实现可选的 `chat.TweetAdapter`（推文与评论的读写端口），由 `ai.Service.SetTweetAdapter` 注入；平台再用 `SetTweetHandler(aiService.HandleTweet)` 把 SSE/回调事件翻译成合成 `chat.Message` 交给公开回复链路。两个端口都是可选的，不实现时 `saber_tweet` 不会出现在工具列表，普通聊天不受影响
+10. 如需表情：实现可选的 `chat.EmojiAdapter`（`ListEmojis`/`FavoriteEmoji`/`UnfavoriteEmoji`），由 `ai.Service.SetEmojiAdapter` 注入。入站正文里的表情 token 若被平台剥离，应通过 `chat.Message.Context` 把 token 清单与复用说明交还模型；不实现时 `saber_emoji` 不会出现在工具列表
 
 ## 实施进度
 

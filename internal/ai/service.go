@@ -71,6 +71,9 @@ type Service struct {
 	// tweetAdapter 是推文读写端口，由支持推文的平台在启动时注入。
 	// 未注入时 saber_tweet 不会出现在任何工具列表中。
 	tweetAdapter chat.TweetAdapter
+	// emojiAdapter 是表情目录与收藏端口，由支持表情的平台在启动时注入。
+	// 未注入时 saber_emoji 不会出现在任何工具列表中。
+	emojiAdapter chat.EmojiAdapter
 	// tweetPosts 是主动发帖的进程内限流状态，按本地日期计次。
 	tweetPosts tweetPostLimiter
 }
@@ -269,6 +272,14 @@ func (s *Service) SetPromptProvider(pp PromptProvider) {
 // 因此运行期修改配置或撤销管理员不会让旧工具快照继续生效。
 func (s *Service) SetTweetAdapter(adapter chat.TweetAdapter) {
 	s.tweetAdapter = adapter
+}
+
+// SetEmojiAdapter 注入表情目录与收藏端口，由支持表情的平台在启动时调用。
+//
+// 与推文端口一样只做依赖登记：平台开关、账号匹配与工具可见性都在执行阶段复核，
+// 因此运行期关闭平台或换掉账号不会让旧工具快照继续生效。
+func (s *Service) SetEmojiAdapter(adapter chat.EmojiAdapter) {
+	s.emojiAdapter = adapter
 }
 
 // GetModelRegistry 获取模型注册表。
@@ -565,6 +576,11 @@ func (s *Service) handleChat(ctx context.Context, message chat.Message, reply ch
 		if dir, err := s.executor.Workspace(identity); err == nil {
 			toolCtx = execution.WithTask(toolCtx, 0, dir)
 		}
+	}
+	// 表情说明只加在非公开聊天回合：公开推文回复不提供任何工具，也不应引导模型
+	// 去查询表情；普通 Violet 聊天才需要「先查 token、再原样写回正文」的提示。
+	if !publicThread && s.emojiToolAvailable(toolCtx) {
+		req.Messages = append(req.Messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: emojiReplyInstruction})
 	}
 	req.Tools, _ = s.toolExecutor.PrepareTools(toolCtx)
 	if s.tasks != nil && useTasks {

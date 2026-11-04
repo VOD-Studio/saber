@@ -513,6 +513,7 @@ func (p *Platform) normalizeMessage(ctx context.Context, item inbound) (chat.Mes
 		SenderID:    message.Sender.ID,
 		Direct:      p.states.get(item.conversationID).storedKind() == kindDirect,
 		Text:        text,
+		Context:     customEmoteHint(emotes),
 		Attachments: attachments,
 		ReplyTo:     replyTo,
 	}, true
@@ -546,7 +547,8 @@ func (p *Platform) normalizeImageMessage(ctx context.Context, item inbound, botU
 			attachments = append(attachments, attachment)
 		}
 	}
-	if emotes := referencedCustomEmotes(message.Content, message.CustomEmote); len(emotes) > 0 {
+	emotes := referencedCustomEmotes(message.Content, message.CustomEmote)
+	if len(emotes) > 0 {
 		caption = stripCustomEmotes(caption, emotes)
 		attachments = append(attachments, p.customEmoteAttachments(ctx, message.ID, emotes)...)
 	}
@@ -568,6 +570,7 @@ func (p *Platform) normalizeImageMessage(ctx context.Context, item inbound, botU
 		SenderID:    message.Sender.ID,
 		Direct:      p.states.get(item.conversationID).storedKind() == kindDirect,
 		Text:        stripMentions(caption),
+		Context:     customEmoteHint(emotes),
 		Attachments: attachments,
 		ReplyTo:     replyTo,
 	}, true

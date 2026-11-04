@@ -54,6 +54,49 @@ type customEmoteDTO struct {
 	Relation      string `json:"relation"`
 }
 
+// emojiMetaDTO 是表情的展示元数据；size 的形态跟随前端，保留原始值由映射层
+// 归一化，缺字段时为零值。type 与 id 一样是数字枚举，不是可读字符串。
+type emojiMetaDTO struct {
+	Size any   `json:"size"`
+	Type int32 `json:"type"`
+}
+
+// emojiDTO 对应 EmojiDTO：系统表情与分组内表情共用同一形状。
+// id 是数字主键；token 才是写进正文的引用串。
+type emojiDTO struct {
+	ID          int32         `json:"id"`
+	Name        string        `json:"name"`
+	URL         string        `json:"url"`
+	Token       string        `json:"token"`
+	GIFURL      string        `json:"gif_url"`
+	TextContent string        `json:"text_content"`
+	Meta        *emojiMetaDTO `json:"meta"`
+}
+
+// emojiGroupDTO 对应 EmojiGroupDTO：系统表情按组下发，组内表情自带 token。
+// id 与 type 都是数字枚举，type 的语义在映射层翻译成可读标签。
+type emojiGroupDTO struct {
+	ID     int32      `json:"id"`
+	Name   string     `json:"name"`
+	Type   int32      `json:"type"`
+	Emojis []emojiDTO `json:"emojis"`
+}
+
+// customEmojiDTO 对应 bot 自有或已收藏的自定义表情；source 取 owned 或 favorited。
+type customEmojiDTO struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Token  string `json:"token"`
+	URL    string `json:"url"`
+	Source string `json:"source"`
+}
+
+// emojiCatalogDTO 对应 GET /chat/bot/emojis 的 data：系统分组与 bot 私有收藏。
+type emojiCatalogDTO struct {
+	Groups []emojiGroupDTO  `json:"groups"`
+	Custom []customEmojiDTO `json:"custom"`
+}
+
 // messageMediaDTO 是消息内嵌的媒体快照，URL 供 saber 侧入站下载。
 type messageMediaDTO struct {
 	ID       string `json:"id"`

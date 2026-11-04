@@ -78,6 +78,15 @@ tweetReplyAdapter.Send ─> 平台写端点 ─> 公开评论
 - 推文回合不向模型提供任何工具，且执行阶段对工具调用整体拒绝，防止把私聊记忆或执行结果带进公开内容。
 - `saber_tweet` 是主动侧的可选工具，只在「Violet 平台启用 + 推文接入启用 + 身份账号匹配」时出现，用于发布/回复/点赞/删除推文与评论，以及读取推文和评论。它与推文自动回评互不依赖：关闭自动回评仍可让管理员通过聊天或定时计划调用工具。
 
+## Violet 表情
+
+表情没有独立的消息类型：模型把 token（系统表情 `[doge]`、自定义表情 `[cat:<uuid>]`）直接写进回复正文，Violet 负责校验、持久化并渲染。Saber 只负责把目录与收藏整理成工具可用的形状。
+
+- 系统表情随 `GET /chat/bot/emojis` 按分组下发，token 开箱即用，无需收藏。
+- 自定义表情默认私有：bot 只能看到自己自制（`owned`）与已收藏（`favorited`）的那部分，没有全站目录可查。收藏/取消收藏走 `POST`/`DELETE /chat/bot/emojis/{id}/favorite`，成功返回 204。
+- 入站消息里的自定义表情 token 仍按原逻辑从正文剥离、图片作为附件投递；平台额外在 `chat.Message.Context` 里附上 token 清单。该区块会被上层当作不可信资料，因此只陈述「本条消息引用了哪些 token」，不写任何指令；收藏与复用的步骤由系统提示和工具说明负责。
+- `saber_emoji` 的 `list` 读取目录并按 `query`/`group` 过滤，`favorite`/`unfavorite` 接受 `emoji_id`（UUID）或 `[name:uuid]` token；系统 token 会被拒绝，因为收藏对它们没有意义。工具只在「Violet 启用 + 账号匹配」时出现，使用表情本身不需要管理员授权。
+
 ## 内存 adapter
 
 测试或嵌入式调用可注入同一 Handler：

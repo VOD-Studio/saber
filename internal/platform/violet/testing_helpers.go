@@ -97,6 +97,28 @@ type fakeViolet struct {
 	tweetUploads []uploadedMedia
 	// tweetCommentSeq 生成评论 ID，跨推文单调递增。
 	tweetCommentSeq int
+
+	// emojiCatalog 是表情目录端点返回的内容；emojiCalls 记录路径与鉴权头，
+	// emojiFavoriteRecords 记录收藏/取消收藏的 ID 与请求头。
+	emojiCatalog         emojiCatalogDTO
+	emojiCalls           []emojiCall
+	emojiFavoriteRecords []emojiFavoriteRecord
+	// emojiFavoriteStatus 让收藏端点返回指定错误码，用于验证错误映射。
+	emojiFavoriteStatus int
+}
+
+// emojiCall 是一次表情端点的调用记录。
+type emojiCall struct {
+	Method string
+	Path   string
+	Auth   string
+}
+
+// emojiFavoriteRecord 是一次收藏或取消收藏的观测记录。
+type emojiFavoriteRecord struct {
+	ID        string
+	Favorited bool
+	Auth      string
 }
 
 // uploadedMedia 是一次图片上传的观测记录。
@@ -366,6 +388,10 @@ func (f *fakeViolet) serve(w http.ResponseWriter, r *http.Request) {
 		f.serveTyping(w, r, path)
 	case path == "/media" && r.Method == http.MethodPost:
 		f.serveMediaUpload(w, r)
+	case path == "/emojis" && r.Method == http.MethodGet:
+		f.serveEmojiCatalog(w, r)
+	case strings.HasPrefix(path, "/emojis/") && strings.HasSuffix(path, "/favorite") && (r.Method == http.MethodPost || r.Method == http.MethodDelete):
+		f.serveEmojiFavorite(w, r, path)
 	case path == "/events" && r.Method == http.MethodGet:
 		f.serveEvents(w, r)
 	default:
@@ -647,6 +673,69 @@ func (f *fakeViolet) serveMediaUpload(w http.ResponseWriter, r *http.Request) {
 		Height:   height,
 		Size:     record.Size,
 	})
+}
+
+// serveEmojiCatalog 返回已登记的表情目录，并记录路径与鉴权头。
+func (f *fakeViolet) serveEmojiCatalog(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	f.emojiCalls = append(f.emojiCalls, emojiCall{Method: r.Method, Path: r.URL.RequestURI(), Auth: r.Header.Get("Authorization")})
+	catalog := f.emojiCatalog
+	f.mu.Unlock()
+	writeAPIData(w, http.StatusOK, catalog)
+}
+
+// serveEmojiFavorite 复现收藏端点：ID 必须是 UUID，成功返回 204。
+// emojiFavoriteStatus 非零时按指定状态码报错，用于验证 403/404 的映射。
+func (f *fakeViolet) serveEmojiFavorite(w http.ResponseWriter, r *http.Request, path string) {
+	id := strings.TrimSuffix(strings.TrimPrefix(path, "/emojis/"), "/favorite")
+	f.mu.Lock()
+	f.emojiCalls = append(f.emojiCalls, emojiCall{Method: r.Method, Path: r.URL.RequestURI(), Auth: r.Header.Get("Authorization")})
+	status := f.emojiFavoriteStatus
+	f.mu.Unlock()
+	if _, err := uuid.Parse(id); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "custom emoji id 必须是 UUID")
+		return
+	}
+	if status != 0 {
+		writeAPIError(w, status, "EMOJI_ERROR", "表情接口拒绝该操作")
+		return
+	}
+	f.mu.Lock()
+	f.emojiFavoriteRecords = append(f.emojiFavoriteRecords, emojiFavoriteRecord{
+		ID:        id,
+		Favorited: r.Method == http.MethodPost,
+		Auth:      r.Header.Get("Authorization"),
+	})
+	f.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// setEmojiCatalog 设置表情目录端点返回的内容。
+func (f *fakeViolet) setEmojiCatalog(catalog emojiCatalogDTO) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.emojiCatalog = catalog
+}
+
+// setEmojiFavoriteStatus 让收藏端点返回指定状态码；0 表示恢复正常。
+func (f *fakeViolet) setEmojiFavoriteStatus(status int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.emojiFavoriteStatus = status
+}
+
+// emojiCallRecords 返回表情端点的调用记录。
+func (f *fakeViolet) emojiCallRecords() []emojiCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]emojiCall(nil), f.emojiCalls...)
+}
+
+// emojiFavoriteRecordList 返回收藏与取消收藏的观测记录。
+func (f *fakeViolet) emojiFavoriteRecordList() []emojiFavoriteRecord {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]emojiFavoriteRecord(nil), f.emojiFavoriteRecords...)
 }
 
 // serveUpload 按 /uploads/{id} 回放已登记媒体的字节，公开读取无需鉴权。

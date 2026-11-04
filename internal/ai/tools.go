@@ -100,6 +100,9 @@ func (te *ToolExecutor) ExecuteToolCall(ctx context.Context, toolName string, ar
 	if toolName == tweetToolName {
 		return te.service.executeTweetTool(ctx, args)
 	}
+	if toolName == emojiToolName {
+		return te.service.executeEmojiTool(ctx, args)
+	}
 	if toolName == "saber_task" && te.service.tasks != nil {
 		identity, ok := chat.IdentityFromContext(ctx)
 		if !ok {
@@ -173,6 +176,10 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 	if te.service.tweetToolAvailable(ctx) {
 		tools = append(tools, tweetTool())
 	}
+	// 表情工具同样不依赖执行后端：可见性由平台、开关与账号身份决定。
+	if te.service.emojiToolAvailable(ctx) {
+		tools = append(tools, emojiTool())
+	}
 	if te.service.memory != nil {
 		if identity, ok := chat.IdentityFromContext(ctx); ok {
 			if _, ok := memory.Space(identity); ok {
@@ -222,7 +229,7 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 // ExecuteToolCall 优先走内置分支，MCP 的实现永远等不到调用。
 func builtinToolName(name string) bool {
 	switch name {
-	case "saber_task", "saber_schedule", "saber_memory", "saber_history", "saber_skill", "saber_task_state", "saber_trace", "saber_batch", tweetToolName, agent.DelegateTool:
+	case "saber_task", "saber_schedule", "saber_memory", "saber_history", "saber_skill", "saber_task_state", "saber_trace", "saber_batch", tweetToolName, emojiToolName, agent.DelegateTool:
 		return true
 	}
 	return false
