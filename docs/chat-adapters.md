@@ -55,6 +55,29 @@ Presenter 只调用已声明的可选能力：支持编辑时展示临时内容�
 最终回答先写入历史，再发送到平台；发送失败时返回成功的 Agent Result 和独立的交付错误。
 Matrix 回复和编辑均保留原消息引用，线程回复保留线程根关系。
 
+## Violet 推文互动
+
+Violet 除了站内聊天，还有第二条入站通道：推文评论与引用。它复用同一套模型与历史，但出站目标不是会话消息，而是推文下的公开评论。
+
+```text
+Violet SSE：tweet.commented / tweet.quoted
+        │
+        ▼
+平台组装合成 chat.Message（Session.Conversation = tweet:<id>，Context = 互动快照）
+        │
+        ▼
+ai.Service.HandleTweet ─ handleChat(useTasks=false, publicThread=true)
+        │                          └─ 不建持久化任务、不准备工具、不注入记忆
+        ▼
+tweetReplyAdapter.Send ─> 平台写端点 ─> 公开评论
+```
+
+- 合成消息的真身仍是 `chat.Message`：`Text` 是评论或引用正文，`Context` 是平台生成的推文/评论快照，`ReplyTo` 是所回复的评论 ID。`Context` 不参与命令识别，也不会混入用户消息；核心把它包装成明确分隔的不可信运行时资料，并追加「只输出公开评论正文」的系统约束。
+- 推文回合使用零能力的回复 adapter：`Capabilities()` 全零，不支持编辑、输入状态或流式状态。平台只支持一次性发送最终正文，空白正文直接跳过，避免在公开时间线留下空评论。
+- 推文回合 `useTasks=false`：不写入任务库、不回执任务编号；因此模型不可用或发送失败只记服务端日志，不会在推文下补一张公开的失败卡片。
+- 推文回合不向模型提供任何工具，且执行阶段对工具调用整体拒绝，防止把私聊记忆或执行结果带进公开内容。
+- `saber_tweet` 是主动侧的可选工具，只在「Violet 平台启用 + 推文接入启用 + 身份账号匹配」时出现，用于发布/回复/点赞/删除推文与评论，以及读取推文和评论。它与推文自动回评互不依赖：关闭自动回评仍可让管理员通过聊天或定时计划调用工具。
+
 ## 内存 adapter
 
 测试或嵌入式调用可注入同一 Handler：

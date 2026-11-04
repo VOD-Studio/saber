@@ -59,6 +59,11 @@ func (te *ToolExecutor) ExecuteToolCall(ctx context.Context, toolName string, ar
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// 公开互动回合的回复会发布给所有人，任何工具都可能把私有上下文带进公开内容，
+	// 因此这里整类拒绝；PrepareTools 已经不提供工具，这里是第二道防线。
+	if isPublicThread(ctx) {
+		return nil, fmt.Errorf("公开互动回合不允许调用工具")
+	}
 	if execution.LocalTool(toolName) {
 		if te.service.executor == nil {
 			return nil, fmt.Errorf("execution is not configured")
@@ -91,6 +96,9 @@ func (te *ToolExecutor) ExecuteToolCall(ctx context.Context, toolName string, ar
 	}
 	if toolName == "saber_batch" {
 		return te.service.executeBatchTool(ctx, args)
+	}
+	if toolName == tweetToolName {
+		return te.service.executeTweetTool(ctx, args)
 	}
 	if toolName == "saber_task" && te.service.tasks != nil {
 		identity, ok := chat.IdentityFromContext(ctx)
@@ -141,6 +149,10 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 	if len(contexts) > 0 {
 		ctx = contexts[0]
 	}
+	// 公开互动回合不应拥有任何工具：回复会公开发布，工具结果与私有上下文都可能外泄。
+	if isPublicThread(ctx) {
+		return nil, false
+	}
 	var tools []openai.Tool
 	if te.service.executor != nil {
 		tools = append(tools, te.service.executor.Tools(ctx)...)
@@ -155,6 +167,11 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 			tools = append(tools, traceTool())
 			tools = append(tools, batchTool())
 		}
+	}
+	// 推文工具不依赖执行后端或任务服务：它的可见性由平台、配置与账号身份决定，
+	// 因此无论是否启用持久任务都要在 MCP 与 delegate 之前加入。
+	if te.service.tweetToolAvailable(ctx) {
+		tools = append(tools, tweetTool())
 	}
 	if te.service.memory != nil {
 		if identity, ok := chat.IdentityFromContext(ctx); ok {
@@ -205,7 +222,7 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 // ExecuteToolCall 优先走内置分支，MCP 的实现永远等不到调用。
 func builtinToolName(name string) bool {
 	switch name {
-	case "saber_task", "saber_schedule", "saber_memory", "saber_history", "saber_skill", "saber_task_state", "saber_trace", "saber_batch", agent.DelegateTool:
+	case "saber_task", "saber_schedule", "saber_memory", "saber_history", "saber_skill", "saber_task_state", "saber_trace", "saber_batch", tweetToolName, agent.DelegateTool:
 		return true
 	}
 	return false

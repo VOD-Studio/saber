@@ -403,7 +403,12 @@ func (s *appState) initServices() error {
 		if err := s.cfg.Platforms.Violet.Validate(); err != nil {
 			return fmt.Errorf("violet 平台配置无效: %w", err)
 		}
-		if err := s.registerPlatform(violetplatform.New(s.cfg), aiService); err != nil {
+		violet := violetplatform.New(s.cfg)
+		// 推文互动是平台的可选第二条入口：平台侧仍受 tweets.enabled 控制，
+		// 工具侧再按账号与配置独立判断可见性。
+		aiService.SetTweetAdapter(violet)
+		violet.SetTweetHandler(aiService.HandleTweet)
+		if err := s.registerPlatform(violet, aiService); err != nil {
 			return err
 		}
 	}

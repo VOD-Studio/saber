@@ -29,7 +29,7 @@ func (s *Service) ChatCommand(ctx context.Context, message chat.Message, adapter
 		return commandReply(ctx, message, adapter, "用法：/ai <问题>；问题以命令名开头时使用 /ai -- <问题>")
 	}
 	message.Text, message.ControlText = raw, &raw
-	_, err := s.handleChat(ctx, message, adapter, modelName, false)
+	_, err := s.handleChat(ctx, message, adapter, modelName, false, true, false)
 	return err
 }
 

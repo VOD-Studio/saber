@@ -29,7 +29,7 @@ func (s *Service) InvokeSkillCommand(ctx context.Context, message chat.Message, 
 	if !s.CanInvokeSkill(ctx, message) {
 		return errors.New("当前消息不是可执行的技能调用")
 	}
-	_, err := s.handleChat(ctx, message, reply, s.GetModelRegistry().GetDefault(), true)
+	_, err := s.handleChat(ctx, message, reply, s.GetModelRegistry().GetDefault(), true, true, false)
 	return err
 }
 

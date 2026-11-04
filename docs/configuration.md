@@ -280,6 +280,15 @@ platforms:
     group_chat_mention_reply: true
     edit_interval_ms: 200
     http_timeout_seconds: 15
+    tweets:
+      enabled: false             # 默认关闭：不处理推文评论/引用事件，也不暴露 saber_tweet
+      reply_to_comments: true    # 有人评论或追问本人推文时组织一次公开回复
+      reply_to_quotes: true      # 有人引用本人推文时组织一次公开回复
+      reply_timeout_seconds: 120 # 单次推文回合超时，1..3600
+      max_content_runes: 480     # 评论正文上限（Unicode 字符），1..500
+      max_images_per_tweet: 4    # 单条推文/评论的配图上限，0 表示禁止配图，最多 4
+      max_posts_per_day: 8       # 每日主动发帖上限（进程内记忆，重启清零）
+      min_post_interval_minutes: 30 # 两次主动发帖最小间隔，0 或负数回退默认 30
   telegram:
     enabled: false # 默认关闭；getUpdates 长轮询，无需公网回调
     bot_token: "" # BotFather 签发，形如 123456:ABC-DEF
@@ -319,6 +328,9 @@ platforms:
 - Violet 的「允许展示 thinking」开关由 Violet 后台逐 Bot 管理，默认关闭；Saber 仅上报 Responses 明确给出的公开摘要，不从正文的 `<think>` 标签猜测或发送原始推理。Violet 关闭展示时应丢弃新上报的摘要，并从历史与 SSE 中隐藏既有摘要；关闭开关不删除历史数据。
 - `http_timeout_seconds` 只作用于普通 API 请求，事件流是长连接，靠 30 秒心跳与 90 秒静默看门狗判活。
 - 断线恢复：Violet 的 bot 事件流不支持 `Last-Event-ID` 补发，Saber 在重连后按消息历史接口补齐水位之后的消息，并按消息 ID 去重；首次连接只打水位基线，不会把站内旧消息当新问题回答一遍。
+- 推文互动由 `platforms.violet.tweets.enabled` 单独控制，默认 `false`；打开后，有人评论本人推文、在评论下追问或引用本人推文时，Saber 组织一次模型回合，并把结果作为该推文下的公开评论发布。推文回合不提交持久化任务、不准备任何工具、不注入长期记忆，只接收平台带回来的互动上下文（正文按不可信外部文本处理）。`max_content_runes` 同时约束自动回评与 `saber_tweet` 的正文；`max_images_per_tweet` 为 0 时禁止配图。
+- `saber_tweet` 只在「Violet 平台启用 + 推文接入启用 + 当前身份账号等于 `platforms.violet.account`」时提供给模型。`post`/`reply`/`like`/`unlike`/`delete`/`delete_comment` 是公开写操作，执行时按 `commands.admins` 重新授权（平台、账号、用户精确匹配，不继承任务管理员）；`get`/`comments` 只读。图片只能是任务工作区内的 png/jpeg/gif/webp 文件，由 Saber 上传后再发布，路径越过工作区、非普通文件、超过 10 MiB 或类型不符都会中止整次写入。
+- 自主发帖复用定时计划而不是新增调度器：管理员先用 `!schedule ... --silent`（或 `saber_schedule` 的 `"delivery":"silent"`）创建计划，计划冻结 `saber_tweet` 后由到点任务调用工具发布。`--silent` 让聊天侧保持安静，推文内容与任务结果仍完整落库；每日上限与最小间隔按进程内状态执行，重启清零。
 - 能力边界：Violet 只走 `HandleChat` 这条最小链路。`!ai <内容>` 会被剥掉前缀当提问，其余 `!` 开头命令（`!task`、`!schedule`、上下文命令）在本平台无落点、直接跳过；任务产出的文件不投递（上传通道仍按 Matrix 限定）；主动聊天未接入 Violet（`SendNotice` 没有对等语义）。
 - Telegram：`bot_token` 在 `enabled: true` 时必填；走 `getUpdates` 长轮询（`poll_timeout_seconds`，默认 30），不需要公网地址、证书或 webhook。私聊按 `direct_chat_auto_reply`，群聊需被 `@` 或直接回复 bot 的消息（`group_chat_mention_reply`）；频道消息、其他机器人与非文本消息跳过。单条正文超过 4000 字符时截断并标注。
 - Discord：`bot_token` 在 `enabled: true` 时必填；入站走 Gateway WebSocket、出站走 REST。**必须在 Discord 开发者后台为 bot 开启 `MESSAGE_CONTENT` 特权 intent**，否则频道与私聊正文为空串；频道内需被 `@` 或回复 bot 的消息才触发，私聊由 `direct_chat_auto_reply` 控制。出站会清空 `allowed_mentions`，模型输出不会 ping 任何人；单条正文超过 1900 字符时截断。

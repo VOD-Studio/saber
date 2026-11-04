@@ -11,6 +11,7 @@
 !schedule cron "*/15 9-18 * * 1-5" Asia/Shanghai 检查服务状态并汇报
 !schedule every 1h Asia/Shanghai model=openai.gpt-4o-mini 检查服务状态并汇报
 !schedule every 1h Asia/Shanghai 提醒我喝水 --silent
+!schedule weekdays 10:00 Asia/Shanghai 用 saber_tweet 先 get 推文 tweet-9，再用 post 发布今日文章推荐 --silent
 !schedule edit 12 every 2h Asia/Shanghai model=openai.gpt-4o-mini 检查服务状态并汇报
 !schedule edit 12 cron "0 9 * * 1-5" UTC 每日早报 --silent
 !schedule run 12
@@ -69,6 +70,26 @@
 - 三者权限与暂停一致：负责人或 `execution.task_admins` 授权的本群管理员。`run` 仍按计划的 `requires_execution` 语义执行：纯聊天计划免授权，带执行能力的计划在创建任务前按当前授权复查，撤销时把计划置为 `paused` 且不建任务。
 
 已授权用户也可直接交办“每个工作日 09:00，Asia/Shanghai，检查服务状态并汇报到本群”。模型通过 `saber_schedule` 调用与命令完全相同的逻辑，参数不能指定身份、目的群或目录；`delivery` 可选 `origin`（默认）或 `silent`。纯聊天计划不要求执行授权，没有授权的成员也可以直接说“每天早上九点提醒我喝水，不用发到群里”。没有明确时间或时区时应先补充；确定性命令不依赖模型。每条原消息最多建立一个计划，重复事件或重复工具调用返回原计划，不能复活已删除计划。
+
+## 定时发布推文（Violet）
+
+自主发帖不需要新调度器：把它当作一次普通定时任务，让模型在运行中调用 `saber_tweet`。计划创建时按当前授权冻结工具集合，`saber_tweet` 属于内置聊天工具，因此不需要 `execution.grants` 的工作区授权，也能被纯聊天计划冻结并在运行时保留。
+
+```text
+!schedule weekdays 10:00 Asia/Shanghai 推荐今天的新文章并发布一条推文 --silent
+```
+
+管理员的计划可以要求模型先读后写，例如：
+
+```json
+{"action":"get","tweet_id":"tweet-9"}
+{"action":"post","content":"今天的文章：……","quote_of":"tweet-9","images":["assets/cover.png"]}
+```
+
+- `--silent`（工具字段 `"delivery":"silent"`）让计划不向聊天发送回执或结果，推文照常发布，执行记录仍可用 `!task status <ID>` / `!task logs <ID>` 查询。
+- 写操作在执行时按 `commands.admins` 重新授权，创建计划时的授权不能替代当前配置；撤销管理员后旧计划会在工具调用处失败，而不是继续公开发布。
+- 每日上限 `platforms.violet.tweets.max_posts_per_day` 与最小间隔 `min_post_interval_minutes` 由进程内状态执行，重启清零；达到上限时工具返回明确错误并提示等待，不会静默跳过。
+- 相同任务内相同参数的重试复用同一幂等键，不会重复发帖；不同任务或不同参数各自独立。
 
 ## 投递方式
 

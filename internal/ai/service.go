@@ -68,6 +68,11 @@ type Service struct {
 	memory *memory.Service
 	// runningReviews 记录正在执行复盘的空间键，防止同一空间并发复盘。
 	runningReviews sync.Map
+	// tweetAdapter 是推文读写端口，由支持推文的平台在启动时注入。
+	// 未注入时 saber_tweet 不会出现在任何工具列表中。
+	tweetAdapter chat.TweetAdapter
+	// tweetPosts 是主动发帖的进程内限流状态，按本地日期计次。
+	tweetPosts tweetPostLimiter
 }
 
 // ServiceOption 配置 AI 服务的可选依赖。平台专属服务由接入端注入，
@@ -256,6 +261,14 @@ func (s *Service) IsEnabled() bool {
 // 提示词提供者用于获取房间的系统提示词（合并基础提示词和人格提示词）。
 func (s *Service) SetPromptProvider(pp PromptProvider) {
 	s.promptProvider = pp
+}
+
+// SetTweetAdapter 注入推文读写端口，由支持推文的平台在启动时调用。
+//
+// 这里只做依赖登记：平台开关、账号匹配与授权都在工具可见性和执行阶段复核，
+// 因此运行期修改配置或撤销管理员不会让旧工具快照继续生效。
+func (s *Service) SetTweetAdapter(adapter chat.TweetAdapter) {
+	s.tweetAdapter = adapter
 }
 
 // GetModelRegistry 获取模型注册表。
@@ -471,23 +484,37 @@ func (s *Service) GenerateStreamingSimpleResponse(ctx context.Context, modelName
 
 // HandleChat 是内存或其他聊天 adapter 可复用的统一消息入口。
 func (s *Service) HandleChat(ctx context.Context, message chat.Message, reply chat.Adapter) (agent.Result, error) {
-	return s.handleChat(ctx, message, reply, s.GetModelRegistry().GetDefault(), true)
+	return s.handleChat(ctx, message, reply, s.GetModelRegistry().GetDefault(), true, true, false)
 }
 
 // HandleChatModel 与 HandleChat 相同，但由平台指定本轮使用的模型。
 // 供接入端在解析平台专属命令（例如 !ai-gpt-4）后复用同一条聊天链路。
 func (s *Service) HandleChatModel(ctx context.Context, message chat.Message, reply chat.Adapter, modelName string) (agent.Result, error) {
-	return s.handleChat(ctx, message, reply, modelName, true)
+	return s.handleChat(ctx, message, reply, modelName, true, true, false)
 }
 
-func (s *Service) handleChat(ctx context.Context, message chat.Message, reply chat.Adapter, modelName string, allowNaturalControl bool) (agent.Result, error) {
+// HandleTweet 是推文互动的处理入口，由支持推文的平台注入。
+//
+// 推文回合与普通聊天共用模型与历史，但有三处明确差异：不解析聊天控制命令、
+// 不提交持久化任务、不准备任何工具；回复正文由平台 adapter 发成公开评论。
+// 回合被标记为公开线程，即使将来某条路径漏掉了工具裁剪，执行阶段也会再次拒绝。
+func (s *Service) HandleTweet(ctx context.Context, message chat.Message, reply chat.Adapter) (agent.Result, error) {
+	return s.handleChat(withPublicThread(ctx), message, reply, s.GetModelRegistry().GetDefault(), false, false, true)
+}
+
+// handleChat 是所有聊天入口共用的处理链路。
+//
+// allowNaturalControl 控制自然语言任务/技能识别；useTasks 决定是否提交持久化任务；
+// publicThread 标记「回复会成为公开内容」的回合：此时不准备工具、不注入记忆，
+// 并追加公开回复约束与平台上下文。
+func (s *Service) handleChat(ctx context.Context, message chat.Message, reply chat.Adapter, modelName string, allowNaturalControl, useTasks, publicThread bool) (agent.Result, error) {
 	if !s.IsEnabled() {
 		return agent.Result{}, fmt.Errorf("AI功能未启用")
 	}
 	if err := message.Validate(); err != nil {
 		return agent.Result{}, err
 	}
-	if s.tasks != nil {
+	if s.tasks != nil && useTasks {
 		if allowNaturalControl {
 			if action, taskID, ok := naturalTaskCommand(message.CommandText()); ok {
 				return agent.Result{}, s.replyTaskCommand(ctx, message, reply, action, taskID)
@@ -520,16 +547,32 @@ func (s *Service) handleChat(ctx context.Context, message chat.Message, reply ch
 	if invoked {
 		req = appendRuntimeContext(req, invocation.runtimeInstruction(s.skillInvokeBudget()))
 	}
+	// 平台上下文只进入本次运行的运行时资料，不进持久化请求，也不改写用户消息本身；
+	// 普通聊天没有 Context 时这里什么都不追加，行为保持不变。
+	if contextText := platformUntrustedContext(message.Context); contextText != "" {
+		req = appendRuntimeContext(req, contextText)
+	}
+	if publicThread {
+		// 公开回复约束是系统提示的一部分。
+		req.Messages = append(req.Messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleSystem, Content: tweetPublicReplyInstruction})
+	}
 	identity := chat.Identity{Session: message.Session, SenderID: message.SenderID, Direct: message.Direct}
 	toolCtx := chat.WithIdentity(ctx, identity)
+	if publicThread {
+		toolCtx = withPublicThread(toolCtx)
+	}
 	if s.executor != nil {
 		if dir, err := s.executor.Workspace(identity); err == nil {
 			toolCtx = execution.WithTask(toolCtx, 0, dir)
 		}
 	}
 	req.Tools, _ = s.toolExecutor.PrepareTools(toolCtx)
-	if s.tasks != nil {
+	if s.tasks != nil && useTasks {
 		return agent.Result{}, s.submitTask(ctx, message, req, reply)
+	}
+	// 公开互动回合不注入记忆：记忆可能包含私聊内容，不能因一次公开评论而外泄。
+	if publicThread {
+		return s.chatProcessor.Handle(ctx, message, req, reply)
 	}
 	// 无持久化任务时在此装配快照；有任务时改在续接恢复之后装配，避免旧快照被续接继承。
 	return s.chatProcessor.Handle(ctx, message, s.augmentMemory(toolCtx, req), reply)

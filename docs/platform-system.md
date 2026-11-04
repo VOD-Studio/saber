@@ -410,6 +410,7 @@ S8 还需要一台真实 Violet 实例（管理端 `/admin/chat-bots` 注册 bot
 6. 如需接收任务与定时计划结果：实现可选端口 `platform.TaskDelivery`（`DeliveryAdapter() chat.Adapter`），`registerPlatform` 会据此注册投递器；不实现就只接即时消息
 7. 如需 `!ai`/`!task` 等聊天命令：实现 `ai.ChatEntrypoint` 并 `aiService.SetChatEntrypoint(...)`。当前它是**单例 setter 且签名带 mautrix `id.UserID`/`id.RoomID`**，同一进程只能挂一个平台（现在是 Matrix）；第二平台要挂命令入口，得先把这个端口改成平台无关并按平台名注册
 8. 如需主动聊天：实现 `ai.ProactiveRooms`（见下文）并在 `initProactiveManager` 注入。没有 notice 语义的平台要么把 `SendNotice` 降级成普通文本，要么像 Violet 一样干脆不接
+9. 如需推文/公开内容互动：实现可选的 `chat.TweetAdapter`（推文与评论的读写端口），由 `ai.Service.SetTweetAdapter` 注入；平台再用 `SetTweetHandler(aiService.HandleTweet)` 把 SSE/回调事件翻译成合成 `chat.Message` 交给公开回复链路。两个端口都是可选的，不实现时 `saber_tweet` 不会出现在工具列表，普通聊天不受影响
 
 ## 实施进度
 
@@ -442,7 +443,7 @@ S8 还需要一台真实 Violet 实例（管理端 `/admin/chat-bots` 注册 bot
 
 装配顺序见 `internal/bot/bot.go`：构造平台 → （Matrix 才有）`aiService.SetChatEntrypoint` → `s.registerPlatform` 按 `platform.TaskDelivery` 注册任务投递并 `Registry.Register` → `run()` 按 `Registry.Enabled()` 依次 `Start(ctx, aiService.HandleChat)`。
 
-`ai.ProactiveRooms` 与 `ai.ChatEntrypoint` 都是可选端口：Violet 两个都不挂，只走 `HandleChat`。`TaskDelivery`（`DeliveryAdapter`）也是可选端口，matrix 与 violet 都实现了它。
+`ai.ProactiveRooms` 与 `ai.ChatEntrypoint` 都是可选端口：Violet 两个都不挂，只走 `HandleChat`。`TaskDelivery`（`DeliveryAdapter`）也是可选端口，matrix 与 violet 都实现了它。推文互动另有可选的 `chat.TweetAdapter` + `SetTweetHandler`：平台负责事件去重、合成 `chat.Message` 与公开回复 adapter，`ai.Service.HandleTweet` 负责「无任务、无工具、无记忆」的公开回合。
 
 ## 平台端口 `ai.ProactiveRooms`
 

@@ -32,12 +32,14 @@ type scheduleInput struct {
 }
 
 // chatToolNames 是不依赖执行后端的内置聊天工具；纯聊天计划只保留这些能力。
-// delegate 只是把当前已授权的工具子集交给子代理，本身不产生外部副作用。
+// delegate 只是把当前已授权的工具子集交给子代理，本身不产生外部副作用；
+// saber_tweet 是平台写端口，执行时按 commands.admins 重新授权，不申请工作区。
 var chatToolNames = map[string]bool{
 	"saber_task": true, "saber_schedule": true, "saber_memory": true,
 	"saber_history": true, "saber_skill": true, "saber_task_state": true,
 	"saber_trace":      true,
 	"saber_batch":      true,
+	tweetToolName:      true,
 	agent.DelegateTool: true,
 }
 
