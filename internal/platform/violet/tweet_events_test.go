@@ -266,6 +266,15 @@ func TestPlatform_TweetReplyToCommentOnHumanTweetAnswered(t *testing.T) {
 	if !strings.Contains(message.Context, tweetReasonReplyToComment) {
 		t.Fatalf("Context 未标明原因:\n%s", message.Context)
 	}
+	// 所在推文属于人类，不能标成「你的推文」；评论正文与父评论仍要保留。
+	if strings.Contains(message.Context, "你的推文") {
+		t.Fatalf("人类推文被错标为「你的推文」:\n%s", message.Context)
+	}
+	for _, fragment := range []string{"对方推文（你曾在此评论）", "接着问一句", "所回复的评论: comment-root"} {
+		if !strings.Contains(message.Context, fragment) {
+			t.Fatalf("Context 缺少 %q:\n%s", fragment, message.Context)
+		}
+	}
 }
 
 // TestPlatform_TweetQuotedTriggersHandler 验证引用事件：会话落在引用推文上，

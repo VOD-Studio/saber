@@ -321,7 +321,13 @@ func buildTweetContext(job tweetReply) string {
 		fmt.Fprintf(&builder, "引用者: %s\n", tweetAuthorLine(job.actor))
 		writeTweetBody(&builder, "引用推文正文", job.content)
 	} else {
-		writeTweetSnapshot(&builder, "你的推文", job.tweet)
+		// reply_to_comment 可能落在对方的推文下（我们只是曾在下面评论），
+		// 不能把人类推文标成「你的推文」，否则模型会误判所有权。
+		label := "你的推文"
+		if job.reason == tweetReasonReplyToComment {
+			label = "对方推文（你曾在此评论）"
+		}
+		writeTweetSnapshot(&builder, label, job.tweet)
 		fmt.Fprintf(&builder, "互动者: %s\n", tweetAuthorLine(job.actor))
 		writeTweetBody(&builder, "评论正文", job.content)
 		if job.replyTo != "" {
