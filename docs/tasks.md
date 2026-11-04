@@ -36,6 +36,32 @@ Violet 在任务入库后立即创建空正文 `pending` 回复，因此即使�
 
 任务正文、附件、工具参数及结果可能包含私密信息；数据库与 WAL/SHM 文件均不可提交。一份数据库只供一个机器人进程使用。超长汇报截断为 12,000 字符，完整结果保留在数据库；发起人或本群任务管理员可用 `!task logs <ID>` 下载已结束任务的完整请求、结果及事件 JSON，以及每条命令的完整输出文件，包含失败、超时、取消和重启中断情况。每份文件独立上传、加密、记录发送进度；重复同一下载消息可续传，新消息可重新下载。运行中的任务需结束或取消后再下载，避免把变化中的日志当作完整记录。
 
+## 批次（`saber_batch`）
+
+模型可用内置 `saber_batch` 把多条互不依赖的指令一次提交成独立任务，`action` 取 `submit`、`status`、`cancel`。`submit` 必填 `items`（1..20 条），每条为 `{text, silent?}`：`text` 去首尾空白后必须有内容且不超过 8000 字符，`silent: true` 表示结果只落库、不向聊天投递；可选 `label` 是批次说明，不超过 256 字符，不参与执行。校验在落库前完成，条目进入存储层后在同一事务里写入 1 条批次与 N 条任务，任一条不合法整批拒绝，不会留下「有任务无批次」的半批。`batch_id` 形如 `b_<16hex>`，只由程序生成。
+
+批次条目各自是根任务：只带本条的 `text`，不继承提交者的对话历史、任务链或检查点，条目之间也不建立关联，因此批次不是续接。它也不绕过工作目录互斥与 `agent.max_concurrent_tasks`：同一授权工作区的条目照样串行执行，不能用它做并行加速。
+
+- `submit`：返回 `{batch_id, task_ids}`，任务编号按 `items` 顺序排列。
+- `status`：`batch_id` 必填。返回 `{batch_id, total, counts, items}`；`counts` 始终包含 `queued`、`running`、`completed`、`failed`、`cancelled`、`interrupted` 六个键并补零，`items` 每项只有 `{task_id, status, created_at}`（`created_at` 为 UTC 的 RFC 3339 纳秒时间），正文与结果仍需用 `!task status`、`!task logs` 查看。
+- `cancel`：`batch_id` 必填，逐条取消仍在 `queued` 或 `running` 的任务，返回 `{cancelled, skipped}`。已进入终态的任务与取消失败的任务都进 `skipped`，不算失败，也不把部分成功伪装成整批成功。
+
+`batch_id` 只接受 `b_<16hex>` 形状；提交、查询与取消都按 platform + account + room 过滤并复用 `CanManage` 判定，只有批次创建者或本群任务管理员能查询与取消，凭编号猜不到其他群或他人的批次。
+
+已知缺口：重启恢复把 `running` 任务直接批量标为 `interrupted`，这条路径不经过批次结束逻辑，因此被中断的批次不会补写 `batch_finished` 事件，导出与 `!task logs` 会看到 `batch_submitted` 没有配对结束事件。批次状态本身不依赖该事件，`saber_batch status` 仍按任务行算出真实状态。
+
+## 轨迹导出（`saber_trace`）
+
+模型可用内置 `saber_trace` 把持久任务的执行事件流导出成私有 JSONL 产物：`{action: "export", task_id, format: "jsonl", include_content?}`，`action` 目前只有 `export`，`format` 省略或为 `jsonl`，`task_id` 必须是正整数。
+
+产物写入该任务自己的 `task-<id>/artifacts/`（目录 `0700`、文件 `0600`），文件名为 `<32hex>-trace-<task_id>.jsonl`，随机前缀与交付文件同一套命名规则，调用方只能给出展示名。单份产物上限 16 MiB，超出后按完整行截断并置 `truncated`，不会写出半行。返回 `{artifact, records, bytes, truncated, skipped}`：`artifact` 是产物文件名，`records` 是写入行数，`bytes` 是产物字节数，`skipped` 是损坏记录数（单条坏记录只计数，不中断导出），正文不回传给模型。
+
+每行固定为 `seq`、`at`、`task_id`、`batch_id`、`kind`、`round`、`tool{name, call_id, args_bytes}`、`error_code`、`duration_ms`，工具行只给参数字节数。当前版本不认识的 `kind` 仍原样保留，并附 `raw_bytes` 记录原始长度；批次任务的行带所属 `batch_id`，非批次任务为空字符串。
+
+默认只导出事件元数据。`include_content: true` 才附带 `content`（对话正文或工具结果）与 `args`（工具参数原文），且只对 JSON 形状的正文按键名剔除凭据：键名小写后含 `apikey`、`api_key`、`token`、`authorization`、`secret`、`password`、`credential`、`cookie`、`responseshistory` 等片段的一律移除；纯文本原样保留，加密推理历史与 Checkpoint 从不进入导出器。
+
+授权复用 `AuthorizeOutput`：只能导出当前任务及其祖先链上的任务，且要求调用者是源任务发起人或本群任务管理员。链外任务即使同群、本人发起也会报 `output belongs to an unrelated task`；缺少持久任务上下文时直接拒绝，报 `轨迹导出需要持久任务上下文`。
+
 ## 验收
 
 ```sh
