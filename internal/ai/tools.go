@@ -147,8 +147,9 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 	}
 	if te.service.tasks != nil {
 		tools = append(tools, taskTool())
-		// 计划与轨迹工具都不依赖执行后端，只要求可信身份；轨迹导出还要在运行时
-		// 有持久任务上下文并按 AuthorizeOutput 复核来源，故此处只做可见性判断。
+		// 计划、轨迹与批次工具都不依赖执行后端，只要求可信身份；轨迹导出还要在运行时
+		// 有持久任务上下文并按 AuthorizeOutput 复核来源，批次还要按批次归属复核访问权，
+		// 故此处只做可见性判断。
 		if _, ok := chat.IdentityFromContext(ctx); ok {
 			tools = append(tools, scheduleTool())
 			tools = append(tools, traceTool())
