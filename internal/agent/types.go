@@ -248,7 +248,21 @@ const (
 	SubagentStarted EventKind = "subagent_started"
 	// SubagentFinished 表示子代理已结束，结果与用量对父任务可见。
 	SubagentFinished EventKind = "subagent_finished"
+	// BatchSubmitted 表示一次批次提交已落库，Batch 给出批次编号与条目数。
+	BatchSubmitted EventKind = "batch_submitted"
+	// BatchFinished 表示批次内所有条目都已终态，Batch.Counts 是终态分布。
+	BatchFinished EventKind = "batch_finished"
 )
+
+// BatchInfo 是批次事件的最小事实，只在批次事件上设置。
+type BatchInfo struct {
+	// ID 是批次编号，形状固定为 b_<16hex>。
+	ID string `json:"batch_id"`
+	// Total 是批次条目数，提交后不再变化。
+	Total int `json:"total"`
+	// Counts 只在结束事件上设置，按任务状态计数。
+	Counts map[string]int `json:"counts,omitempty"`
+}
 
 // Event 由 Run 串行发送；回调应快速返回，不得修改引用的响应数据。
 // 完整参数和结果可能包含隐私，持久化消费者应自行实施访问控制。
@@ -275,6 +289,8 @@ type Event struct {
 	Budget *BudgetStats
 	// Subagent 是子代理生命周期事件的最小事实。
 	Subagent *SubagentInfo
+	// Batch 是批次事件的归属与计数；非批次事件为 nil。
+	Batch *BatchInfo
 	// Error 是运行终止原因。
 	Error error
 }

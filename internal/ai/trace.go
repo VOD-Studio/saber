@@ -122,7 +122,7 @@ func knownTraceKinds(kind string) bool {
 		agent.ThinkingDelta, agent.AttemptFinished, agent.ModelCompleted, agent.ToolStarted,
 		agent.ToolFinished, agent.RunFinished, agent.EnvironmentCleanupFailed, agent.TaskStateUpdated,
 		agent.ContextCompacted, agent.BudgetExtended, agent.BudgetStopped, agent.Steered,
-		agent.SubagentStarted, agent.SubagentFinished:
+		agent.SubagentStarted, agent.SubagentFinished, agent.BatchSubmitted, agent.BatchFinished:
 		return true
 	}
 	return false
@@ -155,7 +155,8 @@ func (s *Service) executeTraceTool(ctx context.Context, args map[string]any) (an
 		return nil, err
 	}
 	includeContent, _ := args["include_content"].(bool)
-	if _, err := s.tasks.Get(ctx, identity.Session, taskID); err != nil {
+	source, err := s.tasks.Get(ctx, identity.Session, taskID)
+	if err != nil {
 		return nil, traceLookupError(taskID, err)
 	}
 	if err := s.tasks.AuthorizeOutput(ctx, identity, current, taskID); err != nil {
@@ -165,7 +166,8 @@ func (s *Service) executeTraceTool(ctx context.Context, args map[string]any) (an
 	if err != nil {
 		return nil, traceLookupError(taskID, err)
 	}
-	data, emitted, skipped, truncated := buildTraceLines(taskID, records, includeContent)
+	// 批次归属取任务自身的 batch_id；非批次任务为空字符串，行格式因此保持不变。
+	data, emitted, skipped, truncated := buildTraceLines(taskID, source.BatchID, records, includeContent)
 	if s.executor == nil {
 		return nil, errors.New("cannot write trace artifact: 未配置任务产物目录")
 	}
@@ -221,7 +223,7 @@ func traceLookupError(taskID int64, err error) error {
 // buildTraceLines 把持久化记录转换成产物内容，超过上限时按完整行截断。
 //
 // 返回写入的字节、行数、损坏记录数与截断标记；单条坏记录只计数，不会让整次导出失败。
-func buildTraceLines(taskID int64, records []task.EventRecord, includeContent bool) (data []byte, emitted, skipped int, truncated bool) {
+func buildTraceLines(taskID int64, batchID string, records []task.EventRecord, includeContent bool) (data []byte, emitted, skipped int, truncated bool) {
 	buffer := bytes.NewBuffer(nil)
 	for _, record := range records {
 		var parsed traceRecord
@@ -233,7 +235,7 @@ func buildTraceLines(taskID int64, records []task.EventRecord, includeContent bo
 			Seq:        emitted + 1,
 			At:         record.At.UTC().Format(time.RFC3339Nano),
 			TaskID:     taskID,
-			BatchID:    "",
+			BatchID:    batchID,
 			Kind:       parsed.Kind,
 			Round:      parsed.Round,
 			ErrorCode:  parsed.Tool.ErrorCode,

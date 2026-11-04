@@ -576,6 +576,17 @@ func (m *model) applyEvent(event task.Record) {
 		}
 	case agent.TaskStateUpdated:
 		m.stage = "任务状态已更新"
+	case agent.BatchSubmitted:
+		if event.Batch != nil {
+			m.stage = fmt.Sprintf("批次已提交：%d 条", event.Batch.Total)
+		} else {
+			m.stage = "批次已提交"
+		}
+	case agent.BatchFinished:
+		m.stage = "批次已结束"
+		if event.Batch != nil && len(event.Batch.Counts) > 0 {
+			m.stage += fmt.Sprintf("（完成 %d，失败 %d，取消 %d）", event.Batch.Counts["completed"], event.Batch.Counts["failed"], event.Batch.Counts["cancelled"])
+		}
 	case agent.BudgetExtended:
 		m.stage = "已追加执行预算"
 	case agent.BudgetStopped:

@@ -309,7 +309,7 @@ func TestBuildTraceLines_TruncatesOnlyOnCompleteLines(t *testing.T) {
 		require.NoError(t, err)
 		records = append(records, task.EventRecord{At: time.UnixMilli(1700000000000), Record: string(record)})
 	}
-	data, emitted, skipped, truncated := buildTraceLines(42, records, true)
+	data, emitted, skipped, truncated := buildTraceLines(42, "", records, true)
 	require.True(t, truncated)
 	require.EqualValues(t, 2, emitted)
 	require.EqualValues(t, 0, skipped)

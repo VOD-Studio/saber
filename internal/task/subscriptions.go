@@ -40,6 +40,7 @@ type Record struct {
 	Tool   agent.ToolRecord   `json:"tool,omitempty"`
 	State  *agent.TaskState   `json:"state,omitempty"`
 	Budget *agent.BudgetStats `json:"budget,omitempty"`
+	Batch  *agent.BatchInfo   `json:"batch,omitempty"`
 }
 
 // ReadEvents 按游标读取至多 256 条事件；慢速订阅者可以断开后继续读取。
@@ -65,13 +66,14 @@ func (m *Manager) ReadEvents(ctx context.Context, session chat.Session, taskID, 
 			Tool     agent.ToolRecord
 			State    *agent.TaskState
 			Budget   *agent.BudgetStats
+			Batch    *agent.BatchInfo
 			Response struct{ Content string }
 		}
 		if err = json.Unmarshal(data, &event); err != nil {
 			return nil, err
 		}
 		record.Kind, record.Round, record.Text, record.Tool = event.Kind, event.Round, event.Text, event.Tool
-		record.State, record.Budget = event.State, event.Budget
+		record.State, record.Budget, record.Batch = event.State, event.Budget, event.Batch
 		if event.Kind == agent.ModelCompleted {
 			record.Text = event.Response.Content
 		}

@@ -178,6 +178,10 @@ func (m *Manager) Cancel(ctx context.Context, identity chat.Identity, taskID int
 		var finalStatus string
 		if err := tx.QueryRowContext(ctx, `SELECT status FROM tasks WHERE id=?`, taskID).Scan(&finalStatus); err == nil && finalStatus == "cancelled" {
 			_, _ = tx.ExecContext(ctx, `INSERT INTO task_pending_projections(task_id,created_at) VALUES(?,?) ON CONFLICT(task_id) DO NOTHING`, taskID, time.Now().UnixMilli())
+			// 排队中的任务被直接取消，不会再走 finish；批次可能在这次取消后全部终态。
+			if err := finishBatchIfDone(ctx, tx, taskID); err != nil {
+				return Task{}, err
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {

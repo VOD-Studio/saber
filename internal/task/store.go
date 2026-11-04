@@ -48,6 +48,10 @@ type Task struct {
 	DeliveryID string
 	// Silent 表示计划选择不向聊天投递；终态仍完整落库，可用任务命令查询。
 	Silent bool
+	// BatchID 是所属批次编号；非批次任务为空字符串。
+	BatchID string
+	// BatchIndex 是批次内从 0 开始的位置；非批次任务为 -1。
+	BatchIndex int
 	// CreatedAt 是接收时间。
 	CreatedAt time.Time
 }
@@ -81,10 +85,16 @@ func openStore(path string) (*store, error) {
 		delivery TEXT NOT NULL DEFAULT 'pending', delivery_attempts INTEGER NOT NULL DEFAULT 0,
 		delivery_error TEXT NOT NULL DEFAULT '', delivery_id TEXT NOT NULL DEFAULT '', next_delivery INTEGER NOT NULL DEFAULT 0,
 		silent INTEGER NOT NULL DEFAULT 0,
+		batch_id TEXT NOT NULL DEFAULT '', batch_index INTEGER NOT NULL DEFAULT -1,
 		UNIQUE(platform, account, room, event)
 	);
 	CREATE UNIQUE INDEX IF NOT EXISTS tasks_running_dir ON tasks(work_dir) WHERE status = 'running';
 	CREATE INDEX IF NOT EXISTS tasks_queue ON tasks(status, id);
+	CREATE TABLE IF NOT EXISTS task_batches (
+		batch_id TEXT PRIMARY KEY, platform TEXT NOT NULL, account TEXT NOT NULL,
+		room TEXT NOT NULL, creator TEXT NOT NULL, label TEXT NOT NULL DEFAULT '',
+		total INTEGER NOT NULL, created_at INTEGER NOT NULL
+	);
 	CREATE TABLE IF NOT EXISTS task_events (
 		id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL REFERENCES tasks(id),
 		created_at INTEGER NOT NULL, record BLOB NOT NULL
@@ -145,6 +155,8 @@ func openStore(path string) (*store, error) {
 func (s *store) migrateColumns() error {
 	for _, c := range []struct{ table, column, definition string }{
 		{"tasks", "silent", "INTEGER NOT NULL DEFAULT 0"},
+		{"tasks", "batch_id", "TEXT NOT NULL DEFAULT ''"},
+		{"tasks", "batch_index", "INTEGER NOT NULL DEFAULT -1"},
 		{"schedules", "requires_execution", "INTEGER NOT NULL DEFAULT 1"},
 		{"schedules", "delivery", "TEXT NOT NULL DEFAULT 'origin'"},
 	} {
@@ -158,6 +170,10 @@ func (s *store) migrateColumns() error {
 		if _, err := s.db.Exec(`ALTER TABLE ` + c.table + ` ADD COLUMN ` + c.column + ` ` + c.definition); err != nil {
 			return err
 		}
+	}
+	// 批次索引依赖上面补齐的列，只能在迁移之后创建；旧库已有该索引时幂等跳过。
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS tasks_batch ON tasks(batch_id, batch_index)`); err != nil {
+		return err
 	}
 	return nil
 }
@@ -239,14 +255,14 @@ func (s *store) submit(ctx context.Context, message chat.Message, dir string, re
 	return t, tx.Commit()
 }
 
-const taskColumns = `id,message,work_dir,request,status,result,error,cancel_requested,delivery,delivery_attempts,delivery_error,delivery_id,created_at,event,silent`
+const taskColumns = `id,message,work_dir,request,status,result,error,cancel_requested,delivery,delivery_attempts,delivery_error,delivery_id,created_at,event,silent,batch_id,batch_index`
 
 func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
 	var m, req, result []byte
 	var created int64
 	var silent int
-	err := row.Scan(&t.ID, &m, &t.WorkDir, &req, &t.Status, &result, &t.Error, &t.CancelRequested, &t.Delivery, &t.DeliveryAttempts, &t.DeliveryError, &t.DeliveryID, &created, &t.EventKey, &silent)
+	err := row.Scan(&t.ID, &m, &t.WorkDir, &req, &t.Status, &result, &t.Error, &t.CancelRequested, &t.Delivery, &t.DeliveryAttempts, &t.DeliveryError, &t.DeliveryID, &created, &t.EventKey, &silent, &t.BatchID, &t.BatchIndex)
 	if err != nil {
 		return t, err
 	}
@@ -465,11 +481,14 @@ func (s *store) finish(ctx context.Context, t Task, result agent.Result, runErr 
 				return err
 			}
 		}
+		if err = finishBatchIfDone(ctx, tx, t.ID); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
 
-const qualifiedTaskColumns = `tasks.id,tasks.message,tasks.work_dir,tasks.request,tasks.status,tasks.result,tasks.error,tasks.cancel_requested,tasks.delivery,tasks.delivery_attempts,tasks.delivery_error,tasks.delivery_id,tasks.created_at,tasks.event,tasks.silent`
+const qualifiedTaskColumns = `tasks.id,tasks.message,tasks.work_dir,tasks.request,tasks.status,tasks.result,tasks.error,tasks.cancel_requested,tasks.delivery,tasks.delivery_attempts,tasks.delivery_error,tasks.delivery_id,tasks.created_at,tasks.event,tasks.silent,tasks.batch_id,tasks.batch_index`
 
 func (s *store) pendingProjections(ctx context.Context, limit int) ([]Task, error) {
 	if limit <= 0 {

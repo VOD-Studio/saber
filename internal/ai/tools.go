@@ -89,6 +89,9 @@ func (te *ToolExecutor) ExecuteToolCall(ctx context.Context, toolName string, ar
 	if toolName == "saber_trace" {
 		return te.service.executeTraceTool(ctx, args)
 	}
+	if toolName == "saber_batch" {
+		return te.service.executeBatchTool(ctx, args)
+	}
 	if toolName == "saber_task" && te.service.tasks != nil {
 		identity, ok := chat.IdentityFromContext(ctx)
 		if !ok {
@@ -149,6 +152,7 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 		if _, ok := chat.IdentityFromContext(ctx); ok {
 			tools = append(tools, scheduleTool())
 			tools = append(tools, traceTool())
+			tools = append(tools, batchTool())
 		}
 	}
 	if te.service.memory != nil {
@@ -200,7 +204,7 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 // ExecuteToolCall 优先走内置分支，MCP 的实现永远等不到调用。
 func builtinToolName(name string) bool {
 	switch name {
-	case "saber_task", "saber_schedule", "saber_memory", "saber_history", "saber_skill", "saber_task_state", "saber_trace", agent.DelegateTool:
+	case "saber_task", "saber_schedule", "saber_memory", "saber_history", "saber_skill", "saber_task_state", "saber_trace", "saber_batch", agent.DelegateTool:
 		return true
 	}
 	return false

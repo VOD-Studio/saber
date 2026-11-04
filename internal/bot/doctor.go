@@ -223,6 +223,23 @@ func inspectSQLite(ctx context.Context, path string, runtimeState bool) []doctor
 	} else if runtimeState {
 		add("tasks.trace_export", "warning", "task_events is missing; saber_trace export will fail on this database")
 	}
+	// 批次查询按 (batch_id, batch_index) 过滤，缺少索引时功能仍可用但会退化为全表扫描。
+	if runtimeState {
+		if err = rows.Close(); err != nil {
+			add("sqlite."+filepath.Base(path), "error", err.Error())
+			return checks
+		}
+		var hasBatchIndex int
+		if err = db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='tasks_batch')`).Scan(&hasBatchIndex); err != nil {
+			add("sqlite."+filepath.Base(path), "error", err.Error())
+			return checks
+		}
+		if hasBatchIndex == 1 {
+			add("tasks.batch_index", "ok", "tasks_batch index exists; batch lookups are indexed")
+		} else {
+			add("tasks.batch_index", "warning", "tasks_batch index is missing; batch lookups will scan the tasks table")
+		}
+	}
 	if _, err := os.Stat(path + "-wal"); err == nil {
 		add("sqlite."+filepath.Base(path)+".wal", "warning", "WAL file exists; the read-only snapshot may omit recent commits")
 	}

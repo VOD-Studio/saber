@@ -114,6 +114,8 @@ func (p *taskStream) event(event agent.Event) {
 		case p.updates <- struct{}{}:
 		default:
 		}
+	case agent.BatchSubmitted, agent.BatchFinished:
+		// 批次事件只描述提交与结算，不改变本任务的流式正文与临时回复。
 	case agent.TextDelta:
 		if p.replaceThinking {
 			p.thinking.Reset()

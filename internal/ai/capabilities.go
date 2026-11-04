@@ -28,7 +28,7 @@ const (
 // DisabledCapabilities 在 AI 服务未初始化时仍返回完整的能力关闭状态。
 func DisabledCapabilities(reason string) map[string]Capability {
 	result := make(map[string]Capability, 10)
-	for _, key := range []string{"tasks", "trace_export", "execution", "file_read", "file_search", "processes", "memory", "skills", "mcp", "context_compaction", "adaptive_budget"} {
+	for _, key := range []string{"tasks", "trace_export", "batches", "execution", "file_read", "file_search", "processes", "memory", "skills", "mcp", "context_compaction", "adaptive_budget"} {
 		result[key] = Capability{State: capabilityDisabled, Reason: reason, Tools: []string{}}
 	}
 	return result
@@ -48,11 +48,13 @@ func (s *Service) Capabilities(ctx context.Context, identity chat.Identity) map[
 	}
 	if s.tasks != nil {
 		put("tasks", capabilityAvailable, "", nil)
-		// 轨迹导出只读写 tasks.db 与任务私有产物目录，与执行后端无关。
+		// 轨迹导出与批次只读写 tasks.db 与任务私有目录，与执行后端无关。
 		put("trace_export", capabilityAvailable, "", []string{"saber_trace"})
+		put("batches", capabilityAvailable, "", []string{"saber_batch"})
 	} else {
 		put("tasks", capabilityDisabled, "任务服务未启用", nil)
 		put("trace_export", capabilityDisabled, "任务服务未启用", nil)
+		put("batches", capabilityDisabled, "任务服务未启用", nil)
 	}
 	// 执行相关能力先看总开关，再看身份授权与隔离状态。
 	var allowed []string
