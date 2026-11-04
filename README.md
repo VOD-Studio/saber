@@ -9,6 +9,7 @@
 - **Matrix 协议**: 通过 mautrix-go 完整支持 Matrix 协议
 - **端到端加密**: Matrix 可选的 E2EE 支持，使用 goolm（纯 Go 实现，无需 CGO）
 - **Violet 站内聊天**: 以 Bot API 的 bot 虚拟用户身份接入 Violet 博客的聊天系统，SSE 收消息、原地编辑做流式回复、断线按消息历史补拉（默认关闭，接入步骤见 [docs/platform-system.md](docs/platform-system.md)）
+- **自主换头像**: Matrix 与 Violet 的 `saber_avatar` 工具可读取自身头像，并由已授权管理员通过聊天让 Saber 更换公开账号头像；支持本轮图片附件或已授权工作区图片，详见 [头像工具](docs/chat-adapters.md#账号头像)。
 - **可插拔平台层**: 平台按 `platforms.<name>.enabled` 启停，接入新平台不必改注册表与装配代码
 - **Telegram / Discord / Slack**: 均默认关闭。Telegram 走 `getUpdates` 长轮询；Discord 走 Gateway WebSocket（需在开发者后台开启 `MESSAGE_CONTENT` intent）；Slack 走 Socket Mode（需 bot 与 app 两个 token），详见[配置](docs/configuration.md#平台接入platforms)
 

@@ -409,6 +409,7 @@ func (s *appState) initServices() error {
 		aiService.SetTweetAdapter(violet)
 		// 表情目录与收藏随平台启用即可用，不需要额外配置开关。
 		aiService.SetEmojiAdapter(violet)
+		aiService.SetAvatarAdapter("violet", violet)
 		violet.SetTweetHandler(aiService.HandleTweet)
 		if err := s.registerPlatform(violet, aiService); err != nil {
 			return err
@@ -451,7 +452,9 @@ func (s *appState) initServices() error {
 			}
 			svc.proactiveManager = mgr
 		}
-		if err := s.registerPlatform(s.newMatrixPlatform(), aiService); err != nil {
+		matrixPlatform := s.newMatrixPlatform()
+		aiService.SetAvatarAdapter("matrix", matrixPlatform)
+		if err := s.registerPlatform(matrixPlatform, aiService); err != nil {
 			return err
 		}
 	}
@@ -513,6 +516,7 @@ func (s *appState) newMatrixPlatform() *platformmatrix.Platform {
 	return platformmatrix.New(s.cfg, svc.commandService, svc.mediaService,
 		platformmatrix.WithSession(platformmatrix.NewSession(svc.client, s.cfg.Matrix.AutoJoinRooms)),
 		platformmatrix.WithEventHandler(s.newEventHandler()),
+		platformmatrix.WithAvatarClient(svc.client.GetClient()),
 	)
 }
 

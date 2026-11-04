@@ -18,6 +18,7 @@ func (s *Service) RunAgent(ctx context.Context, req agent.Request, emit func(age
 }
 
 func (s *Service) runAgent(ctx context.Context, req agent.Request, emit func(agent.Event), firstClient *Client) (agent.Result, error) {
+	ctx = withAvatarImages(ctx, req.Messages)
 	retry := s.agentRetry()
 	budget := s.config.Agent.Budget
 	limits := agent.Limits{

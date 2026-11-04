@@ -194,7 +194,7 @@ description: 发布服务并在失败时回滚
 
 `/status` 命令始终可用（AI 关闭时也能查询关闭原因），输出各能力组的真实状态、`backend`/`sandboxed` 与 local 风险提示；`GET /v1/info` 同时返回 `capabilities` 与随服务端注册表更新的 `commands`，TUI 菜单据此生成服务端命令项。
 
-`commands.admins` 单独授权全局 `ai switch` 和共享人格 `new/del`；`commands.session_writers` 授权精确会话内的 `ai clear` 与人格 `set/clear`。两者均按 `platform`、`account`、完整用户 ID 匹配；会话写入还要求 `room` 和 `thread`（省略表示主会话），不接受通配符，也不继承 `execution.task_admins`。例如：
+`commands.admins` 单独授权全局 `ai switch`、共享人格 `new/del`、公开账号头像更换与 Violet 推文写操作；`commands.session_writers` 授权精确会话内的 `ai clear` 与人格 `set/clear`。两者均按 `platform`、`account`、完整用户 ID 匹配；会话写入还要求 `room` 和 `thread`（省略表示主会话），不接受通配符，也不继承 `execution.task_admins`。例如：
 
 ```yaml
 commands:
@@ -333,6 +333,7 @@ platforms:
 - 推文互动由 `platforms.violet.tweets.enabled` 单独控制，默认 `false`；打开后，有人评论本人推文、在评论下追问或引用本人推文时，Saber 组织一次模型回合，并把结果作为该推文下的公开评论发布。推文回合不提交持久化任务、不准备任何工具、不注入长期记忆，只接收平台带回来的互动上下文（正文按不可信外部文本处理）。`max_content_runes` 同时约束自动回评与 `saber_tweet` 的正文；`max_images_per_tweet` 为 0 时禁止配图。
 - `saber_tweet` 只在「Violet 平台启用 + 推文接入启用 + 当前身份账号等于 `platforms.violet.account`」时提供给模型。`post`/`reply`/`like`/`unlike`/`delete`/`delete_comment` 是公开写操作，执行时按 `commands.admins` 重新授权（平台、账号、用户精确匹配，不继承任务管理员）；`get`/`comments` 只读。图片只能是任务工作区内的 png/jpeg/gif/webp 文件，由 Saber 上传后再发布，路径越过工作区、非普通文件、超过 10 MiB 或类型不符都会中止整次写入。
 - `saber_emoji` 在 `platforms.violet.enabled: true` 时即可用，没有单独的开关或配置键：它读取 Violet 的系统表情目录与 bot 私有收藏，收藏/取消收藏自定义表情，模型再把返回的 token 原样写进回复正文。使用表情不产生公开内容，因此不要求 `commands.admins`；工具仍只在当前身份账号等于 `platforms.violet.account` 时出现。
+- `saber_avatar` 在已启用、当前可信账号匹配的 Matrix/Violet 聊天中提供，无额外配置开关。`get` 读取自身账号头像，`set` 按 `commands.admins` 授权公开更换；Matrix 的 `account` 必须是机器人完整用户 ID，Violet 使用 `EffectiveAccount()`（未显式配置时取 endpoint 主机名）。支持本轮平台已下载的图片附件（`attachment` 从 1 开始）或任务工作区相对路径（`image_path`，还需 `read_file` 授权），二选一；PNG/JPEG/GIF/WebP，最多 10 MiB。不接受远程 URL，不改房间头像、其他用户或其他平台。Violet 服务端必须提供 `POST /api/v1/chat/bot/avatar`，仅需既有 Bot Token，不使用站点管理员凭据。
 - 自主发帖复用定时计划而不是新增调度器：管理员先用 `!schedule ... --silent`（或 `saber_schedule` 的 `"delivery":"silent"`）创建计划，计划冻结 `saber_tweet` 后由到点任务调用工具发布。`--silent` 让聊天侧保持安静，推文内容与任务结果仍完整落库；每日上限与最小间隔按进程内状态执行，重启清零。
 - 能力边界：Violet 只走 `HandleChat` 这条最小链路。`!ai <内容>` 会被剥掉前缀当提问，其余 `!` 开头命令（`!task`、`!schedule`、上下文命令）在本平台无落点、直接跳过；任务产出的文件不投递（上传通道仍按 Matrix 限定）；主动聊天未接入 Violet（`SendNotice` 没有对等语义）。
 - Telegram：`bot_token` 在 `enabled: true` 时必填；走 `getUpdates` 长轮询（`poll_timeout_seconds`，默认 30），不需要公网地址、证书或 webhook。私聊按 `direct_chat_auto_reply`，群聊需被 `@` 或直接回复 bot 的消息（`group_chat_mention_reply`）；频道消息、其他机器人与非文本消息跳过。单条正文超过 4000 字符时截断并标注。

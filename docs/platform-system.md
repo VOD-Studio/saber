@@ -224,6 +224,7 @@ Violet 是一个全栈博客平台，内置聊天系统。Saber 通过 Violet Bo
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | GET | `/api/v1/chat/bot/profile` | 取 `user_id`/`username`：自回声过滤与被 @ 判定的依据 |
+| POST | `/api/v1/chat/bot/avatar` | multipart 单个 `file`，上传并替换当前 Bot Token 所属账号头像；返回最新 profile |
 | GET | `/api/v1/chat/bot/events` | SSE 事件流（入站） |
 | GET | `/api/v1/chat/bot/conversations` | 会话列表，首次连接用来打水位基线与预热形态缓存 |
 | GET | `/api/v1/chat/bot/conversations/{cid}` | 会话详情，主要取 `kind`（`direct`/`room`） |
@@ -412,6 +413,7 @@ S8 还需要一台真实 Violet 实例（管理端 `/admin/chat-bots` 注册 bot
 8. 如需主动聊天：实现 `ai.ProactiveRooms`（见下文）并在 `initProactiveManager` 注入。没有 notice 语义的平台要么把 `SendNotice` 降级成普通文本，要么像 Violet 一样干脆不接
 9. 如需推文/公开内容互动：实现可选的 `chat.TweetAdapter`（推文与评论的读写端口），由 `ai.Service.SetTweetAdapter` 注入；平台再用 `SetTweetHandler(aiService.HandleTweet)` 把 SSE/回调事件翻译成合成 `chat.Message` 交给公开回复链路。两个端口都是可选的，不实现时 `saber_tweet` 不会出现在工具列表，普通聊天不受影响
 10. 如需表情：实现可选的 `chat.EmojiAdapter`（`ListEmojis`/`FavoriteEmoji`/`UnfavoriteEmoji`），由 `ai.Service.SetEmojiAdapter` 注入。入站正文里的表情 token 若被平台剥离，应通过 `chat.Message.Context` 把 token 清单与复用说明交还模型；不实现时 `saber_emoji` 不会出现在工具列表
+11. 如需自主换头像：实现 `chat.AvatarAdapter`（`GetAvatar`/`SetAvatar`），通过 `ai.Service.SetAvatarAdapter(platformName, adapter)` 按平台注入。`saber_avatar` 在执行时复核可信账号和 `commands.admins` 写权限，文件来源还需当前工作区的 `read_file` 授权；平台只能操作自身账号，不能接受模型生成的目标用户。
 
 ## 实施进度
 

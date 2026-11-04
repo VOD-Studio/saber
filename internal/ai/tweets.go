@@ -7,10 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -367,83 +363,13 @@ func (s *Service) tweetImages(ctx context.Context, paths []string) ([]chat.Tweet
 	return media, nil
 }
 
-// uploadTweetImage 读取并上传一张工作区内的图片。
-//
-// 路径经过清理、绝对化与符号链接解析后必须仍位于工作目录内；只接受普通文件，
-// 大小与 MIME 都按服务端接受的范围校验，模型无法借参数读取工作区外的文件。
+// uploadTweetImage 复用受限工作区图片读取，与头像上传保持同一条路径边界。
 func (s *Service) uploadTweetImage(ctx context.Context, workDir, rel string) (chat.TweetMedia, error) {
-	rel = strings.TrimSpace(rel)
-	if rel == "" {
-		return chat.TweetMedia{}, errors.New("推文图片路径不能为空")
-	}
-	if filepath.IsAbs(rel) {
-		return chat.TweetMedia{}, fmt.Errorf("推文图片路径必须是工作区内的相对路径，收到 %q", rel)
-	}
-	root, err := filepath.Abs(workDir)
-	if err != nil {
-		return chat.TweetMedia{}, fmt.Errorf("解析任务工作目录失败: %w", err)
-	}
-	target, err := filepath.Abs(filepath.Join(root, filepath.Clean(rel)))
-	if err != nil {
-		return chat.TweetMedia{}, fmt.Errorf("解析推文图片路径失败: %w", err)
-	}
-	if !withinDir(root, target) {
-		return chat.TweetMedia{}, fmt.Errorf("推文图片路径 %q 超出任务工作目录", rel)
-	}
-	resolved, err := filepath.EvalSymlinks(target)
+	data, mimeType, filename, err := readWorkspaceImage(workDir, rel, maxTweetImageBytes)
 	if err != nil {
 		return chat.TweetMedia{}, fmt.Errorf("读取推文图片失败: %w", err)
 	}
-	resolvedRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		resolvedRoot = root
-	}
-	if !withinDir(resolvedRoot, resolved) {
-		return chat.TweetMedia{}, fmt.Errorf("推文图片路径 %q 通过符号链接超出任务工作目录", rel)
-	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return chat.TweetMedia{}, fmt.Errorf("读取推文图片失败: %w", err)
-	}
-	if !info.Mode().IsRegular() {
-		return chat.TweetMedia{}, fmt.Errorf("推文图片 %q 不是普通文件", rel)
-	}
-	if info.Size() > maxTweetImageBytes {
-		return chat.TweetMedia{}, fmt.Errorf("推文图片 %q 超过 %d 字节上限", rel, maxTweetImageBytes)
-	}
-	handle, err := os.Open(resolved)
-	if err != nil {
-		return chat.TweetMedia{}, fmt.Errorf("读取推文图片失败: %w", err)
-	}
-	defer func() {
-		_ = handle.Close()
-	}()
-	data, err := io.ReadAll(io.LimitReader(handle, maxTweetImageBytes+1))
-	if err != nil {
-		return chat.TweetMedia{}, fmt.Errorf("读取推文图片失败: %w", err)
-	}
-	if len(data) > maxTweetImageBytes {
-		return chat.TweetMedia{}, fmt.Errorf("推文图片 %q 超过 %d 字节上限", rel, maxTweetImageBytes)
-	}
-	mimeType := http.DetectContentType(data)
-	switch mimeType {
-	case "image/png", "image/jpeg", "image/gif", "image/webp":
-	default:
-		return chat.TweetMedia{}, fmt.Errorf("推文图片 %q 的类型 %q 不受支持，只接受 png/jpeg/gif/webp", rel, mimeType)
-	}
-	media, err := s.tweetAdapter.UploadImage(ctx, data, mimeType, filepath.Base(resolved))
-	if err != nil {
-		return chat.TweetMedia{}, err
-	}
-	return media, nil
-}
-
-// withinDir 判断 path 是否等于或位于 dir 内。
-func withinDir(dir, path string) bool {
-	if path == dir {
-		return true
-	}
-	return strings.HasPrefix(path, dir+string(os.PathSeparator))
+	return s.tweetAdapter.UploadImage(ctx, data, mimeType, filename)
 }
 
 // tweetPostLimits 返回每日上限与最小间隔；零值或负值回退到默认配置。

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 新增 `saber_avatar` 头像工具与 Matrix/Violet 自身账号头像端口，支持查询与使用本轮图片附件或已授权工作区图片更换公开头像（PNG/JPEG/GIF/WebP，最多 10 MiB）。更换按 `commands.admins` 精确授权，执行时复核平台与账号；文件来源额外复核 `read_file` 授权，拒绝远程 URL 与工作区越界。Violet 使用新增的 Bot Token 自身头像上传端点，不引入站点管理员凭据。
+
 ### Changed
 
 - 长期记忆与生成配置默认开启，省略 `memory.enabled` 时也启用；已有显式 `false` 配置仍保持关闭。自动复盘沿用默认每 5 个已完成轮次触发，可用 `memory.auto_learn: false` 关闭。

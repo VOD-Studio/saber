@@ -74,6 +74,8 @@ type Service struct {
 	// emojiAdapter 是表情目录与收藏端口，由支持表情的平台在启动时注入。
 	// 未注入时 saber_emoji 不会出现在任何工具列表中。
 	emojiAdapter chat.EmojiAdapter
+	// avatarAdapters 按平台保存自身账号头像端口，运行时仍复核可信账号与授权。
+	avatarAdapters sync.Map
 	// tweetPosts 是主动发帖的进程内限流状态，按本地日期计次。
 	tweetPosts tweetPostLimiter
 }

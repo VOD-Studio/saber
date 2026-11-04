@@ -73,6 +73,9 @@ type fakeViolet struct {
 	events  chan string
 	// uploadedMedia 记录 bot 上传的图片，key 为内部生成的 file_id。
 	uploadedMedia map[string]uploadedMedia
+	// avatarFailure 在资料提交前注入服务端错误，上传内容仍会保留。
+	avatarFailure int
+	avatarCalls   int
 	// conversationCalls 记录会话详情接口被调次数，用于验证形态缓存真的生效。
 	conversationCalls int
 	// kindFailure 让会话详情接口报错，用来验证形态未知时的从严判定。
@@ -388,6 +391,8 @@ func (f *fakeViolet) serve(w http.ResponseWriter, r *http.Request) {
 		f.serveTyping(w, r, path)
 	case path == "/media" && r.Method == http.MethodPost:
 		f.serveMediaUpload(w, r)
+	case path == "/avatar" && r.Method == http.MethodPost:
+		f.serveAvatarUpload(w, r)
 	case path == "/emojis" && r.Method == http.MethodGet:
 		f.serveEmojiCatalog(w, r)
 	case strings.HasPrefix(path, "/emojis/") && strings.HasSuffix(path, "/favorite") && (r.Method == http.MethodPost || r.Method == http.MethodDelete):
@@ -673,6 +678,57 @@ func (f *fakeViolet) serveMediaUpload(w http.ResponseWriter, r *http.Request) {
 		Height:   height,
 		Size:     record.Size,
 	})
+}
+
+// serveAvatarUpload 落下真实字节后修改 profile，后续 GET 必须读到新头像。
+func (f *fakeViolet) serveAvatarUpload(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	f.avatarCalls++
+	f.mu.Unlock()
+	if r.URL.RawQuery != "" {
+		writeAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "不接受目标账号")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxMediaBytes+(1<<20))
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "multipart 格式无效")
+		return
+	}
+	defer func() { _ = r.MultipartForm.RemoveAll() }()
+	if len(r.MultipartForm.Value) != 0 || len(r.MultipartForm.File) != 1 || len(r.MultipartForm.File["file"]) != 1 {
+		writeAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "只接受一个 file")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "缺少 file")
+		return
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(io.LimitReader(file, maxMediaBytes+1))
+	if err != nil || chat.ValidateAvatarImage(data, header.Header.Get("Content-Type")) != nil {
+		writeAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "头像图片无效")
+		return
+	}
+	if _, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "头像内容损坏")
+		return
+	}
+	f.mu.Lock()
+	id := fmt.Sprintf("avatar-%d", len(f.uploadedMedia)+1)
+	record := uploadedMedia{ID: id, URL: "/uploads/" + id, MIMEType: header.Header.Get("Content-Type"), Filename: header.Filename, Bytes: data, Size: int64(len(data))}
+	f.uploadedMedia[id] = record
+	failure := f.avatarFailure
+	if failure == 0 {
+		f.profile.AvatarURL = record.URL
+	}
+	profile := f.profile
+	f.mu.Unlock()
+	if failure != 0 {
+		writeAPIError(w, failure, "INTERNAL", "资料提交失败")
+		return
+	}
+	writeAPIData(w, http.StatusOK, profile)
 }
 
 // serveEmojiCatalog 返回已登记的表情目录，并记录路径与鉴权头。

@@ -87,6 +87,20 @@ tweetReplyAdapter.Send ─> 平台写端点 ─> 公开评论
 - 入站消息里的自定义表情 token 仍按原逻辑从正文剥离、图片作为附件投递；平台额外在 `chat.Message.Context` 里附上 token 清单。该区块会被上层当作不可信资料，因此只陈述「本条消息引用了哪些 token」，不写任何指令；收藏与复用的步骤由系统提示和工具说明负责。
 - `saber_emoji` 的 `list` 读取目录并按 `query`/`group` 过滤，`favorite`/`unfavorite` 接受 `emoji_id`（UUID）或 `[name:uuid]` token；系统 token 会被拒绝，因为收藏对它们没有意义。工具只在「Violet 启用 + 账号匹配」时出现，使用表情本身不需要管理员授权。
 
+## 账号头像
+
+Matrix 与 Violet 实现可选的 `chat.AvatarAdapter`，通过 `ai.Service.SetAvatarAdapter(platformName, adapter)` 装配。模型工具 `saber_avatar` 只操作当前平台接入账号，平台、账号与发送者均来自可信上下文；每次执行重新检查平台开关、账号匹配与授权，旧工具快照不能绕过撤销。
+
+| 动作 | 参数 | 权限与行为 |
+|---|---|---|
+| `get` | `{"action":"get"}` | 读取当前公开头像，返回 `{ "url": "…" }`；未设置时为空串 |
+| `set` | `{"action":"set","attachment":1}` | 使用本轮用户的第 1 张图片附件；需 `commands.admins` |
+| `set` | `{"action":"set","image_path":"avatar.png"}` | 使用当前任务工作区相对路径；需 `commands.admins` 与 `read_file` 授权 |
+
+管理员可以发送或引用图片后说「把你自己的头像换成这张图」。图片源二选一，支持 PNG/JPEG/GIF/WebP、最多 10 MiB；附件只能使用接入端已下载的 Data URL，不从历史图片或任意远程地址取图。工作区读取钉住根目录，拒绝绝对路径、越界链接与非普通文件。没有图片时模型应请求图片或在已授权工作区准备，不得声称已经更换。
+
+Matrix 上传公开原图并更新自身 `avatar_url`，返回 MXC URI；即使来源消息使用 E2EE，账号头像也不加密。Violet 调用 `POST /api/v1/chat/bot/avatar`（multipart 单个 `file`），服务端按当前 Bot Token 保存头像素材并事务更新 bot 引用、虚拟用户资料与素材引用计数，返回最新 profile；失败不覆盖旧头像。部署时先升级 Violet 服务端再升级 Saber。公开推文互动回合仍禁止所有工具。
+
 ## 内存 adapter
 
 测试或嵌入式调用可注入同一 Handler：

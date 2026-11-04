@@ -42,6 +42,7 @@ var chatToolNames = map[string]bool{
 	"saber_batch":      true,
 	tweetToolName:      true,
 	emojiToolName:      true,
+	avatarToolName:     true,
 	agent.DelegateTool: true,
 }
 

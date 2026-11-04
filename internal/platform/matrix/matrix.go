@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"sync"
 
+	"maunium.net/go/mautrix"
+
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/matrix"
@@ -19,9 +21,10 @@ import (
 // 登录与 E2EE 初始化属于装配层（需要口令、密钥路径等凭据），装配完成后把
 // Session 与 EventHandler 注入本平台；Start 负责注册事件并启动同步，Stop 取消并等待退出。
 type Platform struct {
-	cfg      *config.Config
-	commands *matrix.CommandService
-	media    *matrix.MediaService
+	cfg          *config.Config
+	commands     *matrix.CommandService
+	media        *matrix.MediaService
+	avatarClient *mautrix.Client
 
 	session Session
 	events  *matrix.EventHandler

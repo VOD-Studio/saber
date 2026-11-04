@@ -18,6 +18,8 @@ type botProfileDTO struct {
 	Username string `json:"username"`
 	// Name 是显示名。
 	Name string `json:"name"`
+	// AvatarURL 是当前头像的站内相对地址，未设置时为空。
+	AvatarURL string `json:"avatar_url"`
 }
 
 // userDTO 是消息作者与成员的公开资料。
