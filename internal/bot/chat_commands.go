@@ -373,13 +373,13 @@ func (s *appState) statusReport(message chat.Message) string {
 	if s.services.aiService != nil {
 		capabilities = s.services.aiService.Capabilities(context.Background(), identity)
 	} else {
-		for _, key := range []string{"tasks", "execution", "file_read", "file_search", "processes", "memory", "skills", "mcp", "context_compaction", "adaptive_budget"} {
+		for _, key := range []string{"tasks", "trace_export", "execution", "file_read", "file_search", "processes", "memory", "skills", "mcp", "context_compaction", "adaptive_budget"} {
 			capabilities[key] = ai.Capability{State: "disabled", Reason: "AI 服务未启用", Tools: []string{}}
 		}
 	}
 	lines := []string{fmt.Sprintf("版本 %s｜提交 %s｜分支 %s", s.info.Version, s.info.GitCommit, s.info.GitBranch)}
 	local := false
-	for _, key := range []string{"tasks", "execution", "file_read", "file_search", "processes", "memory", "skills", "mcp", "context_compaction", "adaptive_budget"} {
+	for _, key := range []string{"tasks", "trace_export", "execution", "file_read", "file_search", "processes", "memory", "skills", "mcp", "context_compaction", "adaptive_budget"} {
 		capability, ok := capabilities[key]
 		if !ok {
 			continue

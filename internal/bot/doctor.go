@@ -217,6 +217,12 @@ func inspectSQLite(ctx context.Context, path string, runtimeState bool) []doctor
 	} else if runtimeState {
 		add("sqlite.tasks.db", "ok", "tasks schema contains task_runtime_state")
 	}
+	// 轨迹导出只读 task_events，缺表时 saber_trace 会在旧库上失败，这里提前暴露。
+	if runtimeState && tables["task_events"] {
+		add("tasks.trace_export", "ok", "task_events exists; saber_trace can export task traces")
+	} else if runtimeState {
+		add("tasks.trace_export", "warning", "task_events is missing; saber_trace export will fail on this database")
+	}
 	if _, err := os.Stat(path + "-wal"); err == nil {
 		add("sqlite."+filepath.Base(path)+".wal", "warning", "WAL file exists; the read-only snapshot may omit recent commits")
 	}

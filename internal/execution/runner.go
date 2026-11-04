@@ -196,7 +196,7 @@ func (w *archiveWriter) Write(p []byte) (int, error) {
 
 // Artifacts 只列举执行器私有目录中的快照，不能由模型指定宿主路径。
 func (e *Executor) Artifacts(taskID int64) ([]Artifact, error) {
-	dir := filepath.Join(e.cfg.LogDir, "task-"+strconv.FormatInt(taskID, 10), "artifacts")
+	dir := e.ArtifactDir(taskID)
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -206,10 +206,10 @@ func (e *Executor) Artifacts(taskID int64) ([]Artifact, error) {
 	}
 	var result []Artifact
 	for _, entry := range entries {
-		if !entry.Type().IsRegular() || len(entry.Name()) < 34 {
+		if !entry.Type().IsRegular() || len(entry.Name()) <= artifactPrefixLen {
 			return nil, errors.New("invalid artifact archive")
 		}
-		result = append(result, Artifact{Name: entry.Name()[33:], Path: filepath.Join(dir, entry.Name())})
+		result = append(result, Artifact{Name: entry.Name()[artifactPrefixLen:], Path: filepath.Join(dir, entry.Name())})
 	}
 	return result, nil
 }

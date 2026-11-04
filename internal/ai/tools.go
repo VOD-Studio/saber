@@ -86,6 +86,9 @@ func (te *ToolExecutor) ExecuteToolCall(ctx context.Context, toolName string, ar
 	if toolName == "saber_skill" {
 		return te.service.executeSkillTool(ctx, args)
 	}
+	if toolName == "saber_trace" {
+		return te.service.executeTraceTool(ctx, args)
+	}
 	if toolName == "saber_task" && te.service.tasks != nil {
 		identity, ok := chat.IdentityFromContext(ctx)
 		if !ok {
@@ -141,11 +144,11 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 	}
 	if te.service.tasks != nil {
 		tools = append(tools, taskTool())
-		// 计划工具本身不产生外部副作用，只要求可信身份即可可见；创建计划时
-		// scheduleOperation 会按当前授权重新收集工具并冻结 RequiresExecution，
-		// 没有执行授权的用户只能得到纯聊天计划。
+		// 计划与轨迹工具都不依赖执行后端，只要求可信身份；轨迹导出还要在运行时
+		// 有持久任务上下文并按 AuthorizeOutput 复核来源，故此处只做可见性判断。
 		if _, ok := chat.IdentityFromContext(ctx); ok {
 			tools = append(tools, scheduleTool())
+			tools = append(tools, traceTool())
 		}
 	}
 	if te.service.memory != nil {
@@ -169,7 +172,7 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 	}
 
 	for _, mcpTool := range mcpTools {
-		if execution.LocalTool(mcpTool.Name) || mcpTool.Name == "saber_task" || mcpTool.Name == "saber_schedule" || mcpTool.Name == "saber_memory" || mcpTool.Name == "saber_history" || mcpTool.Name == "saber_skill" || mcpTool.Name == "saber_task_state" || mcpTool.Name == agent.DelegateTool {
+		if execution.LocalTool(mcpTool.Name) || builtinToolName(mcpTool.Name) {
 			continue
 		}
 		server := te.service.mcpManager.GetServerForTool(mcpTool.Name)
@@ -189,6 +192,18 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 	tools = te.exposeDelegate(ctx, tools)
 	slog.Debug("启用工具调用", "tool_count", len(tools))
 	return tools, len(tools) > 0
+}
+
+// builtinToolName 判断名称是否已被内置聊天工具占用。
+//
+// MCP 同名工具必须在列表阶段让位，否则模型看到的定义会与实际执行路径不一致：
+// ExecuteToolCall 优先走内置分支，MCP 的实现永远等不到调用。
+func builtinToolName(name string) bool {
+	switch name {
+	case "saber_task", "saber_schedule", "saber_memory", "saber_history", "saber_skill", "saber_task_state", "saber_trace", agent.DelegateTool:
+		return true
+	}
+	return false
 }
 
 // canDeliverFiles 判断当前会话所在平台能否接收任务产物文件；缺少可信身份时按不能处理。

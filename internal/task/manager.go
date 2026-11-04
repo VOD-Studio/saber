@@ -222,22 +222,48 @@ func (m *Manager) AuthorizeOutput(ctx context.Context, identity chat.Identity, c
 	return nil
 }
 
+// EventRecord 是一条持久化执行记录及其写入时间。
+//
+// 时间取 task_events.created_at，与记录本身分开保存，导出时才能保留事件先后顺序。
+type EventRecord struct {
+	// At 是事件写入时间，精度到毫秒。
+	At time.Time
+	// Record 是原始事件 JSON，格式由 agent.Event 决定，未知追加类型原样保留。
+	Record string
+}
+
 // Events 返回同群可见的持久化执行记录，包括崩溃前已派发的工具。
-func (m *Manager) Events(ctx context.Context, session chat.Session, taskID int64) (records []string, err error) {
+func (m *Manager) Events(ctx context.Context, session chat.Session, taskID int64) ([]string, error) {
+	records, err := m.TraceRecords(ctx, session, taskID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]string, 0, len(records))
+	for _, record := range records {
+		result = append(result, record.Record)
+	}
+	return result, nil
+}
+
+// TraceRecords 返回任务全部执行记录及写入时间，供轨迹导出保留时序。
+//
+// 可见性规则与 Events 相同：只按任务所属账号与会话查询，不接受跨会话编号。
+func (m *Manager) TraceRecords(ctx context.Context, session chat.Session, taskID int64) (records []EventRecord, err error) {
 	if _, err := m.Get(ctx, session, taskID); err != nil {
 		return nil, err
 	}
-	rows, err := m.store.db.QueryContext(ctx, `SELECT record FROM task_events WHERE task_id=? ORDER BY id`, taskID)
+	rows, err := m.store.db.QueryContext(ctx, `SELECT created_at, record FROM task_events WHERE task_id=? ORDER BY id`, taskID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { err = errors.Join(err, rows.Close()) }()
 	for rows.Next() {
+		var createdAt int64
 		var record string
-		if err := rows.Scan(&record); err != nil {
+		if err := rows.Scan(&createdAt, &record); err != nil {
 			return nil, err
 		}
-		records = append(records, record)
+		records = append(records, EventRecord{At: time.UnixMilli(createdAt), Record: record})
 	}
 	return records, rows.Err()
 }
