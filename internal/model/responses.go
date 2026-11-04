@@ -274,6 +274,12 @@ func (c *Client) createResponse(ctx context.Context, req ChatCompletionRequest, 
 				return nil, fmt.Errorf("responses stream error (%s): %s", event.Error.Code, event.Error.Message)
 			}
 			return nil, fmt.Errorf("responses stream error (%s): %s", event.Code, event.Message)
+		default:
+			// 部分上游（如 DashScope）用无 type 的 code/message 帧报告限流和配额失败，
+			// 忽略它只会把真实原因退化成「断流」，用户和重试策略都看不到错误码。
+			if event.Type == "" && event.Code != "" && event.Message != "" {
+				return nil, fmt.Errorf("responses stream error (%s): %s", event.Code, event.Message)
+			}
 		}
 	}
 }

@@ -229,6 +229,9 @@ func TestResponses_StreamFailuresAndCompletion(t *testing.T) {
 		{"incomplete", `{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}`, "max_output_tokens", ""},
 		{"error", `{"type":"error","code":"bad","message":"bad input"}`, "bad input", ""},
 		{"nested_error", `{"type":"error","error":{"code":"bad","message":"nested error"}}`, "nested error", ""},
+		// DashScope 等上游在 200 流里用无 type 的 code/message 帧报告配额失败。
+		{"inline_error", `{"code":"Throttling.AllocationQuota","message":"Workspace allocated quota exceeded","request_id":"x"}`, "Throttling.AllocationQuota", ""},
+		{"typed_event_without_error", `{"type":"response.output_item.added","code":"not-an-error","message":"ignored"}`, "before response.completed", ""},
 		{"missing_response", `{"type":"response.completed"}`, "has no response", ""},
 		{"missing_failure", `{"type":"response.failed"}`, "stream failed", ""},
 		{"mismatch", `{"type":"response.output_text.delta","delta":"bad"}` + "\n" + `{"type":"response.completed","response":{"status":"completed","output_text":"good"}}`, "does not match", ""},

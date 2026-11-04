@@ -24,6 +24,14 @@ func RetryableError(err error) bool {
 
 	// 检查 HTTP 状态码错误
 	errMsg := err.Error()
+
+	// 配额耗尽重试无益：上游常以 429 或流内错误帧返回，需等额度调整后才可能恢复。
+	for _, quotaErr := range []string{"allocated quota", "quota exceeded", "insufficient_quota", "throttling.allocationquota"} {
+		if strings.Contains(strings.ToLower(errMsg), quotaErr) {
+			return false
+		}
+	}
+
 	httpStatusCodes := []string{"429", "500", "502", "503", "504"}
 	for _, code := range httpStatusCodes {
 		if strings.Contains(errMsg, code) {
@@ -126,8 +134,10 @@ func (rc *RetryConfigWrapper) withCircuitBreaker(ctx context.Context, operation 
 func (rc *RetryConfigWrapper) withRetryInternal(ctx context.Context, operation func() (any, error)) (any, error) {
 	var lastErr error
 	delay := rc.InitialDelay
+	attempts := 0
 
 	for i := 0; i <= rc.MaxRetries; i++ {
+		attempts++
 		// 检查上下文是否已取消
 		select {
 		case <-ctx.Done():
@@ -163,7 +173,7 @@ func (rc *RetryConfigWrapper) withRetryInternal(ctx context.Context, operation f
 		}
 	}
 
-	return nil, fmt.Errorf("operation failed after %d attempts: %w", rc.MaxRetries+1, lastErr)
+	return nil, fmt.Errorf("operation failed after %d attempt(s): %w", attempts, lastErr)
 }
 
 // FallbackModelHandler 处理模型故障转移逻辑。

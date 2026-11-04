@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Responses 流式把上游无 `type` 的 `code`/`message` 错误帧（DashScope 类 200 流内的限流与配额失败）识别为真实错误，不再退化成「responses stream ended before response.completed」；重试错误文案改为报告真实尝试次数（此前固定打印 `max_retries+1`）。
+- 配额耗尽（`Allocated quota exceeded`、`Throttling.AllocationQuota`、`insufficient_quota`）不再按 429 重试，避免任务在额度未恢复时空转 10 次。
+
 ## [0.6.0] - 2026-11-04
 
 ### Added

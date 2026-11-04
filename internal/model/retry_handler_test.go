@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -49,6 +50,9 @@ func TestRetryableError(t *testing.T) {
 		{"invalid token", errors.New("invalid token"), false},
 		{"authentication failed", errors.New("authentication failed"), false},
 		{"permission denied", errors.New("permission denied"), false},
+		{"quota exceeded", errors.New("error: 429 Workspace allocated quota exceeded, please increase your quota limit"), false},
+		{"dashscope throttling code", errors.New("Throttling.AllocationQuota: quota exceeded"), false},
+		{"insufficient quota", errors.New("insufficient_quota"), false},
 
 		// 大小写不敏感测试
 		{"TIMEOUT uppercase", errors.New("TIMEOUT error"), true},
@@ -246,6 +250,39 @@ func TestRetryConfigWrapper_WithRetry_NonRetryableError(t *testing.T) {
 	// 非可重试错误应该立即返回，不重试
 	if callCount != 1 {
 		t.Errorf("expected 1 call for non-retryable error, got %d", callCount)
+	}
+}
+
+// TestRetryConfigWrapper_WithRetry_ReportsActualAttempts 确认错误文案报告真实执行次数。
+func TestRetryConfigWrapper_WithRetry_ReportsActualAttempts(t *testing.T) {
+	cases := []struct {
+		name       string
+		maxRetries int
+		err        error
+		wantCalls  int
+		wantText   string
+	}{
+		{"non-retryable stops immediately", 10, errors.New("error: 401 unauthorized"), 1, "after 1 attempt(s)"},
+		{"retryable exhausts budget", 2, errors.New("error: 500 internal server error"), 3, "after 3 attempt(s)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rc := &RetryConfigWrapper{MaxRetries: tc.maxRetries, InitialDelay: time.Millisecond, MaxDelay: time.Millisecond, BackoffFactor: 2}
+			calls := 0
+			_, err := rc.WithRetry(context.Background(), func() (any, error) {
+				calls++
+				return nil, tc.err
+			})
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if calls != tc.wantCalls {
+				t.Fatalf("expected %d calls, got %d", tc.wantCalls, calls)
+			}
+			if !strings.Contains(err.Error(), tc.wantText) {
+				t.Errorf("error = %v, want to contain %q", err, tc.wantText)
+			}
+		})
 	}
 }
 
