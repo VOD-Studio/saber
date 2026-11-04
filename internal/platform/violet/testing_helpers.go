@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
@@ -75,6 +77,26 @@ type fakeViolet struct {
 	conversationCalls int
 	// kindFailure 让会话详情接口报错，用来验证形态未知时的从严判定。
 	kindFailure bool
+
+	// tweets 是已登记的推文，key 为推文 ID；tweetComments 按推文分组保存评论。
+	tweets        map[string]tweetDTO
+	tweetComments map[string][]commentDTO
+	// tweetPosts 与 tweetCommentPosts 记录 bot 的写请求，供断言正文/父评论/图片。
+	tweetPosts        []tweetPost
+	tweetCommentPosts []tweetCommentPost
+	// tweetCalls 记录推文端点的每次调用（METHOD path），用于断言路径。
+	tweetCalls []string
+	// tweetPublicAuth 记录公开读端点收到的 Authorization 头，验证它确实免鉴权。
+	tweetPublicAuth []string
+	// tweetLikes 记录点赞状态，tweetDeleted 记录被删除的推文 ID。
+	tweetLikes   map[string]bool
+	tweetDeleted []string
+	// tweetIdempotency 复现服务端语义：同键重试返回同一条推文或评论。
+	tweetIdempotency map[string]string
+	// tweetUploads 记录推文图片上传。
+	tweetUploads []uploadedMedia
+	// tweetCommentSeq 生成评论 ID，跨推文单调递增。
+	tweetCommentSeq int
 }
 
 // uploadedMedia 是一次图片上传的观测记录。
@@ -95,6 +117,25 @@ type typingRecord struct {
 	IsTyping     bool
 }
 
+// tweetPost 是一次 bot 发推的观测记录。
+type tweetPost struct {
+	Path        string
+	Content     string
+	Images      []string
+	QuoteOf     string
+	Idempotency string
+}
+
+// tweetCommentPost 是一次 bot 发评论的观测记录。
+type tweetCommentPost struct {
+	Path        string
+	TweetID     string
+	ParentID    string
+	Body        string
+	Pictures    []tweetPictureDTO
+	Idempotency string
+}
+
 // newFakeViolet 启动假服务端，测试结束时自动关闭。
 func newFakeViolet(t *testing.T) *fakeViolet {
 	t.Helper()
@@ -105,6 +146,11 @@ func newFakeViolet(t *testing.T) *fakeViolet {
 		byIdempotency: map[string]string{},
 		uploadedMedia: map[string]uploadedMedia{},
 		events:        make(chan string, 16),
+
+		tweets:           map[string]tweetDTO{},
+		tweetComments:    map[string][]commentDTO{},
+		tweetLikes:       map[string]bool{},
+		tweetIdempotency: map[string]string{},
 	}
 	fake.addConversation(testDirectRoom, kindDirect)
 	fake.addConversation(testGroupRoom, kindRoom)
@@ -173,16 +219,28 @@ func (f *fakeViolet) addUploadedImage(id, mimeType string, bytes []byte) {
 
 // pushEvent 向 SSE 通道写一帧 message.created。
 func (f *fakeViolet) pushEvent(message messageDTO) {
-	payload, err := json.Marshal(eventFrame{
-		Type:       eventMessageCreated,
-		Version:    1,
-		OccurredAt: message.CreatedAt,
-		Data:       eventPayload{ConversationID: message.ConversationID, Message: message},
-	})
+	payload, err := json.Marshal(eventPayload{ConversationID: message.ConversationID, Message: message})
+	if err != nil {
+		f.t.Fatalf("编码测试事件负载失败: %v", err)
+	}
+	frame, err := json.Marshal(eventFrame{Type: eventMessageCreated, Version: 1, OccurredAt: message.CreatedAt, Data: payload})
 	if err != nil {
 		f.t.Fatalf("编码测试事件失败: %v", err)
 	}
-	f.events <- string(payload)
+	f.events <- string(frame)
+}
+
+// pushTweetEvent 向 SSE 通道写一帧推文事件；payload 按事件契约由调用方构造。
+func (f *fakeViolet) pushTweetEvent(eventType string, payload any) {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		f.t.Fatalf("编码测试推文事件负载失败: %v", err)
+	}
+	frame, err := json.Marshal(eventFrame{Type: eventType, Version: 1, Data: encoded})
+	if err != nil {
+		f.t.Fatalf("编码测试推文事件失败: %v", err)
+	}
+	f.events <- string(frame)
 }
 
 // closeEvents 结束当前事件流，用于模拟断线。
@@ -267,6 +325,11 @@ func (f *fakeViolet) uploadedMediaRecords() []uploadedMedia {
 
 // setAuthFailure 让所有请求在未携带正确 token 时返回 401。
 func (f *fakeViolet) serve(w http.ResponseWriter, r *http.Request) {
+	// 推文端点与聊天端点不同前缀：公开读免鉴权，写端点单独验 Bearer token。
+	if strings.HasPrefix(r.URL.Path, publicTweetAPIPrefix) {
+		f.serveTweet(w, r)
+		return
+	}
 	path := strings.TrimPrefix(r.URL.Path, apiPrefix)
 	// /uploads/* 是公开读取路径，不经 BotAuth，须在鉴权前放行。
 	if strings.HasPrefix(path, "/uploads/") && r.Method == http.MethodGet {
@@ -624,10 +687,424 @@ func (f *fakeViolet) serveEvents(w http.ResponseWriter, r *http.Request) {
 			if !open {
 				return
 			}
-			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventMessageCreated, data)
+			// 帧内 type 与 event: 行同源；推文事件必须原样转发，否则接入端只看到 message.created。
+			eventName := eventMessageCreated
+			var frame struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal([]byte(data), &frame) == nil && frame.Type != "" {
+				eventName = frame.Type
+			}
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventName, data)
 			flusher.Flush()
 		}
 	}
+}
+
+// serveTweet 路由推文端点：bot 命名空间要求 Bearer token，公开读端点免鉴权。
+func (f *fakeViolet) serveTweet(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	bot := strings.HasPrefix(path, tweetAPIPrefix)
+	if bot && r.Header.Get("Authorization") != "Bearer "+testToken {
+		writeAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "缺少或无效的 Bot Token")
+		return
+	}
+	f.mu.Lock()
+	f.tweetCalls = append(f.tweetCalls, r.Method+" "+r.URL.RequestURI())
+	if !bot {
+		f.tweetPublicAuth = append(f.tweetPublicAuth, r.Header.Get("Authorization"))
+	}
+	f.mu.Unlock()
+	if bot {
+		f.serveBotTweet(w, r, strings.TrimPrefix(path, tweetAPIPrefix))
+		return
+	}
+	f.servePublicTweet(w, r, strings.TrimPrefix(path, publicTweetAPIPrefix))
+}
+
+// splitTweetPath 把 /a/b/c 拆成 [a b c]；空路径返回空切片。
+func splitTweetPath(rest string) []string {
+	trimmed := strings.Trim(rest, "/")
+	if trimmed == "" {
+		return nil
+	}
+	return strings.Split(trimmed, "/")
+}
+
+// requireUUIDKeyHeader 复现 Violet 对 Idempotency-Key 的 UUID 校验。
+func requireUUIDKeyHeader(w http.ResponseWriter, r *http.Request) (string, bool) {
+	key := r.Header.Get("Idempotency-Key")
+	if _, err := uuid.Parse(key); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "Idempotency-Key 必须是 UUID")
+		return "", false
+	}
+	return key, true
+}
+
+// serveBotTweet 处理 bot 推文写端点，路径已去掉 /api/v1/tweets/bot。
+func (f *fakeViolet) serveBotTweet(w http.ResponseWriter, r *http.Request, rest string) {
+	segments := splitTweetPath(rest)
+	switch {
+	case len(segments) == 0 && r.Method == http.MethodPost:
+		f.createTweet(w, r)
+	case len(segments) == 1 && segments[0] == "media" && r.Method == http.MethodPost:
+		f.uploadTweetMedia(w, r)
+	case len(segments) == 2 && segments[1] == "comments" && r.Method == http.MethodPost:
+		f.createTweetComment(w, r, segments[0])
+	case len(segments) == 3 && segments[1] == "comments" && r.Method == http.MethodDelete:
+		f.deleteTweetComment(w, segments[0], segments[2])
+	case len(segments) == 2 && segments[1] == "like" && (r.Method == http.MethodPost || r.Method == http.MethodDelete):
+		f.likeTweet(w, r, segments[0])
+	case len(segments) == 1 && r.Method == http.MethodDelete:
+		f.deleteTweet(w, segments[0])
+	default:
+		writeAPIError(w, http.StatusNotFound, "NOT_FOUND", r.Method+" "+r.URL.Path+" 未实现")
+	}
+}
+
+// createTweet 发布推文：校验 UUID 幂等键与内容，并按同键返回同一条推文。
+func (f *fakeViolet) createTweet(w http.ResponseWriter, r *http.Request) {
+	key, ok := requireUUIDKeyHeader(w, r)
+	if !ok {
+		return
+	}
+	var body newTweetRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+		return
+	}
+	if strings.TrimSpace(body.Content) == "" && len(body.Images) == 0 && body.QuoteOf == "" {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "推文缺少正文、图片与引用对象")
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if existing, found := f.tweetIdempotency["tweet:"+key]; found {
+		writeAPIData(w, http.StatusCreated, f.tweets[existing])
+		return
+	}
+	id := fmt.Sprintf("tweet-%d", len(f.tweets)+1)
+	created := tweetDTO{
+		ID:        id,
+		Author:    tweetAuthorDTO{ID: testBotUserID, Username: testBotUsername, IsBot: true},
+		Content:   body.Content,
+		QuoteOf:   body.QuoteOf,
+		CreatedAt: time.Now().Format(time.RFC3339Nano),
+	}
+	for _, imageURL := range body.Images {
+		created.Images = append(created.Images, tweetImageDTO{URL: imageURL})
+	}
+	if body.QuoteOf != "" {
+		if quoted, found := f.tweets[body.QuoteOf]; found {
+			snapshot := quoted
+			created.QuotedTweet = &snapshot
+		}
+	}
+	f.tweets[id] = created
+	f.tweetIdempotency["tweet:"+key] = id
+	f.tweetPosts = append(f.tweetPosts, tweetPost{Path: r.URL.Path, Content: body.Content, Images: body.Images, QuoteOf: body.QuoteOf, Idempotency: key})
+	writeAPIData(w, http.StatusCreated, created)
+}
+
+// createTweetComment 发布评论：校验父评论存在，并按同键返回同一条评论。
+func (f *fakeViolet) createTweetComment(w http.ResponseWriter, r *http.Request, tweetID string) {
+	key, ok := requireUUIDKeyHeader(w, r)
+	if !ok {
+		return
+	}
+	var body newCommentRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+		return
+	}
+	if strings.TrimSpace(body.Body) == "" && len(body.Pictures) == 0 {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "评论缺少正文与图片")
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	tweet, found := f.tweets[tweetID]
+	if !found {
+		writeAPIError(w, http.StatusNotFound, "NOT_FOUND", "推文不存在")
+		return
+	}
+	if existing, seen := f.tweetIdempotency["comment:"+key]; seen {
+		for _, comment := range f.tweetComments[tweetID] {
+			if comment.ID == existing {
+				writeAPIData(w, http.StatusCreated, comment)
+				return
+			}
+		}
+	}
+	depth := 0
+	if body.ParentID != "" {
+		parentFound := false
+		for index := range f.tweetComments[tweetID] {
+			if f.tweetComments[tweetID][index].ID != body.ParentID {
+				continue
+			}
+			depth = f.tweetComments[tweetID][index].Depth + 1
+			f.tweetComments[tweetID][index].RepliesCount++
+			parentFound = true
+			break
+		}
+		if !parentFound {
+			writeAPIError(w, http.StatusNotFound, "NOT_FOUND", "父评论不存在")
+			return
+		}
+	}
+	f.tweetCommentSeq++
+	created := commentDTO{
+		ID:        fmt.Sprintf("comment-%d", f.tweetCommentSeq),
+		TweetID:   tweetID,
+		Author:    tweetAuthorDTO{ID: testBotUserID, Username: testBotUsername, IsBot: true},
+		Body:      body.Body,
+		Pictures:  body.Pictures,
+		ParentID:  body.ParentID,
+		Depth:     depth,
+		CreatedAt: time.Now().Format(time.RFC3339Nano),
+	}
+	f.tweetComments[tweetID] = append(f.tweetComments[tweetID], created)
+	tweet.CommentCount++
+	f.tweets[tweetID] = tweet
+	f.tweetIdempotency["comment:"+key] = created.ID
+	f.tweetCommentPosts = append(f.tweetCommentPosts, tweetCommentPost{Path: r.URL.Path, TweetID: tweetID, ParentID: body.ParentID, Body: body.Body, Pictures: body.Pictures, Idempotency: key})
+	writeAPIData(w, http.StatusCreated, created)
+}
+
+// likeTweet 设置或取消点赞。
+func (f *fakeViolet) likeTweet(w http.ResponseWriter, r *http.Request, tweetID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	tweet, found := f.tweets[tweetID]
+	if !found {
+		writeAPIError(w, http.StatusNotFound, "NOT_FOUND", "推文不存在")
+		return
+	}
+	if r.Method == http.MethodPost {
+		if !f.tweetLikes[tweetID] {
+			tweet.LikeCount++
+		}
+		f.tweetLikes[tweetID] = true
+	} else {
+		if f.tweetLikes[tweetID] {
+			tweet.LikeCount--
+		}
+		delete(f.tweetLikes, tweetID)
+	}
+	f.tweets[tweetID] = tweet
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteTweet 删除推文。
+func (f *fakeViolet) deleteTweet(w http.ResponseWriter, tweetID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, found := f.tweets[tweetID]; !found {
+		writeAPIError(w, http.StatusNotFound, "NOT_FOUND", "推文不存在")
+		return
+	}
+	delete(f.tweets, tweetID)
+	f.tweetDeleted = append(f.tweetDeleted, tweetID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteTweetComment 删除评论。
+func (f *fakeViolet) deleteTweetComment(w http.ResponseWriter, tweetID, commentID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	comments := f.tweetComments[tweetID]
+	for index, comment := range comments {
+		if comment.ID != commentID {
+			continue
+		}
+		f.tweetComments[tweetID] = append(comments[:index], comments[index+1:]...)
+		if tweet, found := f.tweets[tweetID]; found && tweet.CommentCount > 0 {
+			tweet.CommentCount--
+			f.tweets[tweetID] = tweet
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeAPIError(w, http.StatusNotFound, "NOT_FOUND", "评论不存在")
+}
+
+// uploadTweetMedia 处理推文图片上传，与聊天媒体上传共用一套校验口径。
+func (f *fakeViolet) uploadTweetMedia(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "Content-Type 必须是 multipart/form-data")
+		return
+	}
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "解析 multipart 失败: "+err.Error())
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "缺少 file 字段")
+		return
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "INTERNAL", "读取上传字节失败")
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := fmt.Sprintf("tweet-media-%d", len(f.tweetUploads)+1)
+	mimeType := header.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	record := uploadedMedia{ID: id, URL: "/uploads/" + id, MIMEType: mimeType, Filename: header.Filename, Bytes: data, Size: int64(len(data))}
+	if config, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
+		record.Width, record.Height = config.Width, config.Height
+	}
+	f.tweetUploads = append(f.tweetUploads, record)
+	writeAPIData(w, http.StatusCreated, mediaUploadDTO{
+		ID: record.ID, URL: record.URL, MIMEType: record.MIMEType,
+		Width: record.Width, Height: record.Height, Size: record.Size,
+	})
+}
+
+// servePublicTweet 处理公开读端点，路径已去掉 /api/v1/tweets。
+func (f *fakeViolet) servePublicTweet(w http.ResponseWriter, r *http.Request, rest string) {
+	if r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusNotFound, "NOT_FOUND", r.Method+" "+r.URL.Path+" 未实现")
+		return
+	}
+	segments := splitTweetPath(rest)
+	if len(segments) == 0 {
+		writeAPIError(w, http.StatusNotFound, "NOT_FOUND", "推文路径为空")
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	tweet, found := f.tweets[segments[0]]
+	if !found {
+		writeAPIError(w, http.StatusNotFound, "NOT_FOUND", "推文不存在")
+		return
+	}
+	switch {
+	case len(segments) == 1:
+		writeAPIData(w, http.StatusOK, tweet)
+	case len(segments) == 2 && segments[1] == "comments":
+		writeAPIData(w, http.StatusOK, f.filteredComments(segments[0], "", commentLimit(r)))
+	case len(segments) == 4 && segments[1] == "comments" && segments[3] == "replies":
+		writeAPIData(w, http.StatusOK, f.filteredComments(segments[0], segments[2], commentLimit(r)))
+	default:
+		writeAPIError(w, http.StatusNotFound, "NOT_FOUND", r.Method+" "+r.URL.Path+" 未实现")
+	}
+}
+
+// filteredComments 按父评论过滤；parentID 为空取顶层评论。调用方必须持有锁。
+func (f *fakeViolet) filteredComments(tweetID, parentID string, limit int) []commentDTO {
+	out := make([]commentDTO, 0, len(f.tweetComments[tweetID]))
+	for _, comment := range f.tweetComments[tweetID] {
+		if comment.ParentID != parentID {
+			continue
+		}
+		out = append(out, comment)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+// commentLimit 解析公开读的 limit 参数，缺省 20。
+func commentLimit(r *http.Request) int {
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit <= 0 {
+		return 20
+	}
+	return limit
+}
+
+// addTweet 登记一条已存在的推文，供公开读与引用关系使用。
+func (f *fakeViolet) addTweet(tweet tweetDTO) tweetDTO {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if tweet.ID == "" {
+		tweet.ID = fmt.Sprintf("tweet-%d", len(f.tweets)+1)
+	}
+	if tweet.CreatedAt == "" {
+		tweet.CreatedAt = time.Now().Format(time.RFC3339Nano)
+	}
+	f.tweets[tweet.ID] = tweet
+	return tweet
+}
+
+// addTweetComment 登记一条已存在的评论。
+func (f *fakeViolet) addTweetComment(comment commentDTO) commentDTO {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if comment.ID == "" {
+		f.tweetCommentSeq++
+		comment.ID = fmt.Sprintf("comment-%d", f.tweetCommentSeq)
+	}
+	if comment.CreatedAt == "" {
+		comment.CreatedAt = time.Now().Format(time.RFC3339Nano)
+	}
+	f.tweetComments[comment.TweetID] = append(f.tweetComments[comment.TweetID], comment)
+	return comment
+}
+
+// tweetPostRecords 返回 bot 发推记录快照。
+func (f *fakeViolet) tweetPostRecords() []tweetPost {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]tweetPost(nil), f.tweetPosts...)
+}
+
+// tweetCommentRecords 返回 bot 发评论记录快照。
+func (f *fakeViolet) tweetCommentRecords() []tweetCommentPost {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]tweetCommentPost(nil), f.tweetCommentPosts...)
+}
+
+// tweetCallRecords 返回推文端点调用记录快照。
+func (f *fakeViolet) tweetCallRecords() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.tweetCalls...)
+}
+
+// tweetPublicAuthRecords 返回公开读端点收到的 Authorization 头快照。
+func (f *fakeViolet) tweetPublicAuthRecords() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.tweetPublicAuth...)
+}
+
+// tweetLikeState 返回当前点赞状态。
+func (f *fakeViolet) tweetLikeState(tweetID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.tweetLikes[tweetID]
+}
+
+// tweetDeletedRecords 返回被删除的推文 ID 快照。
+func (f *fakeViolet) tweetDeletedRecords() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.tweetDeleted...)
+}
+
+// tweetUploadedRecords 返回推文图片上传记录快照。
+func (f *fakeViolet) tweetUploadedRecords() []uploadedMedia {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]uploadedMedia(nil), f.tweetUploads...)
+}
+
+// commentsFor 返回某推文下的评论快照（含回复）。
+func (f *fakeViolet) commentsFor(tweetID string) []commentDTO {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]commentDTO(nil), f.tweetComments[tweetID]...)
 }
 
 // writeAPIData 按 Violet 的信封格式写响应。
@@ -664,15 +1141,13 @@ func writeAPIError(w http.ResponseWriter, status int, code, message string) {
 // newTestConfig 构造指向假服务端的完整配置。
 func newTestConfig(endpoint string) *config.Config {
 	cfg := config.DefaultConfig()
-	cfg.Platforms.Violet = config.VioletConfig{
-		Enabled:               true,
-		Endpoint:              endpoint,
-		BotToken:              testToken,
-		DirectChatAutoReply:   true,
-		GroupChatMentionReply: true,
-		EditIntervalMs:        int(testEditInterval / time.Millisecond),
-		HTTPTimeoutSeconds:    5,
-	}
+	violet := config.DefaultVioletConfig()
+	violet.Enabled = true
+	violet.Endpoint = endpoint
+	violet.BotToken = testToken
+	violet.EditIntervalMs = int(testEditInterval / time.Millisecond)
+	violet.HTTPTimeoutSeconds = 5
+	cfg.Platforms.Violet = violet
 	return cfg
 }
 

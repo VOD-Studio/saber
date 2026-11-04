@@ -1110,6 +1110,15 @@ platforms:
     enabled: false # Matrix 聊天入口，账号等明细在顶层 matrix: 配置
   violet:
     enabled: false # Violet Bot API 接入，凭据在 Violet 管理端签发
+    tweets: # 推文互动：有人评论或引用 bot 的推文时组织一次模型回合
+      enabled: false # 默认关闭，避免上线即自动回评
+      reply_to_comments: true # 回应推文评论与评论下的追问
+      reply_to_quotes: true # 回应对本人推文的引用
+      reply_timeout_seconds: 120 # 单次推文回合超时（1..3600 秒）
+      max_content_runes: 480 # 评论正文上限（Unicode 字符，1..500）
+      max_images_per_tweet: 4 # 单条推文配图上限（0..4）
+      max_posts_per_day: 8 # 每日主动发帖上限（≥1）
+      min_post_interval_minutes: 30 # 两次主动发帖最小间隔（分钟，≥0）
   telegram:
     enabled: false # 默认关闭；getUpdates 长轮询，无需公网回调
     bot_token: "" # BotFather 签发的 token，形如 123456:ABC-DEF

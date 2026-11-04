@@ -134,3 +134,127 @@ func TestVioletConfig_EffectiveAccount(t *testing.T) {
 		t.Fatalf("EffectiveAccount = %q, want violet", got)
 	}
 }
+
+// TestVioletTweetsConfig_Defaults 固定推文互动的默认值与有效值回退规则。
+func TestVioletTweetsConfig_Defaults(t *testing.T) {
+	t.Parallel()
+	cfg := DefaultVioletTweetsConfig()
+	if cfg.Enabled {
+		t.Fatal("推文互动默认应关闭")
+	}
+	if !cfg.ReplyToComments || !cfg.ReplyToQuotes {
+		t.Fatalf("两种回复开关默认应开启: %+v", cfg)
+	}
+	if cfg.ReplyTimeoutSeconds != 120 || cfg.MaxContentRunes != 480 || cfg.MaxImagesPerTweet != 4 ||
+		cfg.MaxPostsPerDay != 8 || cfg.MinPostIntervalMinutes != 30 {
+		t.Fatalf("推文默认值不符: %+v", cfg)
+	}
+	if got := cfg.EffectiveReplyTimeout(); got.Seconds() != 120 {
+		t.Fatalf("EffectiveReplyTimeout = %v", got)
+	}
+	if got := cfg.EffectiveMaxContentRunes(); got != 480 {
+		t.Fatalf("EffectiveMaxContentRunes = %d", got)
+	}
+	zero := VioletTweetsConfig{}
+	if zero.EffectiveReplyTimeout().Seconds() != 120 || zero.EffectiveMaxContentRunes() != 480 {
+		t.Fatalf("零值未回退默认: %v / %d", zero.EffectiveReplyTimeout(), zero.EffectiveMaxContentRunes())
+	}
+	custom := VioletTweetsConfig{ReplyTimeoutSeconds: 30, MaxContentRunes: 200}
+	if custom.EffectiveReplyTimeout().Seconds() != 30 || custom.EffectiveMaxContentRunes() != 200 {
+		t.Fatalf("显式值被覆盖: %v / %d", custom.EffectiveReplyTimeout(), custom.EffectiveMaxContentRunes())
+	}
+}
+
+// TestVioletTweetsConfig_Validate 验证负数始终拒绝，启用时再校验完整范围。
+func TestVioletTweetsConfig_Validate(t *testing.T) {
+	t.Parallel()
+	defaults := DefaultVioletTweetsConfig()
+	if err := defaults.Validate(); err != nil {
+		t.Fatalf("默认推文配置应合法: %v", err)
+	}
+	zero := VioletTweetsConfig{}
+	if err := zero.Validate(); err != nil {
+		t.Fatalf("未启用时零值应合法: %v", err)
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*VioletTweetsConfig)
+	}{
+		{"负超时", func(c *VioletTweetsConfig) { c.ReplyTimeoutSeconds = -1 }},
+		{"负正文上限", func(c *VioletTweetsConfig) { c.MaxContentRunes = -1 }},
+		{"负图片上限", func(c *VioletTweetsConfig) { c.MaxImagesPerTweet = -1 }},
+		{"负发帖上限", func(c *VioletTweetsConfig) { c.MaxPostsPerDay = -1 }},
+		{"负发帖间隔", func(c *VioletTweetsConfig) { c.MinPostIntervalMinutes = -1 }},
+	} {
+		t.Run("未启用/"+tc.name, func(t *testing.T) {
+			cfg := DefaultVioletTweetsConfig()
+			cfg.Enabled = false
+			tc.mutate(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatalf("负数应被拒绝: %+v", cfg)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name    string
+		mutate  func(*VioletTweetsConfig)
+		wantErr string
+	}{
+		{"超时为零", func(c *VioletTweetsConfig) { c.ReplyTimeoutSeconds = 0 }, "reply_timeout_seconds"},
+		{"超时过大", func(c *VioletTweetsConfig) { c.ReplyTimeoutSeconds = 3601 }, "reply_timeout_seconds"},
+		{"正文为零", func(c *VioletTweetsConfig) { c.MaxContentRunes = 0 }, "max_content_runes"},
+		{"正文超上限", func(c *VioletTweetsConfig) { c.MaxContentRunes = 501 }, "max_content_runes"},
+		{"图片超上限", func(c *VioletTweetsConfig) { c.MaxImagesPerTweet = 5 }, "max_images_per_tweet"},
+		{"发帖上限为零", func(c *VioletTweetsConfig) { c.MaxPostsPerDay = 0 }, "max_posts_per_day"},
+	} {
+		t.Run("启用/"+tc.name, func(t *testing.T) {
+			cfg := DefaultVioletTweetsConfig()
+			cfg.Enabled = true
+			tc.mutate(&cfg)
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatalf("越界配置应被拒绝: %+v", cfg)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("错误 %q 未包含 %q", err, tc.wantErr)
+			}
+		})
+	}
+	noImages := DefaultVioletTweetsConfig()
+	noImages.Enabled = true
+	noImages.MaxImagesPerTweet = 0
+	if err := noImages.Validate(); err != nil {
+		t.Fatalf("max_images_per_tweet: 0 表示不允许配图，应合法: %v", err)
+	}
+	bounds := DefaultVioletTweetsConfig()
+	bounds.Enabled = true
+	bounds.ReplyTimeoutSeconds = 1
+	bounds.MaxContentRunes = 500
+	bounds.MaxImagesPerTweet = 4
+	if err := bounds.Validate(); err != nil {
+		t.Fatalf("边界值应合法: %v", err)
+	}
+}
+
+// TestLoad_VioletTweetsSection 验证 tweets: 子节按字段覆盖默认值，
+// 并且未出现的字段保留默认（解码目标来自 DefaultConfig）。
+func TestLoad_VioletTweetsSection(t *testing.T) {
+	t.Parallel()
+	cfg, err := Load(writeFileConfig(t, "platforms:\n  violet:\n    enabled: true\n    endpoint: https://blog.example.com\n    bot_token: violet_bot_xxx\n    tweets:\n      enabled: true\n      reply_to_quotes: false\n      max_content_runes: 320\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tweets := cfg.Platforms.Violet.Tweets
+	if !tweets.Enabled || tweets.ReplyToQuotes || !tweets.ReplyToComments {
+		t.Fatalf("推文开关未按 YAML 生效: %+v", tweets)
+	}
+	if tweets.MaxContentRunes != 320 {
+		t.Fatalf("max_content_runes = %d, want 320", tweets.MaxContentRunes)
+	}
+	if tweets.ReplyTimeoutSeconds != 120 || tweets.MaxImagesPerTweet != 4 || tweets.MaxPostsPerDay != 8 || tweets.MinPostIntervalMinutes != 30 {
+		t.Fatalf("缺省推文字段应保留默认值: %+v", tweets)
+	}
+	if err := cfg.Platforms.Violet.Validate(); err != nil {
+		t.Fatalf("合法推文配置校验失败: %v", err)
+	}
+}

@@ -148,14 +148,17 @@ type errorBody struct {
 }
 
 // eventFrame 是 SSE 事件信封。ID 恒为空：bot 流不写 id: 行，也不支持续传。
+//
+// Data 保留原始 JSON：聊天事件与推文事件的负载形状完全不同，
+// 先解成统一结构会让其中一类永远读不到字段；由 handleFrame 按事件名分别解码。
 type eventFrame struct {
-	Type       string       `json:"type"`
-	Version    int          `json:"version"`
-	OccurredAt string       `json:"occurred_at"`
-	Data       eventPayload `json:"data"`
+	Type       string          `json:"type"`
+	Version    int             `json:"version"`
+	OccurredAt string          `json:"occurred_at"`
+	Data       json.RawMessage `json:"data"`
 }
 
-// eventPayload 合并两类事件的字段：message.created 用 conversation_id + message，
+// eventPayload 合并两类聊天事件的字段：message.created 用 conversation_id + message，
 // typing.updated 用 conversation_id + user_id + is_typing。
 type eventPayload struct {
 	ConversationID string     `json:"conversation_id"`
@@ -164,8 +167,106 @@ type eventPayload struct {
 	IsTyping       bool       `json:"is_typing"`
 }
 
+// tweetAuthorDTO 是推文与评论作者的公开资料；is_bot 用于跳过自己或同类机器人。
+type tweetAuthorDTO struct {
+	ID          string `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	AvatarURL   string `json:"avatar_url"`
+	IsBot       bool   `json:"is_bot"`
+}
+
+// tweetImageDTO 是推文配图的定位信息。
+type tweetImageDTO struct {
+	URL    string `json:"url"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+// tweetPictureDTO 是评论配图，额外带字节大小。
+type tweetPictureDTO struct {
+	URL    string `json:"url"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	Size   int64  `json:"size"`
+}
+
+// tweetDTO 对应 TweetDTO：SSE 事件、公开读接口与写接口共用同一形状。
+// 可选字段（显示名、头像、引用快照）缺失时保持零值，不视为解析失败。
+type tweetDTO struct {
+	ID           string          `json:"id"`
+	Author       tweetAuthorDTO  `json:"author"`
+	Content      string          `json:"content"`
+	Images       []tweetImageDTO `json:"images,omitempty"`
+	LikeCount    int             `json:"like_count"`
+	IsLiked      bool            `json:"is_liked"`
+	CommentCount int             `json:"comment_count"`
+	QuoteCount   int             `json:"quote_count"`
+	QuoteOf      string          `json:"quote_of"`
+	QuotedTweet  *tweetDTO       `json:"quoted_tweet,omitempty"`
+	CreatedAt    string          `json:"created_at"`
+}
+
+// commentDTO 对应 CommentDTO：parent_id 非空表示对另一条评论的回复。
+type commentDTO struct {
+	ID           string            `json:"id"`
+	TweetID      string            `json:"tweet_id"`
+	Author       tweetAuthorDTO    `json:"author"`
+	Body         string            `json:"body"`
+	Pictures     []tweetPictureDTO `json:"pictures,omitempty"`
+	ParentID     string            `json:"parent_id"`
+	Depth        int               `json:"depth"`
+	RepliesCount int               `json:"replies_count"`
+	CreatedAt    string            `json:"created_at"`
+}
+
+// tweetCommentedPayload 对应 tweet.commented：
+// reason 区分「评论了 bot 的推文」与「回复了推文下的某条评论」。
+type tweetCommentedPayload struct {
+	Reason  string     `json:"reason"`
+	Tweet   tweetDTO   `json:"tweet"`
+	Comment commentDTO `json:"comment"`
+}
+
+// tweetQuotedPayload 对应 tweet.quoted：quoted_tweet 是本人被引用的推文，
+// quote 是那条新发布的引用推文（也是回复要落到的目标）。
+type tweetQuotedPayload struct {
+	QuotedTweet tweetDTO `json:"quoted_tweet"`
+	Quote       tweetDTO `json:"quote"`
+}
+
+// tweetLikedPayload 对应 tweet.liked：只用于记录，不触发模型回合。
+type tweetLikedPayload struct {
+	Tweet tweetDTO       `json:"tweet"`
+	Actor tweetAuthorDTO `json:"actor"`
+}
+
+// newTweetRequest 是 POST /tweets/bot 的请求体。
+type newTweetRequest struct {
+	Content string   `json:"content,omitempty"`
+	Images  []string `json:"images,omitempty"`
+	QuoteOf string   `json:"quote_of,omitempty"`
+}
+
+// newCommentRequest 是 POST /tweets/bot/{id}/comments 的请求体。
+type newCommentRequest struct {
+	Body     string            `json:"body,omitempty"`
+	Pictures []tweetPictureDTO `json:"pictures,omitempty"`
+	ParentID string            `json:"parent_id,omitempty"`
+}
+
 // SSE 事件名，与 Violet 写帧用的事件类型一致。
 const (
 	eventMessageCreated = "message.created"
 	eventTypingUpdated  = "typing.updated"
+
+	eventTweetCommented = "tweet.commented"
+	eventTweetQuoted    = "tweet.quoted"
+	eventTweetLiked     = "tweet.liked"
+)
+
+// tweet.commented 的 reason 取值，与 Violet 的事件契约一致。
+const (
+	tweetReasonCommentOnTweet = "comment_on_tweet"
+	tweetReasonReplyToComment = "reply_to_comment"
 )

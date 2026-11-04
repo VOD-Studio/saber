@@ -47,3 +47,29 @@ func TestMessageCommandText(t *testing.T) {
 		})
 	}
 }
+
+// TestMessageContextIsNotCommandText 验证平台上下文只用于理解场景：
+// 它不参与命令识别，也不影响正文必填校验。
+func TestMessageContextIsNotCommandText(t *testing.T) {
+	message := chat.Message{
+		Session:  chat.Session{Platform: "violet", Account: "site", Conversation: "tweet:1"},
+		ID:       "comment-1",
+		SenderID: "user-1",
+		Text:     "这个观点怎么解释？",
+		Context:  "[Violet 推文互动]\n事件: tweet.commented\n[/Violet 推文互动]",
+	}
+	if got := message.CommandText(); got != "这个观点怎么解释？" {
+		t.Fatalf("CommandText 不应包含平台上下文: %q", got)
+	}
+	if err := message.Validate(); err != nil {
+		t.Fatalf("带上下文的消息应通过校验: %v", err)
+	}
+	empty := chat.Message{
+		Session:  message.Session,
+		SenderID: "user-1",
+		Context:  "只有上下文没有正文",
+	}
+	if err := empty.Validate(); err == nil {
+		t.Fatal("上下文不能替代正文让空消息通过校验")
+	}
+}

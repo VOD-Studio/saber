@@ -42,6 +42,12 @@ const (
 	inboundMessageType = "text"
 	// inboundMessageTypeImage 是入站图片消息的 Type 值，与 Violet domain 的 MessageImage 一致。
 	inboundMessageTypeImage = "image"
+	// tweetQueueSize 是推文互动的有界缓冲：一次推文回合可能跑几分钟，队列只为
+	// 吸收突发流量而存在，满了按「流可丢帧」的约定丢弃并记警告。
+	tweetQueueSize = 16
+	// tweetWorkers 是推文互动的并发度。Violet 侧限流按 bot 计，单 worker 顺序
+	// 回评既能守住写配额，也让同一时间的公开评论不至于互相抢话。
+	tweetWorkers = 1
 )
 
 // inbound 是一条待处理的入站消息与其所属会话。
@@ -65,8 +71,18 @@ type Platform struct {
 	seen     *seenMessages
 	commands []command.Descriptor
 
+	// seenTweets 是推文互动的去重集，键带事件前缀，与聊天消息集互不干扰：
+	// 两套事件的 ID 空间不同，混用只会让某一边的 ID 偶然命中。
+	seenTweets *seenMessages
+	// tweetQueue 是推文互动的独立队列，worker 从里面取回合处理。
+	tweetQueue chan tweetReply
+
 	// handler 是共享聊天链路，由 Start 注入。
 	handler chat.Handler
+	// tweetHandler 是推文互动的处理入口，由 SetTweetHandler 注入。
+	// 与聊天入口分开：推文回合的出站通道是公开评论，不是会话消息。
+	tweetHandler chat.Handler
+	tweetMu      sync.RWMutex
 	// queue 是入站消息的有界缓冲，worker 从中取消息处理。
 	queue chan inbound
 	// cancel 结束事件流与 worker，Stop 使用。
@@ -82,6 +98,21 @@ type Platform struct {
 	identity   botProfileDTO
 }
 
+// SetTweetHandler 设置推文互动的处理入口。可在 Start 前后任意时刻调用：
+// 推文回合与聊天回合走同一份 handler 契约，但出站 adapter 不同。
+func (p *Platform) SetTweetHandler(handler chat.Handler) {
+	p.tweetMu.Lock()
+	defer p.tweetMu.Unlock()
+	p.tweetHandler = handler
+}
+
+// currentTweetHandler 读取推文处理入口快照。
+func (p *Platform) currentTweetHandler() chat.Handler {
+	p.tweetMu.RLock()
+	defer p.tweetMu.RUnlock()
+	return p.tweetHandler
+}
+
 // SetCommands 设置启动与重连时发布的完整目录快照。
 func (p *Platform) SetCommands(commands []command.Descriptor) {
 	p.commands = append([]command.Descriptor(nil), commands...)
@@ -91,8 +122,9 @@ func (p *Platform) SetCommands(commands []command.Descriptor) {
 // 因此配置非法时错误留到 Start 才报，装配阶段可以先注册再启动。
 func New(cfg *config.Config) *Platform {
 	platformValue := &Platform{
-		states: newConversationStates(defaultStateCapacity),
-		seen:   newSeenMessages(defaultSeenCapacity),
+		states:     newConversationStates(defaultStateCapacity),
+		seen:       newSeenMessages(defaultSeenCapacity),
+		seenTweets: newSeenMessages(defaultSeenCapacity),
 	}
 	if cfg == nil {
 		return platformValue
@@ -132,14 +164,16 @@ func (p *Platform) Start(ctx context.Context, handler chat.Handler) error {
 	}
 	p.handler = handler
 	p.queue = make(chan inbound, inboundQueueSize)
+	p.tweetQueue = make(chan tweetReply, tweetQueueSize)
 	runCtx, cancel := context.WithCancel(ctx)
 	p.cancel = cancel
-	p.wg.Add(1 + inboundWorkers)
+	p.wg.Add(1 + inboundWorkers + tweetWorkers)
 	go p.supervise(runCtx)
-	for worker := 0; worker < inboundWorkers; worker++ {
+	for range inboundWorkers {
 		go p.work(runCtx)
 	}
-	slog.Info("violet 平台已启动", "endpoint", p.violet.Endpoint, "account", p.adapter.account)
+	go p.workTweets(runCtx)
+	slog.Info("violet 平台已启动", "endpoint", p.violet.Endpoint, "account", p.adapter.account, "tweets", p.violet.Tweets.Enabled)
 	return nil
 }
 
@@ -270,17 +304,28 @@ func (p *Platform) handleFrame(ctx context.Context, frame sseFrame) error {
 	}
 	switch name {
 	case eventMessageCreated:
-		conversationID := event.Data.ConversationID
-		if conversationID == "" {
-			conversationID = event.Data.Message.ConversationID
-		}
-		if conversationID == "" {
-			slog.Warn("violet 消息事件缺少会话标识，已忽略", "message", event.Data.Message.ID)
+		var payload eventPayload
+		if err := json.Unmarshal(event.Data, &payload); err != nil {
+			slog.Warn("解析 violet 消息事件失败", "event", name, "error", err)
 			return nil
 		}
-		p.enqueue(ctx, conversationID, event.Data.Message)
+		conversationID := payload.ConversationID
+		if conversationID == "" {
+			conversationID = payload.Message.ConversationID
+		}
+		if conversationID == "" {
+			slog.Warn("violet 消息事件缺少会话标识，已忽略", "message", payload.Message.ID)
+			return nil
+		}
+		p.enqueue(ctx, conversationID, payload.Message)
 	case eventTypingUpdated:
 		// 他人的输入状态不影响是否回答，也不需要在出站侧反馈，显式忽略。
+	case eventTweetCommented:
+		p.handleTweetCommented(event.Data)
+	case eventTweetQuoted:
+		p.handleTweetQuoted(event.Data)
+	case eventTweetLiked:
+		p.handleTweetLiked(event.Data)
 	default:
 		slog.Debug("忽略未知 violet 事件", "event", name)
 	}

@@ -66,10 +66,14 @@ func clientStatus(err error) int {
 
 // client 是 Violet Bot API 的 HTTP 客户端。
 type client struct {
-	base   string
-	token  string
-	api    *http.Client // 普通请求，带总超时
-	stream *http.Client // SSE 长连接，不能设总超时，靠 idle 看门狗断开
+	// base 是站内聊天 Bot API 根路径；推文写端点与公开读端点各挂在另一组前缀下，
+	// 三者同源但鉴权要求不同，因此分开保存而不是每次现拼。
+	base            string
+	tweetBase       string
+	publicTweetBase string
+	token           string
+	api             *http.Client // 普通请求，带总超时
+	stream          *http.Client // SSE 长连接，不能设总超时，靠 idle 看门狗断开
 }
 
 // newClient 按配置构造客户端。endpoint 已由 config 校验过协议前缀，这里只做拼接。
@@ -87,11 +91,14 @@ func newClient(endpoint, token string, timeoutSeconds int) *client {
 	}
 	streamTransport := transport()
 	streamTransport.ResponseHeaderTimeout = timeout
+	root := strings.TrimSuffix(endpoint, "/")
 	return &client{
-		base:   strings.TrimSuffix(endpoint, "/") + apiPrefix,
-		token:  token,
-		api:    &http.Client{Timeout: timeout, Transport: transport()},
-		stream: &http.Client{Transport: streamTransport},
+		base:            root + apiPrefix,
+		tweetBase:       root + tweetAPIPrefix,
+		publicTweetBase: root + publicTweetAPIPrefix,
+		token:           token,
+		api:             &http.Client{Timeout: timeout, Transport: transport()},
+		stream:          &http.Client{Transport: streamTransport},
 	}
 }
 
@@ -312,13 +319,25 @@ func (c *client) openEvents(ctx context.Context) (io.ReadCloser, error) {
 
 // request 发一次请求并把 data 解到 out（out 为 nil 时忽略响应体）。
 func (c *client) request(ctx context.Context, method, path string, query url.Values, body any, idempotencyKey string, out any) error {
-	_, err := c.requestMeta(ctx, method, path, query, body, idempotencyKey, out)
+	return c.requestAt(ctx, c.base, true, method, path, query, body, idempotencyKey, out)
+}
+
+// requestAt 与 request 相同，但可指定 API 根路径与是否附带 Bot Token：
+// 推文写端点挂在另一组前缀下，公开读端点不需要鉴权。
+func (c *client) requestAt(ctx context.Context, base string, authorize bool, method, path string, query url.Values, body any, idempotencyKey string, out any) error {
+	_, err := c.requestMetaAt(ctx, base, authorize, method, path, query, body, idempotencyKey, out)
 	return err
 }
 
 // requestMeta 与 request 相同，但额外返回分页 meta，供游标翻页的端点使用。
 func (c *client) requestMeta(ctx context.Context, method, path string, query url.Values, body any, idempotencyKey string, out any) (*envelopeMeta, error) {
-	target := c.base + path
+	return c.requestMetaAt(ctx, c.base, true, method, path, query, body, idempotencyKey, out)
+}
+
+// requestMetaAt 是所有普通请求的唯一出口：拼地址、编码请求体、附带鉴权与幂等头，
+// 再把统一信封解到 out。错误一律保留状态码与 Violet 错误码。
+func (c *client) requestMetaAt(ctx context.Context, base string, authorize bool, method, path string, query url.Values, body any, idempotencyKey string, out any) (*envelopeMeta, error) {
+	target := base + path
 	if len(query) > 0 {
 		target += "?" + query.Encode()
 	}
@@ -334,7 +353,9 @@ func (c *client) requestMeta(ctx context.Context, method, path string, query url
 	if err != nil {
 		return nil, fmt.Errorf("构造 violet 请求失败: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	if authorize {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

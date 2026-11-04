@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // PlatformsConfig 集中管理可插拔聊天平台接入端的开关与平台专属参数。
@@ -35,15 +36,48 @@ type TerminalPlatformConfig struct {
 // Violet 以 bot 虚拟用户身份收发站内聊天，凭据由 Violet 管理端
 // （/admin/chat-bots）签发，Saber 侧只持有 endpoint 与 bot_token。
 type VioletConfig struct {
-	Enabled               bool   `yaml:"enabled"`                  // 是否启用 Violet 接入
-	Endpoint              string `yaml:"endpoint"`                 // Violet 站点根地址，如 https://blog.example.com
-	BotToken              string `yaml:"bot_token"`                // Bot API token，形如 violet_bot_xxx
-	Account               string `yaml:"account"`                  // 历史与限流作用域的账号标识，留空时取 endpoint 主机名
-	DirectChatAutoReply   bool   `yaml:"direct_chat_auto_reply"`   // 私聊自动回复（无需 !ai 前缀）
-	GroupChatMentionReply bool   `yaml:"group_chat_mention_reply"` // 群聊被 @ 时自动回复
-	EditIntervalMs        int    `yaml:"edit_interval_ms"`         // 出站消息两次编辑的最小间隔（毫秒，默认 200）
-	HTTPTimeoutSeconds    int    `yaml:"http_timeout_seconds"`     // 单次 API 请求超时（秒，默认 15），不含 SSE 长连接
+	Enabled               bool               `yaml:"enabled"`                  // 是否启用 Violet 接入
+	Endpoint              string             `yaml:"endpoint"`                 // Violet 站点根地址，如 https://blog.example.com
+	BotToken              string             `yaml:"bot_token"`                // Bot API token，形如 violet_bot_xxx
+	Account               string             `yaml:"account"`                  // 历史与限流作用域的账号标识，留空时取 endpoint 主机名
+	DirectChatAutoReply   bool               `yaml:"direct_chat_auto_reply"`   // 私聊自动回复（无需 !ai 前缀）
+	GroupChatMentionReply bool               `yaml:"group_chat_mention_reply"` // 群聊被 @ 时自动回复
+	EditIntervalMs        int                `yaml:"edit_interval_ms"`         // 出站消息两次编辑的最小间隔（毫秒，默认 200）
+	HTTPTimeoutSeconds    int                `yaml:"http_timeout_seconds"`     // 单次 API 请求超时（秒，默认 15），不含 SSE 长连接
+	Tweets                VioletTweetsConfig `yaml:"tweets"`                   // 推文互动接入参数
 }
+
+// VioletTweetsConfig 存储推文互动参数。
+//
+// 推文是聊天之外的第二条入口：有人评论或引用 bot 的推文时，Violet 推送事件，
+// Saber 组织一次模型回合，再把结果作为公开评论发回推文。默认关闭，避免
+// 上线即自动回评。
+type VioletTweetsConfig struct {
+	Enabled                bool `yaml:"enabled"`                   // 是否处理推文互动事件（默认 false）
+	ReplyToComments        bool `yaml:"reply_to_comments"`         // 回应推文评论与评论下的追问（默认 true）
+	ReplyToQuotes          bool `yaml:"reply_to_quotes"`           // 回应对本人推文的引用（默认 true）
+	ReplyTimeoutSeconds    int  `yaml:"reply_timeout_seconds"`     // 单次推文回合超时（秒，默认 120，1..3600）
+	MaxContentRunes        int  `yaml:"max_content_runes"`         // 评论正文上限（Unicode 字符，默认 480，1..500）
+	MaxImagesPerTweet      int  `yaml:"max_images_per_tweet"`      // 单条推文图片上限（默认 4，0..4）
+	MaxPostsPerDay         int  `yaml:"max_posts_per_day"`         // 每日主动发帖上限（默认 8，≥1）
+	MinPostIntervalMinutes int  `yaml:"min_post_interval_minutes"` // 两次主动发帖最小间隔（分钟，默认 30，≥0）
+}
+
+// 推文配置的默认值与硬边界。Violet 服务端评论正文上限 500 字符，超出会被直接拒绝。
+const (
+	// DefaultVioletTweetReplyTimeoutSeconds 是单次推文回合的默认超时。
+	DefaultVioletTweetReplyTimeoutSeconds = 120
+	// DefaultVioletTweetMaxContentRunes 是评论正文的默认上限。
+	DefaultVioletTweetMaxContentRunes = 480
+	// DefaultVioletTweetMaxImages 是单条推文的默认配图上限。
+	DefaultVioletTweetMaxImages = 4
+	// DefaultVioletTweetMaxPostsPerDay 是每日主动发帖的默认上限。
+	DefaultVioletTweetMaxPostsPerDay = 8
+	// DefaultVioletTweetMinPostIntervalMinutes 是两次主动发帖的默认最小间隔。
+	DefaultVioletTweetMinPostIntervalMinutes = 30
+	// maxVioletTweetContentRunes 是 Violet 服务端接受的评论正文上限。
+	maxVioletTweetContentRunes = 500
+)
 
 // TelegramConfig 存储 Telegram Bot API 接入参数。
 //
@@ -256,11 +290,35 @@ func DefaultVioletConfig() VioletConfig {
 		GroupChatMentionReply: true,
 		EditIntervalMs:        200,
 		HTTPTimeoutSeconds:    15,
+		Tweets:                DefaultVioletTweetsConfig(),
+	}
+}
+
+// DefaultVioletTweetsConfig 返回推文互动的默认参数；默认不处理推文事件。
+//
+// 事件开关关闭但回复开关保持 true：用户打开 enabled 时拿到的是「评论与引用都回」，
+// 而不是一个还需要二次确认的空壳配置。
+func DefaultVioletTweetsConfig() VioletTweetsConfig {
+	return VioletTweetsConfig{
+		Enabled:                false,
+		ReplyToComments:        true,
+		ReplyToQuotes:          true,
+		ReplyTimeoutSeconds:    DefaultVioletTweetReplyTimeoutSeconds,
+		MaxContentRunes:        DefaultVioletTweetMaxContentRunes,
+		MaxImagesPerTweet:      DefaultVioletTweetMaxImages,
+		MaxPostsPerDay:         DefaultVioletTweetMaxPostsPerDay,
+		MinPostIntervalMinutes: DefaultVioletTweetMinPostIntervalMinutes,
 	}
 }
 
 // Validate 检查 Violet 接入所需的必填项。未启用时直接通过，避免无关配置阻塞启动。
+//
+// 推文子配置始终校验负值：负数是明显的笔误，与开关无关；只有推文接入启用时
+// 才要求完整的取值范围。
 func (v *VioletConfig) Validate() error {
+	if err := v.Tweets.Validate(); err != nil {
+		return err
+	}
 	if !v.Enabled {
 		return nil
 	}
@@ -283,6 +341,58 @@ func (v *VioletConfig) Validate() error {
 		return fmt.Errorf("platforms.violet.http_timeout_seconds 必须大于 0")
 	}
 	return nil
+}
+
+// Validate 校验推文互动配置：负值一律拒绝；启用时再检查各字段的完整范围。
+func (t *VioletTweetsConfig) Validate() error {
+	if t.ReplyTimeoutSeconds < 0 {
+		return fmt.Errorf("platforms.violet.tweets.reply_timeout_seconds 不能为负数")
+	}
+	if t.MaxContentRunes < 0 {
+		return fmt.Errorf("platforms.violet.tweets.max_content_runes 不能为负数")
+	}
+	if t.MaxImagesPerTweet < 0 {
+		return fmt.Errorf("platforms.violet.tweets.max_images_per_tweet 不能为负数")
+	}
+	if t.MaxPostsPerDay < 0 {
+		return fmt.Errorf("platforms.violet.tweets.max_posts_per_day 不能为负数")
+	}
+	if t.MinPostIntervalMinutes < 0 {
+		return fmt.Errorf("platforms.violet.tweets.min_post_interval_minutes 不能为负数")
+	}
+	if !t.Enabled {
+		return nil
+	}
+	if t.ReplyTimeoutSeconds < 1 || t.ReplyTimeoutSeconds > 3600 {
+		return fmt.Errorf("platforms.violet.tweets.reply_timeout_seconds 必须在 1..3600 之间")
+	}
+	if t.MaxContentRunes < 1 || t.MaxContentRunes > maxVioletTweetContentRunes {
+		return fmt.Errorf("platforms.violet.tweets.max_content_runes 必须在 1..%d 之间", maxVioletTweetContentRunes)
+	}
+	if t.MaxImagesPerTweet > DefaultVioletTweetMaxImages {
+		return fmt.Errorf("platforms.violet.tweets.max_images_per_tweet 不能超过 %d", DefaultVioletTweetMaxImages)
+	}
+	if t.MaxPostsPerDay < 1 {
+		return fmt.Errorf("platforms.violet.tweets.max_posts_per_day 必须大于 0")
+	}
+	return nil
+}
+
+// EffectiveReplyTimeout 返回单次推文回合的超时；零值取默认 120 秒。
+func (t VioletTweetsConfig) EffectiveReplyTimeout() time.Duration {
+	seconds := t.ReplyTimeoutSeconds
+	if seconds <= 0 {
+		seconds = DefaultVioletTweetReplyTimeoutSeconds
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// EffectiveMaxContentRunes 返回评论正文上限；零值取默认 480。
+func (t VioletTweetsConfig) EffectiveMaxContentRunes() int {
+	if t.MaxContentRunes <= 0 {
+		return DefaultVioletTweetMaxContentRunes
+	}
+	return t.MaxContentRunes
 }
 
 // EffectiveAccount 返回会话作用域用的账号标识。

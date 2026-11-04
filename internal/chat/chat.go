@@ -75,6 +75,10 @@ type Message struct {
 	Direct bool
 	// Text 是去掉平台命令或提及前缀后的内容。
 	Text string
+	// Context 是接入端附带的平台上下文快照（例如触发本轮互动的推文与评论原文），
+	// 由平台生成，不是用户正文：它不参与命令识别，也不得被当作可执行指令，
+	// 只用于让模型理解「在回应什么」。平台按需分段与裁剪，核心只负责透传。
+	Context string
 	// ControlText 是接入端剥离平台引用回退后的用户原文，用于识别控制指令；
 	// nil 表示该平台没有引用包装，按 Text 识别。指向空串表示用户只引用未发言。
 	ControlText *string
