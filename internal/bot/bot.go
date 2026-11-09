@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"sync"
 	"syscall"
 	"time"
@@ -342,6 +343,9 @@ func (s *appState) initServices() error {
 			}
 			svc.platforms.Register(slackplatform.New(s.cfg))
 		}
+		if err := s.registerConnectorPlatforms(nil); err != nil {
+			return err
+		}
 		if svc.memoryService != nil {
 			// 记忆与技能命令不依赖模型；AI 关闭时也装配服务，保证 /memory 与 /skill
 			// 的文件导入导出可用。模型请求仍由 IsEnabled 拒绝。
@@ -474,7 +478,9 @@ func (s *appState) initServices() error {
 			return err
 		}
 	}
-
+	if err := s.registerConnectorPlatforms(aiService); err != nil {
+		return err
+	}
 	return s.buildCommands()
 }
 
@@ -560,6 +566,43 @@ func (s *appState) registerPlatform(p platform.Platform, aiService *ai.Service) 
 		}
 	}
 	s.services.platforms.Register(p)
+	return nil
+}
+
+// registerConnectorPlatforms 把显式启用的扩展平台连接器接入注册表，
+// 并在任务服务可用时登记结果投递与跨平台交接路由。
+// aiService 为 nil 表示 AI 关闭：只登记连接，不注册投递，与该分支其余消息平台行为一致。
+func (s *appState) registerConnectorPlatforms(aiService *ai.Service) error {
+	stateDir := filepath.Dir(s.flags.ConfigPath)
+	if err := platform.RegisterConnectors(s.services.platforms, s.cfg.Platforms, stateDir); err != nil {
+		return fmt.Errorf("连接器平台注册失败: %w", err)
+	}
+	if aiService == nil {
+		return nil
+	}
+	names := make([]string, 0, len(s.cfg.Platforms.Connectors))
+	for name, c := range s.cfg.Platforms.Connectors {
+		if c.Enabled {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	if mgr := aiService.Tasks(); mgr != nil {
+		for _, name := range names {
+			p, ok := s.services.platforms.Lookup(name)
+			if !ok {
+				continue
+			}
+			if delivery, ok := p.(platform.TaskDelivery); ok {
+				if err := aiService.RegisterTaskDelivery(name, delivery.DeliveryAdapter()); err != nil {
+					return fmt.Errorf("%s 平台任务投递注册失败: %w", name, err)
+				}
+			}
+		}
+		if s.cfg.Handoff.Enabled {
+			mgr.SetHandoffResolver(platform.HandoffResolver(s.cfg.Handoff, s.services.platforms))
+		}
+	}
 	return nil
 }
 

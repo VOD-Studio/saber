@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 持久任务新增依赖图与阻塞、运行中问题澄清、跨平台结果交接（`handoff`，默认关闭）与批量隔离工作副本；任务控制与依赖校验仍以可信身份为准。
 - 新增桌面应用（`desktop/`，Electron）与 `setup` 安装向导、`devtools` LSP 诊断与编辑前快照；桌面端只连接回环服务并使用既有令牌。
 - 本机服务新增 Agent 运行 API、运行转向（steer）、音频流与保险库端点（`api`，默认开启，仍要求服务端 Bearer 令牌）。
+- 扩展平台连接器接入生产启动链路：显式启用 `platforms.connectors.*` 的连接器在 AI 开启与关闭两条装配路径都会注册进平台注册表并随启动/停止循环管理；AI 开启时同步登记任务结果投递与 `handoff` 跨平台交接路由。默认配置不启用任何连接器，行为不变。
 
 ### Changed
 

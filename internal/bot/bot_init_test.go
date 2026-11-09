@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"rua.plus/saber/internal/cli"
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/matrix"
 )
@@ -362,6 +363,7 @@ func TestInitServices_AIDisabled(t *testing.T) {
 				Enabled: false,
 			},
 		},
+		flags:    &cli.Flags{ConfigPath: filepath.Join(t.TempDir(), "config.yaml")},
 		services: &services{},
 		info:     matrix.BuildInfo{},
 	}

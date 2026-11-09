@@ -6,8 +6,10 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"testing"
 
+	"rua.plus/saber/internal/cli"
 	"rua.plus/saber/internal/config"
 )
 
@@ -108,6 +110,7 @@ func TestAppState_InitServices_AIEnabled(t *testing.T) {
 
 	state := &appState{
 		cfg:      cfg,
+		flags:    &cli.Flags{ConfigPath: filepath.Join(t.TempDir(), "config.yaml")},
 		services: &services{},
 	}
 
