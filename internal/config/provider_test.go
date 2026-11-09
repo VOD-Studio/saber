@@ -248,10 +248,10 @@ func findSubstring(s, substr string) bool {
 }
 
 func TestProviderConfig_ValidateAPI(t *testing.T) {
-	for _, api := range []string{"", "openai-completions", "openai-responses", "anthropic-messages", "bad"} {
+	for _, api := range []string{"", "openai-completions", "openai-responses", "anthropic-messages", "google-gemini", "bedrock-converse", "bad"} {
 		t.Run(api, func(t *testing.T) {
 			p := ProviderConfig{API: api, BaseURL: "http://localhost:8317/v1", Models: map[string]ModelConfig{"m": {Model: "m"}}}
-			valid := api == "" || api == "openai-completions" || api == "openai-responses"
+			valid := api == "" || api == "openai-completions" || api == "openai-responses" || api == "anthropic-messages" || api == "google-gemini" || api == "bedrock-converse"
 			if err := p.Validate("relay"); (err == nil) != valid {
 				t.Fatalf("provider validation: %v", err)
 			}

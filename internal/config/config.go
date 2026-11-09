@@ -16,16 +16,33 @@ import (
 
 // Config 存储从 YAML 配置文件加载的应用程序配置
 type Config struct {
-	Agent     AgentConfig      `yaml:"agent"`
-	Server    HTTPServerConfig `yaml:"server"`
-	Execution ExecutionConfig  `yaml:"execution"`
-	Commands  CommandConfig    `yaml:"commands"`
-	Matrix    MatrixConfig     `yaml:"matrix"`
-	Platforms PlatformsConfig  `yaml:"platforms"`
-	AI        AIConfig         `yaml:"ai"`
-	MCP       MCPConfig        `yaml:"mcp"`
-	Memory    MemoryConfig     `yaml:"memory"`
-	Shutdown  ShutdownConfig   `yaml:"shutdown"`
+	Agent           AgentConfig           `yaml:"agent"`
+	Server          HTTPServerConfig      `yaml:"server"`
+	Execution       ExecutionConfig       `yaml:"execution"`
+	Commands        CommandConfig         `yaml:"commands"`
+	Matrix          MatrixConfig          `yaml:"matrix"`
+	Platforms       PlatformsConfig       `yaml:"platforms"`
+	AI              AIConfig              `yaml:"ai"`
+	MCP             MCPConfig             `yaml:"mcp"`
+	Memory          MemoryConfig          `yaml:"memory"`
+	Shutdown        ShutdownConfig        `yaml:"shutdown"`
+	Browser         BrowserConfig         `yaml:"browser"`
+	Computer        ComputerConfig        `yaml:"computer_use"`
+	MediaTools      MediaToolsConfig      `yaml:"media_tools"`
+	CodeExecution   CodeExecutionConfig   `yaml:"code_execution"`
+	Control         ControlConfig         `yaml:"control"`
+	MemoryProviders MemoryProvidersConfig `yaml:"memory_providers"`
+	ModelRuntime    ModelRuntimeConfig    `yaml:"model_runtime"`
+	Plugins         PluginsConfig         `yaml:"plugins"`
+	Vault           VaultConfig           `yaml:"vault"`
+	AgentTools      AgentToolsConfig      `yaml:"agent_tools"`
+	Desktop         DesktopConfig         `yaml:"desktop"`
+	DevTools        DevToolsConfig        `yaml:"devtools"`
+	Automation      AutomationConfig      `yaml:"automation"`
+	Batch           BatchConfig           `yaml:"batch"`
+	Handoff         HandoffConfig         `yaml:"handoff"`
+	API             APIConfig             `yaml:"api"`
+	MemoryBackends  MemoryBackendsConfig  `yaml:"memory_backends"`
 }
 
 // ShutdownConfig 存储关闭配置
@@ -67,7 +84,11 @@ type SkillsConfig struct {
 	// Dirs 是只读外部技能目录；必须是绝对路径，启动时校验存在且为目录。
 	Dirs []string `yaml:"dirs"`
 	// ExportDir 是技能导出目录；必须是绝对路径且父目录存在，空值禁用导出。
-	ExportDir string `yaml:"export_dir"`
+	ExportDir     string                        `yaml:"export_dir"`
+	Catalog       map[string]SkillCatalogSource `yaml:"catalog"`
+	AllowNetwork  bool                          `yaml:"allow_network"`
+	WriteApproval bool                          `yaml:"write_approval"`
+	Config        map[string]any                `yaml:"config"`
 }
 
 // DefaultSkillsConfig 返回技能文件默认配置：不导入外部目录，禁用导出。
@@ -77,6 +98,9 @@ func DefaultSkillsConfig() SkillsConfig {
 
 // Validate 校验技能文件目录配置；目录必须真实存在，避免启动后才在命令里失败。
 func (c SkillsConfig) Validate() error {
+	if err := ValidateSkillsExtensions(c); err != nil {
+		return err
+	}
 	if len(c.Dirs) > MaxSkillDirs {
 		return fmt.Errorf("memory.skills.dirs 最多允许 %d 个目录", MaxSkillDirs)
 	}
@@ -880,6 +904,16 @@ func (m *MemeConfig) Validate() error {
 	return nil
 }
 
+// ModelConfigured 判断标识是否指向可解析的模型：
+// 显式别名和 provider.model 形式的隐式模型都算已配置。
+func (a *AIConfig) ModelConfigured(modelID string) bool {
+	cfg, explicit := a.GetModelConfig(modelID)
+	if explicit {
+		return true
+	}
+	return cfg.Model != "" && cfg.Provider != ""
+}
+
 // GetModelConfig 解析完全限定模型名称或显式别名，合并模型、提供商与全局参数。
 func (a *AIConfig) GetModelConfig(modelID string) (ModelConfig, bool) {
 	if provider, model, err := ParseModelID(modelID); err == nil {
@@ -971,6 +1005,9 @@ func Load(path string) (*Config, error) {
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return nil, fmt.Errorf("config must contain exactly one YAML document")
 	}
+	if err := cfg.ValidateFeatures(); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
@@ -1029,15 +1066,32 @@ func DefaultMCPConfig() MCPConfig {
 // DefaultConfig 返回带有合理默认值的配置
 func DefaultConfig() *Config {
 	return &Config{
-		Server:    HTTPServerConfig{Listen: "127.0.0.1:8320", TokenFile: ".saber-token"},
-		Agent:     DefaultAgentConfig(),
-		Execution: DefaultExecutionConfig(),
-		Matrix:    DefaultMatrixConfig(),
-		Platforms: DefaultPlatformsConfig(),
-		AI:        DefaultAIConfig(),
-		MCP:       DefaultMCPConfig(),
-		Memory:    DefaultMemoryConfig(),
-		Shutdown:  DefaultShutdownConfig(),
+		Server:          HTTPServerConfig{Listen: "127.0.0.1:8320", TokenFile: ".saber-token"},
+		Agent:           DefaultAgentConfig(),
+		Execution:       DefaultExecutionConfig(),
+		Matrix:          DefaultMatrixConfig(),
+		Platforms:       DefaultPlatformsConfig(),
+		AI:              DefaultAIConfig(),
+		MCP:             DefaultMCPConfig(),
+		Memory:          DefaultMemoryConfig(),
+		Shutdown:        DefaultShutdownConfig(),
+		Browser:         DefaultBrowserConfig(),
+		Computer:        DefaultComputerConfig(),
+		MediaTools:      DefaultMediaToolsConfig(),
+		CodeExecution:   DefaultCodeExecutionConfig(),
+		Control:         DefaultControlConfig(),
+		MemoryProviders: DefaultMemoryProvidersConfig(),
+		ModelRuntime:    DefaultModelRuntimeConfig(),
+		Plugins:         DefaultPluginsConfig(),
+		Vault:           DefaultVaultConfig(),
+		AgentTools:      DefaultAgentToolsConfig(),
+		Desktop:         DefaultDesktopConfig(),
+		DevTools:        DefaultDevToolsConfig(),
+		Automation:      DefaultAutomationConfig(),
+		Batch:           DefaultBatchConfig(),
+		Handoff:         DefaultHandoffConfig(),
+		API:             DefaultAPIConfig(),
+		MemoryBackends:  DefaultMemoryBackendsConfig(),
 	}
 }
 
@@ -1163,6 +1217,230 @@ memory:
     export_dir: "" # 技能导出目录（绝对路径，父目录需存在）；空值禁用 /skill export
 shutdown:
   timeout_seconds: 30
+
+# 以下可选能力默认关闭或保守启用；开启前请确认依赖，凭据只放在私有配置或环境变量里。
+browser: # 真实浏览器自动化；默认关闭
+  enabled: false # 启用后仍需按来源授权：local 需要 allow_host_process，cdp/nous 需要 cdp_url
+  provider: local # local / cdp / browserbase / browser-use / firecrawl / nous / plugin:<name>
+  engine: chromium # chromium 或 lightpanda
+  # executable_path: /opt/homebrew/bin/chromium # 本机来源必填；use_real_profile 时必须是真实浏览器路径
+  # cdp_url: "ws://127.0.0.1:9222/devtools/browser/<id>" # cdp/nous 来源必填，不允许带凭据
+  allow_host_process: false # 显式允许启动宿主浏览器；不继承沙箱网络隔离
+  allow_private_urls: false # 访问私网地址需要单独授权
+  headed: false # 默认无头运行
+  user_data_dir: "" # 独立配置目录；空值使用临时目录
+  use_real_profile: false # 与 cdp_url 互斥，需要 executable_path 与 real_profile_source
+  command_timeout: 30 # 单条命令超时（秒，1..1800）
+  inactivity_timeout: 120 # 会话空闲回收（秒）
+  max_sessions: 8 # 同时保留的会话数（1..128）
+  dialog_policy: must_respond # must_respond / auto_dismiss / auto_accept
+  dialog_timeout_s: 300 # 弹窗等待超时（秒）
+
+computer_use: # 真实桌面控制（cua-driver）；默认关闭
+  enabled: false # 启用前需授权宿主显示器或配置隔离端点
+  command: cua-driver # 本机驱动可执行文件
+  permission_mode: standard # standard / bounded / unrestricted；不能由模型更改
+  allow_host_process: false # 使用宿主显示器时显式开启
+  # endpoint: "https://sandbox.example/mcp" # 隔离运行时端点，与 allow_host_process 二选一
+  ax_max_elements: 200 # 单次可访问性树元素上限
+  max_image_dimension: 1456 # 截图最大边长（像素）
+  command_timeout: 30
+  inactivity_timeout: 120
+  max_sessions: 8
+
+media_tools: # 语音、图像与视频工具；不会隐式选择收费服务
+  enabled: false # 默认关闭；各子能力还需单独选择 provider
+  asr:
+    enabled: false
+    provider: "" # whisper_cpp / openai / groq / mistral / xai / elevenlabs / deepinfra / command / plugin
+  tts:
+    enabled: false
+    provider: "" # piper / espeak / edge / openai / deepinfra / elevenlabs / xai / minimax / mistral / gemini / command / plugin
+  image:
+    enabled: false
+    provider: "" # openai / fal / xai / openrouter / gemini / command / plugin
+  video:
+    enabled: false
+    provider: "" # xai / fal / command / plugin
+  vision:
+    enabled: false
+    provider: "" # model 复用多模态模型，或 command / plugin
+  voice: # 本地录音与全双工会话；默认不占用麦克风
+    enabled: false
+    mode: chained # chained 或 gpt-live（gpt-live 需要 voice.live.enabled）
+  max_bytes: 26214400 # 单个媒体文件上限（字节，≤256MiB）
+  timeout_seconds: 120
+  video_frames: 8 # 每个视频抽取的帧数（1..32）
+  ffmpeg_command: ffmpeg
+  auto_transcribe: true # 启用后自动转写收到的语音消息
+  auto_vision: false # 启用后自动理解收到的图片
+
+code_execution: # 授权工作区内的持久 Python 代码单元；依赖 execution 已配置 backend
+  enabled: false
+  mode: project # project 或 strict
+  python: python3
+  timeout_seconds: 300 # 1..3600
+  max_tool_calls: 50 # 1..1000
+  max_output_bytes: 50000 # 1024..16MiB
+  max_session_kernels: 16 # 1..128
+  kernel_idle_seconds: 1800 # 1..86400
+  tools: [read_file, list_files, search_files, glob_files, write_file, apply_patch, exec] # 可从代码调用的工具；实际调用仍重新授权
+
+control: # 任务依赖、持久澄清与显式交接；权限始终来自可信入口
+  enabled: true
+  question_timeout_seconds: 86400 # 0..604800
+  max_pending_questions: 20 # 0..1000
+  max_dependencies: 64 # 0..256
+  allow_cross_user_handoff: false # 默认禁止跨用户交接
+
+memory_providers: # 外部记忆插件；本地记忆库仍是权威存储
+  active: "" # 留空不启用；填写后必须在 providers 中声明
+  providers: {}
+  # providers:
+  #   example:
+  #     plugin: example-memory # 已安装插件名；凭据只由插件私有配置读取
+  #     operations: [context, turn_start, sync_turn, session_end] # 必须显式声明生命周期
+  timeout_seconds: 30 # 0..300
+  context_bytes: 4096 # 0..65536
+  strict_checkpoint: false # 开启后 active provider 必须支持 pre_compress
+
+memory_backends: # 原生外部记忆适配器；配置后以 native:<name> 注册，被选中时才发送对话
+  backends: {}
+  # backends:
+  #   hindsight:
+  #     type: hindsight # hindsight / supermemory / holographic / retaindb / byterover / memori / honcho / openviking / mem0
+  #     endpoint: "https://memory.example.com" # 无凭据 HTTPS；私网 HTTP 需要 allow_private
+  #     api_key_env: MEMORY_API_KEY # 凭据只从环境变量读取，不写入配置文件
+  #     timeout_seconds: 30 # 0..300
+
+model_runtime: # 可信模型路由、辅助请求缓存与协作模型；目标必须在 ai 模型白名单中
+  state_dir: "" # 路由状态目录；空值使用默认运行目录
+  routes: {}
+  # routes:
+  #   podlink-responses.gpt-5.6-sol: # 键为已配置的模型标识
+  #     targets: [podlink-responses.gpt-5.6-sol]
+  #     fallbacks: []
+  #     strategy: ordered # ordered 或 round_robin
+  #     sticky_seconds: 0
+  cache: # 只缓存无工具、非流式的确定性辅助请求，按可信会话隔离
+    enabled: false
+    ttl_seconds: 300
+    max_entries: 128
+    purposes: [summary, evaluation]
+  moa: # 多模型协作；聚合器是实际执行工具的模型，参考模型只提供建议
+    enabled: false
+    default_preset: "" # 启用时必须指向一个 enabled 的 preset
+    max_parallel: 8 # 1..32
+    timeout_seconds: 120
+    privacy_filter: "" # display 或 full；留空不过滤
+
+plugins: # 第三方进程插件与连接器；插件代码不继承宿主凭据环境
+  enabled: false # 默认关闭；启用后仍需在 sources/enabled_plugins 中逐个放开
+  directory: "" # 插件目录（绝对路径）
+  enabled_plugins: []
+  disabled_plugins: []
+  sources: {} # 名称到 URL/路径的映射；URL 不允许带凭据
+  load_timeout_seconds: 10 # 1..600
+  call_timeout_seconds: 60 # 1..3600
+  clone_timeout_seconds: 300 # 1..3600
+  max_output_bytes: 8388608 # 1024..64MiB
+  connectors: {} # 远程连接器：type 为 mcp 或 managed，端点仅 HTTPS 或回环 HTTP
+
+vault: # 本机秘密存储；模型不能读取秘密
+  enabled: true
+  directory: "" # 空值使用状态目录下的 vault；必须是私有目录
+  key_storage: file # file 或 keychain
+  idle_timeout_seconds: 1800 # 1..86400
+  onepassword: # 只允许受信配置选择 CLI 与服务账号令牌
+    enabled: false
+    command: op
+    token_env: OP_SERVICE_ACCOUNT_TOKEN
+  bitwarden:
+    enabled: false
+    command: bw
+
+agent_tools: # 大型工具集的渐进式披露；桥接调用仍复用原任务与权限
+  tool_search: auto # auto / on / off
+  deferred: [] # 额外延迟到 tool_search 之后才可见的工具名
+  always_visible: [clarify, terminal, read_file, write_file, edit_file, tool_search, tool_describe, tool_call]
+  listing_max_tokens: 2000 # 0..100000
+  search_limit: 10 # 1..100
+  threshold_percent: 10 # 工具占比超过该百分比才启用发现，1..100
+
+desktop: # 独立桌面客户端；自身不授予任何执行权限
+  enabled: false
+  endpoint: "http://127.0.0.1:8320" # 远程地址必须 HTTPS，且不能复用本机 token_file
+  app_dir: "" # 绝对路径；空值使用默认安装目录
+  state_dir: "" # 绝对路径；空值使用默认状态目录
+  token_file: "" # 本机令牌文件（绝对路径）
+  theme: system # system / light / dark
+  language: zh # zh / en
+  font_family: ""
+  terminal_font_family: ""
+  quick_entry_shortcut: "CommandOrControl+Shift+Space"
+
+devtools: # 编辑诊断、文档提取与有界上下文引用；自身不授予执行权限
+  enabled: true
+  lsp_enabled: true # 语言服务只会在可信工作区启动
+  trusted_workspaces: [] # 非根绝对路径；为空时不会启动任何语言服务
+  exclude_roots: [] # 文档提取时排除的 glob
+  wait_mode: document # document 或 full
+  wait_timeout_seconds: 5 # 0..120
+  inline_wait_milliseconds: 80 # 0..1000
+  deferred_wait_seconds: 5 # 0..120
+  max_servers: 8 # 0..64
+  servers: {} # 自定义语言服务的命令与初始化配置只能由管理员提供
+  max_document_bytes: 52428800 # ≤50MiB
+  max_extracted_bytes: 8388608 # ≤32MiB
+  notebook_output_characters: 20000 # 0..100000
+  pdf_command: [pdftotext, -layout, "-", "-"]
+  max_references: 16 # 0..64
+  folder_entries: 200 # 0..1000
+  reference_bytes: 131072 # 0..4MiB
+
+automation: # 持久自动化；每次触发仍由任务管理器授权与执行
+  enabled: false
+  poll_seconds: 5 # 1..60
+  min_interval_seconds: 30 # ≥5
+  max_ticks: 100
+  self_paced_floor_seconds: 60 # 模型自定间隔下限
+  self_paced_ceiling_seconds: 900 # 模型自定间隔上限
+  goal_max_turns: 20
+  judge_model: "" # 目标评估模型；留空使用 ai.default_model
+  judge_timeout_seconds: 30 # 1..600
+  hooks: [] # 工具或签名 HTTPS 回调，命令与 URL 由管理员固定
+  destinations: {} # 固定投递路由：需要工具与非空用户白名单
+  curator: # 技能维护；只处理显式收养的技能，从不永久删除
+    enabled: true
+    interval_hours: 168
+    min_idle_hours: 2
+    stale_after_days: 14
+    archive_after_days: 30
+    backup_keep: 2
+
+batch: # 真实任务轨迹生成与评估；不接受数据集内的凭据或服务地址
+  enabled: false
+  max_samples: 10000
+  batch_size: 10 # 1..1000
+  max_concurrent: 4 # 1..64
+  max_turns: 10 # 1..1000
+  include_memory: false
+  isolate_workspace: true # 每个样本使用独立工作区
+  max_input_bytes: 67108864
+  require_reasoning: true
+  evaluation_model: "" # 留空使用 ai.default_model
+  evaluation_timeout_seconds: 60 # 1..600
+  distributions: # 工具使用分布：default 为空表示不额外改变权重
+    default: {}
+
+handoff: # 跨平台会话交接；只允许同租户、同一实际用户的私聊
+  enabled: false
+  routes: {} # 每条路由需精确配置两端的 platform/account/conversation/user/tenant/person，且 direct: true
+
+api: # 持久 Agent HTTP 接口的资源边界
+  enabled: true
+  max_request_bytes: 8388608 # 0..64MiB
+  poll_interval_ms: 100 # 0..10000
 `
 }
 

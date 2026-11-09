@@ -11,12 +11,13 @@ import (
 //
 // Matrix 的明细配置仍在顶层 matrix: 节（见 MatrixConfig），启用开关在此处。
 type PlatformsConfig struct {
-	Terminal TerminalPlatformConfig `yaml:"terminal"` // 本机 HTTP 聊天入口（saber chat / TUI）
-	Matrix   MatrixPlatformConfig   `yaml:"matrix"`   // Matrix 聊天入口开关
-	Violet   VioletConfig           `yaml:"violet"`   // Violet 博客平台 Bot API 接入
-	Telegram TelegramConfig         `yaml:"telegram"` // Telegram Bot API 接入
-	Discord  DiscordConfig          `yaml:"discord"`  // Discord Bot Gateway 接入
-	Slack    SlackConfig            `yaml:"slack"`    // Slack Socket Mode 接入
+	Terminal   TerminalPlatformConfig     `yaml:"terminal"`   // 本机 HTTP 聊天入口（saber chat / TUI）
+	Matrix     MatrixPlatformConfig       `yaml:"matrix"`     // Matrix 聊天入口开关
+	Violet     VioletConfig               `yaml:"violet"`     // Violet 博客平台 Bot API 接入
+	Telegram   TelegramConfig             `yaml:"telegram"`   // Telegram Bot API 接入
+	Discord    DiscordConfig              `yaml:"discord"`    // Discord Bot Gateway 接入
+	Slack      SlackConfig                `yaml:"slack"`      // Slack Socket Mode 接入
+	Connectors map[string]ConnectorConfig `yaml:"connectors"` // 原生扩展平台；未显式配置不启用
 }
 
 // MatrixPlatformConfig 存储 Matrix 聊天入口的开关。
@@ -129,12 +130,13 @@ type SlackConfig struct {
 // DefaultPlatformsConfig 返回带有合理默认值的平台配置。
 func DefaultPlatformsConfig() PlatformsConfig {
 	return PlatformsConfig{
-		Terminal: TerminalPlatformConfig{Enabled: true},
-		Matrix:   MatrixPlatformConfig{Enabled: false},
-		Violet:   DefaultVioletConfig(),
-		Telegram: DefaultTelegramConfig(),
-		Discord:  DefaultDiscordConfig(),
-		Slack:    DefaultSlackConfig(),
+		Terminal:   TerminalPlatformConfig{Enabled: true},
+		Matrix:     MatrixPlatformConfig{Enabled: false},
+		Violet:     DefaultVioletConfig(),
+		Telegram:   DefaultTelegramConfig(),
+		Discord:    DefaultDiscordConfig(),
+		Slack:      DefaultSlackConfig(),
+		Connectors: make(map[string]ConnectorConfig),
 	}
 }
 
@@ -428,6 +430,188 @@ func (c *Config) PlatformEnabled(name string) bool {
 	case "slack":
 		return c.Platforms.Slack.Enabled
 	default:
-		return false
+		connector, ok := c.Platforms.Connectors[name]
+		return ok && connector.Enabled
 	}
+}
+
+// ConnectorConfig 保存扩展平台的可信凭据、协议地址和入站策略；模型不能修改这些参数。
+type ConnectorConfig struct {
+	Enabled            bool     `yaml:"enabled"`
+	Account            string   `yaml:"account"`
+	Tenant             string   `yaml:"tenant"`
+	Endpoint           string   `yaml:"endpoint"`
+	WebSocketURL       string   `yaml:"websocket_url"`
+	Token              string   `yaml:"token"`
+	Secret             string   `yaml:"secret"`
+	AppID              string   `yaml:"app_id"`
+	TenantID           string   `yaml:"tenant_id"`
+	BotID              string   `yaml:"bot_id"`
+	Phone              string   `yaml:"phone"`
+	Username           string   `yaml:"username"`
+	Password           string   `yaml:"password"`
+	Listen             string   `yaml:"listen"`
+	PublicURL          string   `yaml:"public_url"`
+	WebhookPath        string   `yaml:"webhook_path"`
+	VerifyToken        string   `yaml:"verify_token"`
+	EncodingAESKey     string   `yaml:"encoding_aes_key"`
+	AllowedUsers       []string `yaml:"allowed_users"`
+	AllowedGroups      []string `yaml:"allowed_groups"`
+	AllowAllUsers      bool     `yaml:"allow_all_users"`
+	GroupMentionOnly   bool     `yaml:"group_mention_only"`
+	Channels           []string `yaml:"channels"`
+	Command            string   `yaml:"command"`
+	Profile            string   `yaml:"profile"`
+	IMAPAddress        string   `yaml:"imap_address"`
+	SMTPAddress        string   `yaml:"smtp_address"`
+	Mailbox            string   `yaml:"mailbox"`
+	TLS                bool     `yaml:"tls"`
+	PollSeconds        int      `yaml:"poll_seconds"`
+	HTTPTimeoutSeconds int      `yaml:"http_timeout_seconds"`
+	MaxMediaBytes      int64    `yaml:"max_media_bytes"`
+	ServiceAccountFile string   `yaml:"service_account_file"`
+	SharedMediaDir     string   `yaml:"shared_media_dir"`
+	AuthServID         string   `yaml:"authserv_id"`
+	TrustFromHeader    bool     `yaml:"trust_from_header"`
+	ServerAddress      string   `yaml:"server_address"`
+}
+
+// ConnectorNames 返回固定 Hermes 快照支持的扩展平台；现有入口仍使用各自配置。
+func ConnectorNames() []string {
+	return []string{"whatsapp", "whatsapp_cloud", "signal", "mattermost", "email", "sms", "dingtalk", "webhook", "msgraph_webhook", "feishu", "wecom", "wecom_callback", "weixin", "bluebubbles", "qqbot", "relay", "teams", "simplex", "raft", "photon", "ntfy", "irc", "line", "google_chat", "buzz", "a2a"}
+}
+
+// EffectiveAccount 返回账号历史与权限使用的稳定标识。
+func (c ConnectorConfig) EffectiveAccount(name string) string {
+	return effectiveAccount(c.Account, name)
+}
+
+// Validate 拒绝未登记的平台、缺少凭据和默认开放的入站策略。
+func (p PlatformsConfig) Validate() error {
+	known := make(map[string]bool)
+	for _, name := range ConnectorNames() {
+		known[name] = true
+	}
+	for name, c := range p.Connectors {
+		if !known[name] {
+			return fmt.Errorf("platforms.connectors.%s: 未登记的平台", name)
+		}
+		if !c.Enabled {
+			continue
+		}
+		if c.Tenant == "" {
+			return fmt.Errorf("platforms.connectors.%s.tenant 必填", name)
+		}
+		if !c.AllowAllUsers && len(c.AllowedUsers) == 0 {
+			return fmt.Errorf("platforms.connectors.%s: 必须配置 allowed_users 或显式 allow_all_users", name)
+		}
+		if c.PollSeconds < 0 || c.HTTPTimeoutSeconds < 0 || c.MaxMediaBytes < 0 {
+			return fmt.Errorf("platforms.connectors.%s: 时限与媒体大小不能为负", name)
+		}
+		if c.Endpoint != "" {
+			if err := validateEndpointURL("platforms.connectors."+name+".endpoint", c.Endpoint); err != nil {
+				return err
+			}
+		}
+		if c.WebSocketURL != "" {
+			u, err := url.Parse(c.WebSocketURL)
+			if err != nil || u.Host == "" || (u.Scheme != "ws" && u.Scheme != "wss") {
+				return fmt.Errorf("%s.websocket_url 必须为 ws/wss URL", name)
+			}
+		}
+		if c.PublicURL != "" {
+			if err := validateEndpointURL(name+".public_url", c.PublicURL); err != nil {
+				return err
+			}
+		}
+		switch name {
+		case "email":
+			if c.IMAPAddress == "" || c.SMTPAddress == "" || c.Username == "" || c.Password == "" {
+				return fmt.Errorf("email 需要 imap_address/smtp_address/username/password")
+			}
+			if c.AuthServID == "" && !c.TrustFromHeader {
+				return fmt.Errorf("email 需要可信 MTA authserv_id 或显式 trust_from_header")
+			}
+		case "irc":
+			if c.ServerAddress == "" && c.IMAPAddress == "" {
+				return fmt.Errorf("irc 需要 server_address（host:port）")
+			}
+			if c.Username == "" || strings.ContainsAny(c.Username, " \r\n:") {
+				return fmt.Errorf("irc 需要有效 username（nick）")
+			}
+		case "simplex":
+			if c.WebSocketURL == "" {
+				return fmt.Errorf("simplex 需要 websocket_url（simplex-chat daemon）")
+			}
+		case "buzz", "raft":
+			if c.Command == "" {
+				return fmt.Errorf("%s 需要 command（已安装的官方 CLI）", name)
+			}
+			if name == "raft" && (c.Profile == "" || c.Token == "") {
+				return fmt.Errorf("raft 需要 profile/token")
+			}
+			if name == "buzz" && (c.Endpoint == "" || c.Secret == "" || len(c.Channels) == 0) {
+				return fmt.Errorf("buzz 需要 endpoint/secret/channels")
+			}
+		case "signal":
+			if c.Endpoint == "" || c.Phone == "" {
+				return fmt.Errorf("signal 需要 endpoint（signal-cli HTTP daemon）和 phone")
+			}
+		case "whatsapp", "photon":
+			if c.Endpoint == "" || c.Token == "" {
+				return fmt.Errorf("%s 需要 endpoint 和 token（已认证的官方桥接服务）", name)
+			}
+		case "mattermost", "ntfy", "bluebubbles":
+			if c.Endpoint == "" {
+				return fmt.Errorf("%s 需要 endpoint", name)
+			}
+			if name != "ntfy" && c.Token == "" && c.Password == "" {
+				return fmt.Errorf("%s 需要 token/password", name)
+			}
+		case "dingtalk", "feishu", "qqbot", "teams":
+			if c.AppID == "" || c.Secret == "" {
+				return fmt.Errorf("%s 需要 app_id/secret", name)
+			}
+			if name == "teams" && c.TenantID == "" {
+				return fmt.Errorf("teams 需要 tenant_id")
+			}
+		case "google_chat":
+			if c.ServiceAccountFile == "" {
+				return fmt.Errorf("google_chat 需要 service_account_file")
+			}
+		case "wecom":
+			if c.BotID == "" || c.Secret == "" {
+				return fmt.Errorf("wecom 需要 bot_id/secret")
+			}
+		case "wecom_callback":
+			if c.TenantID == "" || c.AppID == "" || c.Secret == "" || c.VerifyToken == "" || c.EncodingAESKey == "" {
+				return fmt.Errorf("wecom_callback 需要 tenant_id/app_id/secret/verify_token/encoding_aes_key")
+			}
+		case "sms":
+			if c.AppID == "" || c.Secret == "" || c.Phone == "" || c.PublicURL == "" {
+				return fmt.Errorf("sms 需要 Twilio app_id（SID）/secret/phone/public_url")
+			}
+		case "line":
+			if c.Token == "" || c.Secret == "" {
+				return fmt.Errorf("line 需要 token/secret")
+			}
+		case "whatsapp_cloud":
+			if c.Token == "" || c.Secret == "" || c.BotID == "" || c.VerifyToken == "" {
+				return fmt.Errorf("whatsapp_cloud 需要 token/secret/bot_id/verify_token")
+			}
+		case "relay":
+			if c.WebSocketURL == "" || c.Endpoint == "" || c.Secret == "" || c.AppID == "" || c.BotID == "" {
+				return fmt.Errorf("relay 需要 websocket_url/endpoint/secret/app_id（前置平台名）/bot_id")
+			}
+		case "msgraph_webhook":
+			if c.Token == "" || c.VerifyToken == "" {
+				return fmt.Errorf("msgraph_webhook 需要 token/verify_token（clientState）")
+			}
+		default:
+			if c.Token == "" {
+				return fmt.Errorf("%s 需要 token", name)
+			}
+		}
+	}
+	return nil
 }

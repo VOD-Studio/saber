@@ -16,6 +16,12 @@ type ProviderConfig struct {
 	APIKey          string                 `yaml:"api_key"`                    // API 密钥
 	Models          map[string]ModelConfig `yaml:"models"`                     // 该提供商下的模型配置
 	Extra           map[string]any         `yaml:"extra,omitempty"`            // 提供商特有配置（如 Azure deployment）
+	OAuth           OAuthConfig            `yaml:"oauth"`
+	Credentials     []ProviderCredential   `yaml:"credentials"`
+	PoolStrategy    string                 `yaml:"pool_strategy"`
+	Headers         map[string]string      `yaml:"headers"`
+	AWS             AWSProviderConfig      `yaml:"aws"`
+	Google          GoogleProviderConfig   `yaml:"google"`
 }
 
 // Validate 验证提供商配置是否有效。
@@ -25,6 +31,7 @@ func (p *ProviderConfig) Validate(providerName string) error {
 	if p.Type == "" {
 		p.Type = providerName
 	}
+	p.OAuth = p.OAuth.WithDefaults(p.Type)
 
 	if p.BaseURL == "" {
 		return fmt.Errorf("base_url is required")
@@ -32,6 +39,26 @@ func (p *ProviderConfig) Validate(providerName string) error {
 
 	if err := ValidateAPI(p.API); err != nil {
 		return err
+	}
+	if err := p.OAuth.Validate(); err != nil {
+		return fmt.Errorf("oauth: %w", err)
+	}
+	switch p.PoolStrategy {
+	case "", "fill_first", "round_robin", "random", "least_used":
+	default:
+		return fmt.Errorf("unsupported pool_strategy %q", p.PoolStrategy)
+	}
+	ids := map[string]bool{"configured": true, "oauth": true, "__cursor": true}
+	for _, credential := range p.Credentials {
+		if credential.ID == "" || ids[credential.ID] || (credential.APIKey == "" && credential.TokenFile == "") || (credential.APIKey != "" && credential.TokenFile != "") {
+			return fmt.Errorf("credential requires unique id and exactly one api_key or token_file")
+		}
+		ids[credential.ID] = true
+	}
+	for key, value := range p.Headers {
+		if strings.ContainsAny(key+value, "\r\n") || strings.EqualFold(key, "Authorization") || strings.EqualFold(key, "x-api-key") || strings.EqualFold(key, "x-goog-api-key") {
+			return fmt.Errorf("invalid provider header %q", key)
+		}
 	}
 
 	// APIKey 可以为空（某些本地服务如 Ollama 不需要）
@@ -93,9 +120,9 @@ func FormatModelID(provider, model string) string {
 // ValidateAPI 拒绝未知协议，避免错误地向兼容端点发送 Chat Completions 请求。
 func ValidateAPI(api string) error {
 	switch api {
-	case "", "openai-completions", "openai-responses":
+	case "", "openai-completions", "openai-responses", "anthropic-messages", "google-gemini", "bedrock-converse":
 		return nil
 	default:
-		return fmt.Errorf("unsupported api %q (use openai-completions or openai-responses)", api)
+		return fmt.Errorf("unsupported api %q (use openai-completions, openai-responses, anthropic-messages, google-gemini or bedrock-converse)", api)
 	}
 }

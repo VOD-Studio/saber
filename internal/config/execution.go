@@ -6,7 +6,7 @@ import "fmt"
 type ExecutionConfig struct {
 	// Enabled 启用已授权工作区的工具，默认关闭。
 	Enabled bool `yaml:"enabled"`
-	// Backend 选择执行后端：local 或 docker；空值表示未显式选择，有效默认 local。
+	// Backend 选择 local、docker、ssh、modal、daytona、vercel 或管理员登记的扩展后端。
 	Backend string `yaml:"backend,omitempty"`
 	// Network 控制沙箱容器是否允许联网；默认开启，设为 false 可显式关闭断网。
 	Network *bool `yaml:"network,omitempty"`
@@ -36,6 +36,12 @@ type ExecutionConfig struct {
 	// MCPRequirements 按 mcp:服务器:工具 声明额外能力；未声明的工具禁止调用。
 	// 所有 MCP 工具都额外要求 external 能力，不信任服务端工具描述或注解。
 	MCPRequirements map[string][]string `yaml:"mcp_requirements"`
+	// SSH 只连接管理员配置的目标，始终验证 known_hosts，不使用模型提供的凭据。
+	SSH SSHExecutionConfig `yaml:"ssh"`
+	// Remote 配置云沙箱的资源、SDK解释器与显式凭据；这些变量不进入执行环境。
+	Remote RemoteExecutionConfig `yaml:"remote"`
+	// Extensions 将名称绑定到管理员安装的 NDJSON 执行适配器。
+	Extensions map[string]ExecutionBackendConfig `yaml:"extensions,omitempty"`
 }
 
 // WorkspaceConfig 描述容器唯一可见的宿主工作目录与显式环境变量。
@@ -118,9 +124,43 @@ func (c ExecutionConfig) BackendFor(workspace string) (string, error) {
 	switch backend {
 	case "":
 		return "local", nil
-	case "local", "docker":
+	case "local", "docker", "ssh", "modal", "daytona", "vercel":
 		return backend, nil
 	default:
-		return "", fmt.Errorf("unknown execution backend %q; use local or docker", backend)
+		if _, ok := c.Extensions[backend]; ok && backend != "" {
+			return backend, nil
+		}
+		return "", fmt.Errorf("unknown execution backend %q; use local, docker, ssh, modal, daytona, vercel or a configured extension", backend)
 	}
+}
+
+// SSHExecutionConfig 定义不依赖宿主 SSH agent 的远程连接。
+type SSHExecutionConfig struct {
+	Host       string `yaml:"host"`
+	User       string `yaml:"user"`
+	Port       int    `yaml:"port"`
+	KeyPath    string `yaml:"key_path"`
+	KnownHosts string `yaml:"known_hosts"`
+	RemoteRoot string `yaml:"remote_root"`
+}
+
+// RemoteExecutionConfig 定义官方云 SDK 所需的管理员配置。
+type RemoteExecutionConfig struct {
+	Python          string `yaml:"python"`
+	CPU             int    `yaml:"cpu"`
+	MemoryMB        int    `yaml:"memory_mb"`
+	DiskMB          int    `yaml:"disk_mb"`
+	LifetimeSeconds int    `yaml:"lifetime_seconds"`
+	// Credentials 仅发送给 SDK 控制进程，不暴露给沙箱和模型。
+	Credentials   map[string]string `yaml:"credentials"`
+	VercelRuntime string            `yaml:"vercel_runtime"`
+	VercelImage   string            `yaml:"vercel_image"`
+}
+
+// ExecutionBackendConfig 配置进程隔离的第三方执行适配器。
+type ExecutionBackendConfig struct {
+	Command []string          `yaml:"command"`
+	Env     map[string]string `yaml:"env"`
+	// NetworkIsolation 必须由适配器真实实现；配置关闭网络时未声明支持的适配器会被拒绝。
+	NetworkIsolation bool `yaml:"network_isolation"`
 }
