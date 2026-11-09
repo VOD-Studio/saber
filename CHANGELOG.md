@@ -10,6 +10,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - 新增 `saber_avatar` 头像工具与 Matrix/Violet 自身账号头像端口，支持查询与使用本轮图片附件或已授权工作区图片更换公开头像（PNG/JPEG/GIF/WebP，最多 10 MiB）。更换按 `commands.admins` 精确授权，执行时复核平台与账号；文件来源额外复核 `read_file` 授权，拒绝远程 URL 与工作区越界。Violet 使用新增的 Bot Token 自身头像上传端点，不引入站点管理员凭据。
+- 新增真实浏览器控制（`browser`，默认关闭）：通过 CDP 驱动本机 Chromium 或连接远程端点，提供 `browser_exec`、`browser_cdp`、`browser_dialog`、`browser_session`，按可信用户/会话隔离标签页，动作不重放；私网 URL 默认改走本地实例。
+- 新增电脑控制（`computer`，默认关闭）：`computer_use` 只通过显式配置的命令或端点驱动，能力清单需显式批准，不接受模型跳过授权。
+- 新增程序化工具调用（`code_execution`，默认关闭）：`execute_code` 在受控 Python 内核里经 RPC 调用白名单工具，每次调用仍按当前身份重新授权，并受调用次数、输出与超时上限约束。
+- 新增自动化控制面（`automation`，默认关闭）：循环、目标、心跳、curator 与事件钩子复用持久任务队列；循环命令走共享命令注册表，`!` 与 `/` 指令保持原有授权与一次性回执语义，递归创建自动化会被拒绝。
+- 新增模型运行时（`model_runtime`）：显式路由/回退、按可信会话隔离的辅助请求缓存、MoA 多模型协作、凭据池与 OAuth 登录；新增 Anthropic Messages、Google Gemini 与 Bedrock Converse 原生协议，未配置的实现不会出现在模型列表。
+- 扩展执行后端：新增远程后端与工作副本（worktree）、交互式进程控制、标准输入/信号与断点续传；执行仍要求显式 `backend`，未授权目录与已关闭环境不允许复用。
+- 新增插件系统（`plugins`，默认关闭）：进程插件清单、生命周期、工具与 provider 调用、真实禁用与 hook 拦截；连接器支持 MCP 与托管应用，凭据只经宿主环境或 `vault` 引用。凭据保险库（`vault`，默认关闭）支持 OnePassword/Bitwarden CLI 与空闲锁定。
+- 新增消息平台连接器：LINE、企业微信、Simplex、IRC、邮件、ntfy、relay、webhook、A2A、raft 与通用 Socket 接入，统一入站去重、媒体授权与会话隔离。
+- 新增多媒体链路（`media_tools`，默认关闭）：语音转录、TTS、实时语音与图像工具按提供商配置启用；本机服务与桌面端新增音频流接口。
+- 新增原生记忆提供方（`memory_providers`、`memory_backends`，默认关闭）：hindsight、supermemory、holographic、retaindb、byterover 与 memori，调用走插件/原生授权；技能包支持 `references`/`scripts`/`templates`/`assets` 附属资源、插件技能目录与审计。
+- 持久任务新增依赖图与阻塞、运行中问题澄清、跨平台结果交接（`handoff`，默认关闭）与批量隔离工作副本；任务控制与依赖校验仍以可信身份为准。
+- 新增桌面应用（`desktop/`，Electron）与 `setup` 安装向导、`devtools` LSP 诊断与编辑前快照；桌面端只连接回环服务并使用既有令牌。
+- 本机服务新增 Agent 运行 API、运行转向（steer）、音频流与保险库端点（`api`，默认开启，仍要求服务端 Bearer 令牌）。
+
+### Changed
+
+- 配置新增 `browser`、`computer`、`media_tools`、`code_execution`、`control`、`memory_providers`、`memory_backends`、`model_runtime`、`plugins`、`vault`、`agent_tools`、`desktop`、`devtools`、`automation`、`batch`、`handoff`、`api` 小节，默认全部关闭
+  （`api` 保持开启以兼容既有本机入口）；启动时统一校验，非法能力配置在运行前报错而不是静默忽略。
+- 子代理新增 worker 模型路由、批次并行、上下文通知与输出 schema；父任务预算仍按子任务实际用量记账。
+- 模型客户端在配置了显式路由时只接受白名单模型，未配置路由时仍兼容 `提供商.模型` 隐式写法。
+
+### Fixed
+
+- 修复并行接入的多套插件与平台配置重复声明 `ConnectorConfig` 导致 `internal/config` 无法编译的问题，插件连接器改用独立类型。
+- 修复任务运行器在首个尝试开始即被取消时仍解析模型客户端并建立连接的问题；取消后不再发起请求。
+- 修复企业微信出站头使用 `map[string]string` 与协议读取不一致、导致原生回执绑定丢失的问题。
 
 ### Changed
 

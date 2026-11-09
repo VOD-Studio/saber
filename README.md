@@ -674,9 +674,19 @@ saber/
     acp/                           # Agent Client Protocol stdio 适配（saber acp）
     conversation/                  # 平台无关的历史、串行调度与回复交付
     task/                          # SQLite 任务与定时计划、执行日志、目录互斥和结果重试
+    automation/                    # 持久自动化的调度、边界、审计与任务交付，复用唯一任务管理器
+    batch/                         # 从持久任务导出 ShareGPT 轨迹、检查点与评估
     execution/                     # 容器命令/文件工具、权限检查、日志与交付文件
       snapshots.go                 # write_file/apply_patch 写前快照与回滚
       refs.go                      # 工作区上下文文件与 @ 引用解析
+    browser/                       # 原生 CDP 浏览器工具与进程管理，不执行宿主脚本
+    computer/                      # 经 cua-driver MCP 的桌面截屏与输入控制
+    codeexec/                      # 受任务隔离的持久代码单元与工具 RPC
+    devtools/                      # 受任务后端约束的 LSP 诊断、补全与文档辅助
+    discovery/                     # 按当前任务授权渐进披露工具
+    toolkit/                       # 可选能力共用的工具端口与宿主授权
+    vault/                         # 按用户与站点绑定的秘密存储，仅交给受监督浏览器
+    plugins/                       # 显式安装的进程插件、受权扩展调用与托管连接器
     agent/
       runtime.go                   # 独立执行循环、预算、取消和工具错误回传
       types.go                     # 模型与工具接口、运行事件和每轮记录
@@ -686,8 +696,10 @@ saber/
       errors.go                    # 错误定义
     server/                        # 本机会话接口、令牌认证、持久化事件流与本机命令入口
     tui/                           # Charm 聊天界面、模型选择、断线续读
+    desktop/                       # 隔离 Electron 桌面客户端启动、面板与音频代理
     cli/
       flags.go                     # 命令行标志解析
+    setup/                         # 显式授权的本机初始化、配置、安装、升级与回滚
     config/
       config.go                    # 配置加载和验证
       commands.go                  # 命令管理员与会话写入权限
@@ -762,6 +774,7 @@ saber/
         js_sandbox.go              # JavaScript 沙箱
         stdio.go                   # Stdio MCP 服务器
         http.go                    # HTTP MCP 服务器
+    media/                         # Go 原生媒体协议、生成、转录与实时语音
     meme/
       service.go                   # Meme 服务（Klipy API）
       chat_command.go              # 通用图片命令处理
@@ -780,6 +793,7 @@ saber/
       history.go                   # 历史投影记录、FTS5 全文召回与上下文读取
       review.go                    # 复盘设置、配额、排除来源与复盘结果存储
       skills.go                    # 程序性技能存储、CAS版本控制、建议流与目录生成
+    memoryproviders/               # 已核实协议的外部原生记忆服务接入，作用域与权限由 Saber 决定
 ```
 
 ## 开发
