@@ -14,7 +14,7 @@ type AgentToolsConfig struct {
 
 // DefaultAgentToolsConfig 在工具集合较大时开启渐进式披露。
 func DefaultAgentToolsConfig() AgentToolsConfig {
-	return AgentToolsConfig{ToolSearch: "auto", ListingMaxTokens: 2000, SearchLimit: 10, ThresholdPercent: 10, AlwaysVisible: []string{"clarify", "terminal", "read_file", "write_file", "edit_file", "tool_search", "tool_describe", "tool_call"}}
+	return AgentToolsConfig{ToolSearch: "auto", ListingMaxTokens: 2000, SearchLimit: 10, ThresholdPercent: 10, AlwaysVisible: []string{"clarify", "exec", "read_file", "write_file", "apply_patch", "tool_search", "tool_describe", "tool_call"}}
 }
 
 // Validate 拒绝未知开关和无界发现结果。

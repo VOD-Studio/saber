@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 修复并行接入的多套插件与平台配置重复声明 `ConnectorConfig` 导致 `internal/config` 无法编译的问题，插件连接器改用独立类型。
 - 修复任务运行器在首个尝试开始即被取消时仍解析模型客户端并建立连接的问题；取消后不再发起请求。
 - 修复企业微信出站头使用 `map[string]string` 与协议读取不一致、导致原生回执绑定丢失的问题。
+- 修复 `agent_tools.always_visible` 默认值使用旧工具名 `terminal`/`edit_file` 导致永不命中的问题，改为真实工具名 `exec`/`apply_patch`；渐进式披露下基础读写与执行工具恢复常驻可见。
 
 ### Changed
 
