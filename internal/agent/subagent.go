@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -12,7 +11,7 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-// DelegateTool 是内置子代理工具名；只有顶层运行会向模型暴露它。
+// DelegateTool 是内置子代理工具名；是否允许继续委派由程序深度上限决定。
 const DelegateTool = "delegate"
 
 // 子代理默认值与上限；config 包的同名常量必须保持一致。
@@ -34,7 +33,7 @@ const (
 const subagentSystemPrompt = `你是 Saber 的子代理，只完成用户消息给出的单一目标。
 - 你看不到父任务的历史、其他子代理的工作和父任务的工具结果；需要的事实请自己取得。
 - 只做当前目标，不要扩大任务范围，不要复述或续写父任务的计划。
-- 禁止再次委派：delegate 工具不存在，不要请求它。
+- 只有本次工具列表提供 delegate 时才可继续拆分独立目标；不得绕过深度或预算限制。
 - 只使用本次提供的工具；完成后用最终答复简洁总结结果、改动的文件和未完成的点。`
 
 // SubagentPolicy 控制子代理的轮数、用量与并发上限。
@@ -45,6 +44,8 @@ type SubagentPolicy struct {
 	MaxTotalTokens int
 	// MaxParallel 是同一轮并发子代理数上限；零值用 DefaultSubagentMaxParallel，上限 MaxSubagentMaxParallel。
 	MaxParallel int
+	// MaxDepth 是程序允许的最大委派深度，默认 1。
+	MaxDepth int
 }
 
 // Normalize 补齐零值并把越界值钳制到允许范围；负数按零值处理。
@@ -60,6 +61,10 @@ func (p SubagentPolicy) Normalize() SubagentPolicy {
 	if p.MaxTotalTokens < 0 {
 		p.MaxTotalTokens = 0
 	}
+	if p.MaxDepth <= 0 {
+		p.MaxDepth = 1
+	}
+	p.MaxDepth = min(p.MaxDepth, 16)
 	return p
 }
 
@@ -69,7 +74,7 @@ type SubagentHooks struct {
 	// Start 写入启动记录并返回可用于 Finish 的编号；返回 0 表示没有持久化记录。
 	Start func(ctx context.Context, goal string) (int64, error)
 	// Finish 写入终态、结果与用量；Start 返回 0 时不会被调用。
-	Finish func(ctx context.Context, id int64, status Status, result string, usage openai.Usage)
+	Finish func(ctx context.Context, id int64, status Status, result string, usage openai.Usage) error
 }
 
 // SubagentInfo 是子代理生命周期事件的最小事实，供事件消费者渲染或持久化。
@@ -91,12 +96,16 @@ type SubagentInfo struct {
 // SubagentResult 是 delegate 返回给父模型的结构化结果。
 // 子代理失败也是可读结果，父模型据此决定下一步，而不是让父运行失败。
 type SubagentResult struct {
-	ID      int64        `json:"id"`
-	Status  Status       `json:"status"`
-	Error   string       `json:"error,omitempty"`
-	Content string       `json:"content,omitempty"`
-	Usage   openai.Usage `json:"usage"`
-	Rounds  int          `json:"rounds"`
+	ID        int64        `json:"id"`
+	Status    Status       `json:"status"`
+	Error     string       `json:"error,omitempty"`
+	Content   string       `json:"content,omitempty"`
+	Usage     openai.Usage `json:"usage"`
+	Rounds    int          `json:"rounds"`
+	Model     string       `json:"model,omitempty"`
+	WorkDir   string       `json:"work_dir,omitempty"`
+	Detached  bool         `json:"detached,omitempty"`
+	ToolTrace []ToolRecord `json:"tool_trace,omitempty"`
 }
 
 // WorkspaceLease 按工作区串行化工具执行。
@@ -150,6 +159,16 @@ type Delegator struct {
 	LeaseKey string
 	// Hooks 持久化子代理生命周期；为空表示只在事件中可见。
 	Hooks SubagentHooks
+	// Route 只从受信配置选择子模型、图片与结构化输出要求。
+	Route func(context.Context, map[string]any, *Request) error
+	// Spawn 有可靠持久结果出口时返回后台句柄；false 时执行真实同步子运行。
+	Spawn func(context.Context, Request) (SubagentResult, bool, error)
+	// RunChild 支持服务递归装配；为空时使用当前模型与工具构建子 Runtime。
+	RunChild func(context.Context, Request) (Result, error)
+	// Prepare 为同步子运行派生受授权的独立工作副本，结束后必须清理。
+	Prepare   func(context.Context) (context.Context, func(context.Context) error, error)
+	slotsOnce sync.Once
+	slots     chan struct{}
 }
 
 type subagentDepthKey struct{}
@@ -186,8 +205,15 @@ func (d *Delegator) Delegate(ctx context.Context, args map[string]any) (ToolOutp
 	if d == nil {
 		return ToolOutput{}, errors.New("子代理委托器未配置")
 	}
-	if SubagentDepth(ctx) > 0 {
-		return ToolOutput{}, errors.New("delegate 不能在子代理内调用（最大委派深度 1）")
+	if SubagentDepth(ctx) >= d.Policy.Normalize().MaxDepth {
+		return ToolOutput{}, fmt.Errorf("delegate 已达到最大委派深度 %d", d.Policy.Normalize().MaxDepth)
+	}
+	if raw := args["tasks"]; raw != nil {
+		tasks, err := delegateTasksJSON(raw)
+		if err != nil {
+			return ToolOutput{}, err
+		}
+		return d.delegateBatch(ctx, tasks)
 	}
 	goal, err := delegateGoal(args)
 	if err != nil {
@@ -205,12 +231,6 @@ func (d *Delegator) Delegate(ctx context.Context, args map[string]any) (ToolOutp
 		return ToolOutput{}, errors.New("子代理缺少模型入口")
 	}
 
-	// 生命周期事件与持久化必须越过父取消，否则取消时查不到已完成的子代理；
-	// 子运行本身仍使用父 ctx，父取消会立即终止所有子代理。
-	safe := context.WithoutCancel(ctx)
-	id := d.recordStart(safe, goal)
-	emitFromContext(safe, Event{Kind: SubagentStarted, Subagent: &SubagentInfo{ID: id, Goal: goal}})
-
 	childContext := WithSubagentDepth(ctx, SubagentDepth(ctx)+1)
 	child := Request{
 		ReasoningEffort: d.Parent.ReasoningEffort,
@@ -218,11 +238,57 @@ func (d *Delegator) Delegate(ctx context.Context, args map[string]any) (ToolOutp
 			{Role: openai.ChatMessageRoleSystem, Content: subagentSystemPrompt},
 			{Role: openai.ChatMessageRoleUser, Content: goal},
 		},
-		Stream:      d.Parent.Stream,
-		MaxTokens:   d.Parent.MaxTokens,
-		Temperature: d.Parent.Temperature,
-		Model:       d.Parent.Model,
-		Tools:       tools,
+		Stream:        d.Parent.Stream,
+		MaxTokens:     d.Parent.MaxTokens,
+		Temperature:   d.Parent.Temperature,
+		Model:         d.Parent.Model,
+		Tools:         tools,
+		SubagentDepth: SubagentDepth(ctx) + 1,
+	}
+	for _, tool := range tools {
+		if tool.Function != nil {
+			child.ToolScope = append(child.ToolScope, tool.Function.Name)
+		}
+	}
+	if gate, ok := AttemptGateFromContext(ctx); ok {
+		child.ParentAttemptGate = gate
+	}
+	if d.Route != nil {
+		if err := d.Route(ctx, args, &child); err != nil {
+			return ToolOutput{}, err
+		}
+	}
+	d.slotsOnce.Do(func() { d.slots = make(chan struct{}, d.Policy.Normalize().MaxParallel) })
+	select {
+	case d.slots <- struct{}{}:
+		defer func() { <-d.slots }()
+	case <-ctx.Done():
+		return ToolOutput{}, ctx.Err()
+	}
+	if d.Spawn != nil {
+		spawned, detached, spawnErr := d.Spawn(ctx, child)
+		if spawnErr != nil {
+			return ToolOutput{}, spawnErr
+		}
+		if detached {
+			emitFromContext(ctx, Event{Kind: SubagentStarted, Subagent: &SubagentInfo{ID: spawned.ID, Goal: goal}})
+			return ToolOutput{Value: spawned}, nil
+		}
+	}
+	safe := context.WithoutCancel(ctx)
+	id, startErr := d.recordStart(safe, goal)
+	if startErr != nil {
+		return ToolOutput{}, startErr
+	}
+	emitFromContext(safe, Event{Kind: SubagentStarted, Subagent: &SubagentInfo{ID: id, Goal: goal}})
+	var cleanup func(context.Context) error
+	if d.Prepare != nil {
+		prepared, release, prepareErr := d.Prepare(childContext)
+		if prepareErr != nil {
+			return ToolOutput{}, errors.Join(prepareErr, d.recordFinish(safe, id, Failed, prepareErr.Error(), openai.Usage{}))
+		}
+		childContext = prepared
+		cleanup = release
 	}
 	policy := d.Policy.Normalize()
 	runtime := Runtime{
@@ -232,7 +298,19 @@ func (d *Delegator) Delegate(ctx context.Context, args map[string]any) (ToolOutp
 		Context:   d.Context,
 		Summarize: d.Summarize,
 	}
-	result, runErr := runtime.Run(childContext, child, nil)
+	var result Result
+	var runErr error
+	if d.RunChild != nil {
+		result, runErr = d.RunChild(childContext, child)
+	} else {
+		result, runErr = runtime.Run(childContext, child, nil)
+	}
+	if cleanup != nil {
+		if cleanupErr := cleanup(context.WithoutCancel(childContext)); cleanupErr != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("清理子代理工作副本失败: %w", cleanupErr))
+			result.Status = Failed
+		}
+	}
 	status := result.Status
 	if status == "" {
 		status = Failed
@@ -243,10 +321,12 @@ func (d *Delegator) Delegate(ctx context.Context, args map[string]any) (ToolOutp
 	}
 	info := &SubagentInfo{ID: id, Goal: goal, Status: status, Result: result.Content, Usage: result.Usage, Error: message}
 	emitFromContext(safe, Event{Kind: SubagentFinished, Subagent: info})
-	d.recordFinish(safe, id, status, result.Content, result.Usage)
+	if err := d.recordFinish(safe, id, status, result.Content, result.Usage); err != nil {
+		return ToolOutput{}, err
+	}
 	return ToolOutput{Value: SubagentResult{
-		ID: id, Status: status, Error: message, Content: result.Content, Usage: result.Usage, Rounds: len(result.Rounds),
-	}}, nil
+		ID: id, Status: status, Error: message, Content: result.Content, Usage: result.Usage, Rounds: len(result.Rounds), Model: child.Model, ToolTrace: childTrace(result),
+	}, Images: childResultImages(result), Files: childResultFiles(result)}, nil
 }
 
 // childExecute 返回子运行的工具入口：只在父工具执行外包一层工作区租约，模型请求不加锁。
@@ -280,7 +360,7 @@ func (d *Delegator) childTools(requested []string) ([]openai.Tool, error) {
 			continue
 		}
 		name := tool.Function.Name
-		if name == "" || name == DelegateTool || name == "saber_task_state" {
+		if name == "" || name == "saber_task_state" || (name == DelegateTool && d.Parent.SubagentDepth+1 >= d.Policy.Normalize().MaxDepth) {
 			continue
 		}
 		if _, exists := available[name]; exists {
@@ -289,7 +369,7 @@ func (d *Delegator) childTools(requested []string) ([]openai.Tool, error) {
 		available[name] = tool
 		order = append(order, name)
 	}
-	if len(requested) == 0 {
+	if requested == nil {
 		tools := make([]openai.Tool, 0, len(order))
 		for _, name := range order {
 			tools = append(tools, available[name])
@@ -312,25 +392,20 @@ func (d *Delegator) childTools(requested []string) ([]openai.Tool, error) {
 	return tools, nil
 }
 
-// recordStart 写入子代理启动记录；持久化失败只记日志，不阻止子代理运行。
-func (d *Delegator) recordStart(ctx context.Context, goal string) int64 {
+// recordStart 写入子代理启动记录；持久化失败拒绝派发副作用。
+func (d *Delegator) recordStart(ctx context.Context, goal string) (int64, error) {
 	if d.Hooks.Start == nil {
-		return 0
+		return 0, nil
 	}
-	id, err := d.Hooks.Start(ctx, goal)
-	if err != nil {
-		slog.Error("记录子代理启动失败", "error", err)
-		return 0
-	}
-	return id
+	return d.Hooks.Start(ctx, goal)
 }
 
 // recordFinish 写入子代理终态；启动记录缺失时跳过。
-func (d *Delegator) recordFinish(ctx context.Context, id int64, status Status, result string, usage openai.Usage) {
+func (d *Delegator) recordFinish(ctx context.Context, id int64, status Status, result string, usage openai.Usage) error {
 	if id <= 0 || d.Hooks.Finish == nil {
-		return
+		return nil
 	}
-	d.Hooks.Finish(ctx, id, status, result, usage)
+	return d.Hooks.Finish(ctx, id, status, result, usage)
 }
 
 // delegateGoal 提取并校验必填的 goal。
@@ -355,7 +430,12 @@ func delegateToolNames(value any) ([]string, error) {
 	case nil:
 		return nil, nil
 	case []string:
-		return raw, nil
+		for _, name := range raw {
+			if strings.TrimSpace(name) == "" {
+				return nil, errors.New("tools 不能含空名称")
+			}
+		}
+		return append([]string{}, raw...), nil
 	case []any:
 		names := make([]string, 0, len(raw))
 		for _, item := range raw {

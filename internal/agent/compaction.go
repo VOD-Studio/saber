@@ -241,6 +241,11 @@ func (r Runtime) compact(ctx context.Context, req Request, round int, emit func(
 			}
 		}
 	}
+	if r.OnCompaction != nil {
+		if err := r.OnCompaction(ctx); err != nil {
+			return req, nil, fmt.Errorf("context_compaction_failed: %w", err)
+		}
+	}
 	checkpoint := &Checkpoint{Request: cloneRequest(newReq), ThroughRound: round - 1}
 	emit(Event{Kind: ContextCompacted, Round: round, State: CloneTaskState(req.State), Checkpoint: checkpoint})
 	return newReq, checkpoint, nil

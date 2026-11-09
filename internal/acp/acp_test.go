@@ -19,6 +19,11 @@ import (
 
 const testToken = "test-server-token"
 
+type chatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 // syncBuffer 是并发安全的 stderr 缓冲，slog 与测试断言可能同时访问。
 type syncBuffer struct {
 	mu  sync.Mutex
@@ -107,6 +112,43 @@ func newFakeServer(t *testing.T, status int, block bool) (*httptest.Server, *fak
 			return
 		}
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	})
+	mux.HandleFunc("POST /v1/runs", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Session string `json:"session"`
+			Text    string `json:"text"`
+		}
+		if json.NewDecoder(r.Body).Decode(&in) != nil {
+			http.Error(w, "bad request", 400)
+			return
+		}
+		if state.status != 0 {
+			http.Error(w, "denied", state.status)
+			return
+		}
+		history := state.last()
+		if len(history) > 0 {
+			history = append(history, chatMessage{Role: "assistant", Content: "你好"})
+		}
+		history = append(history, chatMessage{Role: "user", Content: in.Text})
+		state.record(history)
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": state.requestCount(), "session": in.Session, "status": "running"})
+	})
+	mux.HandleFunc("GET /v1/runs/{run}/events", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: event\ndata: {\"kind\":\"text_delta\",\"text\":\"你\"}\n\nevent: event\ndata: {\"kind\":\"text_delta\",\"text\":\"好\"}\n\n")
+		w.(http.Flusher).Flush()
+		if state.block {
+			<-r.Context().Done()
+			return
+		}
+		_, _ = fmt.Fprintf(w, "event: task\ndata: {\"id\":%s,\"status\":\"completed\",\"content\":\"你好\"}\n\n", r.PathValue("run"))
+	})
+	mux.HandleFunc("POST /v1/runs/{run}/cancel", func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, `{}`) })
+	mux.HandleFunc("POST /v1/control/questions", func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, `[]`) })
+	mux.HandleFunc("POST /v1/control/graph", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"task":{"Status":"running"},"control":{}}`)
 	})
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
@@ -422,8 +464,8 @@ func TestRun_Initialize(t *testing.T) {
 	if !ok {
 		t.Fatalf("缺少 agentCapabilities: %v", result)
 	}
-	if caps["loadSession"] != false {
-		t.Fatalf("loadSession = %v，期望 false", caps["loadSession"])
+	if caps["loadSession"] != true {
+		t.Fatalf("loadSession = %v，期望 true", caps["loadSession"])
 	}
 	promptCaps, ok := caps["promptCapabilities"].(map[string]any)
 	if !ok {
@@ -457,8 +499,8 @@ func TestRun_SessionNew(t *testing.T) {
 	if id := resultOf(t, resp)["sessionId"]; id == "" {
 		t.Fatalf("带 mcpServers 的 session/new 未返回 sessionId: %v", resp)
 	}
-	if !strings.Contains(h.stderr.String(), "mcp_servers") {
-		t.Fatalf("未记录被忽略的 mcpServers: %s", h.stderr.String())
+	if strings.Contains(h.stderr.String(), "ignored_mcp_servers") {
+		t.Fatal("MCP 引用仍被静默忽略")
 	}
 }
 

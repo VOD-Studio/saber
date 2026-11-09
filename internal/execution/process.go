@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"rua.plus/saber/internal/chat"
@@ -20,24 +21,31 @@ const (
 
 // processRecord 保存一个后台作业的终态、归档句柄与取消函数。
 type processRecord struct {
-	id      string
-	taskID  int64
-	command string
-	archive *outputArchive
-	proc    ownedProcess
-	cancel  context.CancelFunc
-	done    chan struct{}
-	mu      sync.Mutex
-	code    int
-	exited  bool
-	err     string
-	started time.Time
+	id           string
+	taskID       int64
+	command      string
+	archive      *outputArchive
+	proc         ownedProcess
+	cancel       context.CancelFunc
+	done         chan struct{}
+	mu           sync.Mutex
+	code         int
+	exited       bool
+	err          string
+	started      time.Time
+	pty          bool
+	notify       bool
+	ownerID      atomic.Int64
+	ownerCtx     context.Context
+	ownerVersion uint64
+	ownerChanged chan struct{}
+	persistMu    sync.Mutex
 }
 
 func (p *processRecord) status() map[string]any {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	data := map[string]any{"id": p.id, "status": "running", "output_id": p.archive.ID, "started_at": p.started.UTC().Format(time.RFC3339)}
+	data := map[string]any{"id": p.id, "status": "running", "output_id": p.archive.ID, "owner_task_id": p.taskID, "pty": p.pty, "started_at": p.started.UTC().Format(time.RFC3339)}
 	if p.exited {
 		data["status"] = "exited"
 		data["exit_code"] = p.code
@@ -56,7 +64,9 @@ func (p *processRecord) running() bool {
 
 // stop 取消作业并等待清理；已结束作业直接视为已清理。
 func (p *processRecord) stop(ctx context.Context) error {
-	p.cancel()
+	if p.cancel != nil {
+		p.cancel()
+	}
 	if !p.running() {
 		return nil
 	}
@@ -78,6 +88,11 @@ func (e *Executor) runProcess(ctx context.Context, args map[string]any, run scop
 	result := Result{ExitCode: -1}
 	action, _ := args["action"].(string)
 	switch action {
+	case "write", "close_stdin", "resize", "signal":
+		return e.controlProcess(ctx, args, run)
+	case "notifications":
+		events, err := e.DrainProcessNotifications(ctx)
+		return Result{ExitCode: 0, Summary: fmt.Sprintf("%d process notifications", len(events)), Data: map[string]any{"notifications": events}}, err
 	case "start":
 		return e.startProcess(ctx, args, run)
 	case "list":
@@ -217,6 +232,9 @@ func (e *Executor) listProcesses(run scope) (Result, error) {
 }
 
 func (e *Executor) startProcess(ctx context.Context, args map[string]any, run scope) (Result, error) {
+	startLock := e.fileLock(run.dir, "\x00process-start")
+	startLock.Lock()
+	defer startLock.Unlock()
 	result := Result{ExitCode: -1}
 	command, _ := args["command"].(string)
 	identity, ok := chat.IdentityFromContext(ctx)
@@ -257,15 +275,25 @@ func (e *Executor) startProcess(ctx context.Context, args map[string]any, run sc
 		return result, err
 	}
 	writer := &archiveWriter{file: archive.file}
-	procCtx, cancel := context.WithCancel(ctx)
+	procCtx, cancel := context.WithCancel(context.WithoutCancel(e.DeveloperContext(ctx)))
 	writer.cancel = cancel
-	process, err := entry.environment.Start(procCtx, command, writer)
+	options, patterns, heartbeat, notify := processOptions(args, command)
+	interactive, ok := entry.environment.(interactiveEnvironment)
+	if !ok {
+		cancel()
+		_ = archive.close(e)
+		return result, errors.New("execution backend has no process interaction transport")
+	}
+	record := &processRecord{id: id, taskID: run.id, command: command, archive: archive, cancel: cancel, done: make(chan struct{}), started: time.Now(), pty: options.PTY, notify: notify, ownerCtx: e.DeveloperContext(ctx), ownerChanged: make(chan struct{})}
+	record.ownerID.Store(run.id)
+	watcher := &processWatchWriter{writer: writer, executor: e, owner: &record.ownerID, id: id, outputID: archive.ID, patterns: patterns, matched: make([]bool, len(patterns))}
+	process, err := interactive.StartInteractive(procCtx, options, watcher)
 	if err != nil {
 		cancel()
 		_ = archive.close(e)
 		return result, err
 	}
-	record := &processRecord{id: id, taskID: run.id, command: command, archive: archive, proc: process, cancel: cancel, done: make(chan struct{}), started: time.Now()}
+	record.proc = process
 	e.processMu.Lock()
 	if e.processes[run.id] == nil {
 		e.processes[run.id] = make(map[string]*processRecord)
@@ -278,17 +306,43 @@ func (e *Executor) startProcess(ctx context.Context, args map[string]any, run sc
 		record.mu.Lock()
 		record.code = code
 		record.exited = true
-		switch {
-		case waitErr != nil:
-			record.err = waitErr.Error()
-		case writer.err != nil:
-			record.err = writer.err.Error()
-		case closeErr != nil:
-			record.err = closeErr.Error()
+		writer.mu.Lock()
+		outputErr := writer.err
+		writer.mu.Unlock()
+		if terminalErr := errors.Join(waitErr, outputErr, closeErr); terminalErr != nil {
+			record.err = terminalErr.Error()
 		}
 		record.mu.Unlock()
+		if record.notify {
+			event := ProcessNotification{ProcessID: id, OutputID: archive.ID, Kind: "completed", ExitCode: code}
+			record.mu.Lock()
+			event.Error = record.err
+			record.mu.Unlock()
+			if err := e.enqueueNotification(record.ownerID.Load(), event); err != nil {
+				record.mu.Lock()
+				record.err = err.Error()
+				record.mu.Unlock()
+			}
+		}
+		if err := e.persistProcess(record); err != nil {
+			record.mu.Lock()
+			record.err = err.Error()
+			record.mu.Unlock()
+		}
 		close(record.done)
 	}()
+	if err = e.persistProcess(record); err != nil {
+		_ = record.stop(context.Background())
+		return result, err
+	}
+	go e.heartbeat(record, heartbeat)
+	go record.watchOwner()
+	if initial, ok := args["stdin"].(string); ok && initial != "" {
+		if _, err = process.Write([]byte(initial)); err != nil {
+			_ = record.stop(context.Background())
+			return result, err
+		}
+	}
 	result.ExitCode = 0
 	result.Data = map[string]any{"id": id, "status": "running", "output_id": archive.ID}
 	result.Summary = "started process " + id

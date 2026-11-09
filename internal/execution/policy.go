@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -18,9 +19,10 @@ import (
 
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
+	"rua.plus/saber/internal/devtools"
 )
 
-// Executor 持有只读授权快照；所有本地工具始终通过 Docker 执行。
+// Executor 持有只读授权快照，所有执行后端和扩展工具复用同一权限边界。
 type Executor struct {
 	cfg     config.ExecutionConfig
 	grants  map[string]config.ExecutionGrant
@@ -32,9 +34,10 @@ type Executor struct {
 	outputMu      sync.RWMutex
 	outputAuth    func(context.Context, int64) error
 	// backends 按名称缓存无状态后端实现；环境生命周期由 envs 管理。
-	backends map[string]backend
-	envMu    sync.Mutex
-	envs     map[int64]*envEntry
+	backends  map[string]backend
+	backendMu sync.Mutex
+	envMu     sync.Mutex
+	envs      map[int64]*envEntry
 	// closedTasks 阻止清理后的任务 ID 重新打开环境。
 	closedTasks sync.Map
 	// processes 按任务保存后台作业，已结束作业保留状态与日志引用。
@@ -46,17 +49,32 @@ type Executor struct {
 	approvalMu           sync.Mutex
 	approvals            map[string]*approvalRequest
 	approvalFingerprints map[string]string
+	derivedMu            sync.Mutex
+	derived              map[string]*derivedWorkspace
+	fileMu               sync.Mutex
+	fileLocks            map[string]*sync.Mutex
+	notifyMu             sync.Mutex
+	notifications        map[int64][]ProcessNotification
+	devtools             *devtools.Manager
+	forbiddenSecrets     []string
+	transferMu           sync.Mutex
+	transferAuthorize    func(context.Context, context.Context) error
 }
 
 type scope struct {
-	id  int64
-	dir string
+	id       int64
+	dir      string
+	lifetime context.Context
 }
 type scopeKey struct{}
 
 // WithTask 注入程序确定的任务身份和目录，工具参数无法覆盖。
 func WithTask(ctx context.Context, id int64, dir string) context.Context {
-	return context.WithValue(ctx, scopeKey{}, scope{id, dir})
+	lifetime := ctx
+	if previous, ok := ctx.Value(scopeKey{}).(scope); ok && previous.id == id && previous.lifetime != nil {
+		lifetime = previous.lifetime
+	}
+	return context.WithValue(ctx, scopeKey{}, scope{id: id, dir: dir, lifetime: lifetime})
 }
 
 func identityKey(i chat.Identity) string {
@@ -141,12 +159,18 @@ func ValidateConfig(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets
 			}
 		}
 	}
+	if err := validateRemoteConfig(&cfg); err != nil {
+		return cfg, err
+	}
 	logDir, err := filepath.Abs(cfg.LogDir)
 	if err != nil {
 		return cfg, err
 	}
 	cfg.LogDir = logDir
 	protectedPaths = append(slices.Clone(protectedPaths), logDir, "/var/run/docker.sock")
+	if cfg.SSH.KeyPath != "" {
+		protectedPaths = append(protectedPaths, cfg.SSH.KeyPath)
+	}
 	for name, w := range cfg.Workspaces {
 		if !filepath.IsAbs(w.Path) || w.Path == string(filepath.Separator) {
 			return cfg, fmt.Errorf("workspace %q requires a specific absolute directory", name)
@@ -230,8 +254,14 @@ func ValidateConfig(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets
 		if backend == "local" && (grant.Room == "*" || slices.Contains(grant.Users, "*")) {
 			return cfg, fmt.Errorf("workspace %q cannot grant wildcard room/users on the local backend: local execution is not a sandbox; use backend: docker", grant.Workspace)
 		}
+		if backend == "ssh" && (grant.Room == "*" || slices.Contains(grant.Users, "*")) {
+			return cfg, fmt.Errorf("workspace %q cannot grant wildcard identities on SSH: the remote account is not a sandbox", grant.Workspace)
+		}
 		for _, tool := range grant.Tools {
-			if !LocalTool(tool) {
+			if !LocalTool(tool) && !featureName.MatchString(tool) && !validMCPName(tool) {
+				return cfg, fmt.Errorf("invalid exact tool permission %q", tool)
+			}
+			if strings.HasPrefix(tool, "mcp:") {
 				if _, ok := cfg.MCPRequirements[tool]; !ok {
 					return cfg, fmt.Errorf("tool %q has no trusted permission declaration", tool)
 				}
@@ -257,7 +287,7 @@ func ValidateConfig(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets
 				return cfg, err
 			}
 			if cfg.Backend == "" && cfg.Workspaces[name].Backend == "" {
-				return cfg, errors.New("execution backend must be explicit when enabling execution: set backend: local or docker")
+				return cfg, errors.New("execution backend must be explicitly configured when enabling execution")
 			}
 			if backend != "local" {
 				continue
@@ -314,13 +344,17 @@ func New(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) 
 		}
 	}
 	e := &Executor{
-		cfg:       cfg,
-		grants:    make(map[string]config.ExecutionGrant),
-		admins:    make(map[string]bool),
-		owner:     fmt.Sprintf("%x", sha256.Sum256([]byte(cfg.LogDir))),
-		backends:  make(map[string]backend),
-		envs:      make(map[int64]*envEntry),
-		processes: make(map[int64]map[string]*processRecord),
+		cfg:              cfg,
+		forbiddenSecrets: slices.Clone(forbiddenSecrets),
+		grants:           make(map[string]config.ExecutionGrant),
+		admins:           make(map[string]bool),
+		owner:            fmt.Sprintf("%x", sha256.Sum256([]byte(cfg.LogDir))),
+		backends:         make(map[string]backend),
+		envs:             make(map[int64]*envEntry),
+		processes:        make(map[int64]map[string]*processRecord),
+		derived:          make(map[string]*derivedWorkspace),
+		fileLocks:        make(map[string]*sync.Mutex),
+		notifications:    make(map[int64][]ProcessNotification),
 		// 规则在 ValidateConfig 校验后只编译这一次。
 		guard:                newCommandGuard(cfg),
 		approvals:            make(map[string]*approvalRequest),
@@ -336,6 +370,9 @@ func New(cfg config.ExecutionConfig, protectedPaths, forbiddenSecrets []string) 
 			key := identityKey(chat.Identity{Session: chat.Session{Platform: grant.Platform, Account: grant.Account, Conversation: grant.Room}, SenderID: user})
 			e.grants[key] = grant
 		}
+	}
+	if err = e.loadProcessRecords(); err != nil {
+		return nil, err
 	}
 	if err = e.loadEnvironmentRecords(); err != nil {
 		return nil, err
@@ -431,11 +468,14 @@ func (e *Executor) Check(ctx context.Context, tool string) error {
 		return err
 	}
 	run, ok := ctx.Value(scopeKey{}).(scope)
-	if !ok || run.dir != dir {
+	if !ok || !e.authorizedDirectory(identity, run, dir) {
 		return errors.New("tool workspace does not match current authorization")
 	}
 	if _, blocked := e.blocked.Load(dir); blocked {
-		return errors.New("workspace quarantined after container cleanup failure")
+		return errors.New("workspace quarantined after environment cleanup failure")
+	}
+	if _, blocked := e.blocked.Load(run.dir); blocked {
+		return errors.New("derived workspace quarantined after environment cleanup failure")
 	}
 	grant, _ := e.grant(identity)
 	authorized := slices.Contains(grant.Tools, tool)
@@ -446,16 +486,27 @@ func (e *Executor) Check(ctx context.Context, tool string) error {
 	if !authorized {
 		return fmt.Errorf("tool %q is not authorized", tool)
 	}
-	if !LocalTool(tool) {
-		required, ok := e.cfg.MCPRequirements[tool]
-		if !ok {
-			return errors.New("MCP tool has no trusted permission declaration")
+	if tool == "exec" || tool == "process" {
+		backend, backendErr := e.cfg.BackendFor(grant.Workspace)
+		if backendErr != nil {
+			return backendErr
 		}
-		for _, capability := range append(slices.Clone(required), "external") {
-			if !slices.Contains(grant.Capabilities, capability) {
-				return fmt.Errorf("tool requires separately granted %s capability", capability)
+		if backend != "local" && backend != "docker" {
+			if err := checkCapabilities(grant, nil, true); err != nil {
+				return err
 			}
 		}
+	}
+	if strings.HasPrefix(tool, "mcp:") {
+		required, ok := e.cfg.MCPRequirements[tool]
+		if !ok || !validMCPName(tool) {
+			return errors.New("MCP tool has no trusted permission declaration")
+		}
+		if err := checkCapabilities(grant, required, true); err != nil {
+			return err
+		}
+	} else if !LocalTool(tool) {
+		return errors.New("feature tools must use CheckFeature authorization")
 	}
 	return nil
 }
@@ -474,6 +525,10 @@ func (e *Executor) AllowedTools(identity chat.Identity) []string {
 	tools := make([]string, 0, len(grant.Tools))
 	for _, tool := range grant.Tools {
 		if LocalTool(tool) {
+			tools = append(tools, tool)
+			continue
+		}
+		if !strings.HasPrefix(tool, "mcp:") && featureName.MatchString(tool) {
 			tools = append(tools, tool)
 			continue
 		}
@@ -524,3 +579,86 @@ func (e *Executor) Timeout() time.Duration { return time.Duration(e.cfg.TimeoutS
 
 // IsTaskAdmin 查询配置中的精确管理授权；管理员身份不开放任何执行工具。
 func (e *Executor) IsTaskAdmin(identity chat.Identity) bool { return e.admins[identityKey(identity)] }
+
+var featureName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,127}$`)
+
+func validMCPName(name string) bool {
+	parts := strings.Split(name, ":")
+	return len(parts) == 3 && parts[0] == "mcp" && featureName.MatchString(parts[1]) && featureName.MatchString(parts[2])
+}
+
+func checkCapabilities(grant config.ExecutionGrant, required []string, external bool) error {
+	for _, capability := range required {
+		if !slices.Contains(grant.Capabilities, capability) {
+			return fmt.Errorf("tool requires separately granted %s capability", capability)
+		}
+	}
+	if external && !slices.Contains(grant.Capabilities, "external") {
+		return errors.New("tool requires separately granted external capability")
+	}
+	return nil
+}
+
+// CheckFeature 对可选工具的发现与调用执行同一精确授权；非 MCP 工具不能借声明规避 external。
+func (e *Executor) CheckFeature(ctx context.Context, name string, external bool) error {
+	if strings.HasPrefix(name, "mcp:") || LocalTool(name) {
+		if err := e.Check(ctx, name); err != nil {
+			return err
+		}
+	} else {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !featureName.MatchString(name) {
+			return errors.New("invalid feature permission name")
+		}
+		identity, ok := chat.IdentityFromContext(ctx)
+		if !ok {
+			return errors.New("tool permission requires trusted identity")
+		}
+		dir, err := e.Workspace(identity)
+		if err != nil {
+			return err
+		}
+		run, ok := ctx.Value(scopeKey{}).(scope)
+		if !ok || !e.authorizedDirectory(identity, run, dir) {
+			return errors.New("tool workspace does not match current authorization")
+		}
+		if _, blocked := e.blocked.Load(dir); blocked {
+			return errors.New("workspace is quarantined")
+		}
+		if _, blocked := e.blocked.Load(run.dir); blocked {
+			return errors.New("derived workspace is quarantined")
+		}
+		grant, _ := e.grant(identity)
+		if !slices.Contains(grant.Tools, name) {
+			return fmt.Errorf("tool %q is not authorized", name)
+		}
+	}
+	identity, _ := chat.IdentityFromContext(ctx)
+	grant, _ := e.grant(identity)
+	return checkCapabilities(grant, nil, external)
+}
+
+// TaskScope 返回仅由程序注入的任务编号与实际授权目录。
+func TaskScope(ctx context.Context) (int64, string, bool) {
+	run, ok := ctx.Value(scopeKey{}).(scope)
+	return run.id, run.dir, ok && run.id > 0 && run.dir != ""
+}
+
+// WorkspaceForContext 返回经过任务与派生工作区授权复核的实际目录。
+func (e *Executor) WorkspaceForContext(ctx context.Context) (string, error) {
+	identity, ok := chat.IdentityFromContext(ctx)
+	if !ok {
+		return "", errors.New("workspace requires trusted identity")
+	}
+	base, err := e.Workspace(identity)
+	if err != nil {
+		return "", err
+	}
+	run, ok := ctx.Value(scopeKey{}).(scope)
+	if !ok || !e.authorizedDirectory(identity, run, base) {
+		return "", errors.New("workspace does not match current task")
+	}
+	return run.dir, nil
+}

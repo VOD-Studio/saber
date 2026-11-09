@@ -52,10 +52,11 @@ type Turn struct {
 
 // Message 包含客户端生成的幂等键和本轮选择，不接受客户端指定的执行身份。
 type Message struct {
-	ID     string `json:"id"`
-	Text   string `json:"text"`
-	Model  string `json:"model"`
-	Effort string `json:"effort"`
+	ID          string            `json:"id"`
+	Text        string            `json:"text"`
+	Model       string            `json:"model"`
+	Effort      string            `json:"effort"`
+	Attachments []chat.Attachment `json:"attachments,omitempty"`
 }
 
 // CommandInput 是本机可信指令请求；ID 作为有副作用命令的幂等键。
@@ -96,6 +97,34 @@ func New(service *ai.Service, token string, commands ...CommandDispatcher) http.
 	// OpenAI 兼容接口不依赖任务数据库，由处理器自行确认模型能力。
 	mux.HandleFunc("GET /v1/models", h.models)
 	mux.HandleFunc("POST /v1/chat/completions", h.chatCompletions)
+	mux.HandleFunc("POST /v1/runs", h.createRun)
+	mux.HandleFunc("GET /v1/runs/{run}", h.getRun)
+	mux.HandleFunc("GET /v1/runs/{run}/events", h.runEvents)
+	mux.HandleFunc("POST /v1/runs/{run}/cancel", h.cancelRun)
+	mux.HandleFunc("POST /v1/runs/{run}/stop", h.cancelRun)
+	mux.HandleFunc("POST /v1/runs/{run}/resume", h.runControl)
+	mux.HandleFunc("POST /v1/runs/{run}/approval", h.runControl)
+	mux.HandleFunc("POST /v1/runs/{run}/clarify", h.runControl)
+	mux.HandleFunc("POST /v1/runs/{run}/steer", h.steerRun)
+	mux.HandleFunc("POST /v1/responses", h.responses)
+	mux.HandleFunc("GET /v1/responses/{response}", h.responseGet)
+	mux.HandleFunc("POST /v1/control/graph", h.control)
+	mux.HandleFunc("POST /v1/control/questions", h.control)
+	mux.HandleFunc("POST /v1/tool", h.tool)
+	mux.HandleFunc("POST /v1/audio/transcriptions", h.audio)
+	mux.HandleFunc("POST /v1/audio/speech", h.audio)
+	mux.HandleFunc("POST /v1/audio/live", h.audio)
+	mux.HandleFunc("GET /v1/audio/transcriptions/stream", h.audioStream)
+	mux.HandleFunc("GET /v1/audio/speech/stream", h.audioStream)
+	mux.HandleFunc("POST /v1/audio/wake", h.wake)
+	mux.HandleFunc("POST /v1/audio/sessions", h.startAudioSession)
+	mux.HandleFunc("DELETE /v1/audio/sessions/{task}", h.finishAudioSession)
+	mux.HandleFunc("GET /v1/vault/items", h.vaultAPI)
+	mux.HandleFunc("POST /v1/vault/items", h.vaultAPI)
+	mux.HandleFunc("DELETE /v1/vault/items/{handle}", h.vaultAPI)
+	mux.HandleFunc("POST /v1/vault/sources/{source}/unlock", h.vaultAPI)
+	mux.HandleFunc("GET /v1/vault/sources", h.vaultSources)
+	mux.HandleFunc("POST /v1/vault/code", h.vaultCode)
 	mux.HandleFunc("GET /v1/sessions", h.sessions)
 	mux.HandleFunc("GET /v1/sessions/{session}/tasks", h.history)
 	mux.HandleFunc("POST /v1/sessions/{session}/messages", h.submit)
@@ -112,10 +141,21 @@ func New(service *ai.Service, token string, commands ...CommandDispatcher) http.
 			http.Error(w, "不接受浏览器跨源请求", http.StatusForbidden)
 			return
 		}
+		if service != nil && service.Config() != nil {
+			cfg := service.Config().API
+			if !cfg.Enabled && r.URL.Path != "/v1/info" {
+				http.Error(w, "Agent API 未启用", http.StatusServiceUnavailable)
+				return
+			}
+			if cfg.MaxRequestBytes > 0 {
+				r.Body = http.MaxBytesReader(w, r.Body, cfg.MaxRequestBytes)
+			}
+		}
 		// 本机命令入口由自己的分发器判定是否可用，ping/help 等命令不依赖 AI 与任务。
 		// OpenAI 兼容接口只要求模型能力，不要求任务数据库。
 		openAI := r.URL.Path == "/v1/models" || r.URL.Path == "/v1/chat/completions"
-		if !openAI && r.URL.Path != "/v1/info" && !strings.HasSuffix(r.URL.Path, "/commands") && (service == nil || service.Tasks() == nil) {
+		privateVault := service != nil && strings.HasPrefix(r.URL.Path, "/v1/vault/")
+		if !openAI && !privateVault && r.URL.Path != "/v1/info" && !strings.HasSuffix(r.URL.Path, "/commands") && (service == nil || service.Tasks() == nil) {
 			http.Error(w, "请配置 ai.enabled 和模型后重启服务", http.StatusServiceUnavailable)
 			return
 		}
@@ -211,7 +251,7 @@ func (h *handler) submit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "需要有效的消息编号和单个 JSON 对象", http.StatusBadRequest)
 		return
 	}
-	t, err := h.service.SubmitChatTask(r.Context(), chat.Message{Session: session(r), SenderID: identity(r).SenderID, ID: input.ID, Text: input.Text}, input.Model, input.Effort)
+	t, err := h.service.SubmitChatTask(r.Context(), chat.Message{Session: session(r), SenderID: identity(r).SenderID, ID: input.ID, Text: input.Text, Attachments: input.Attachments}, input.Model, input.Effort)
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, task.ErrBusy) {
@@ -290,7 +330,7 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	controller := http.NewResponseController(w)
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(h.pollInterval())
 	defer ticker.Stop()
 	previousStatus := ""
 	for {

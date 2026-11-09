@@ -4,14 +4,10 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
-// maxContentRunes 是 Slack 消息正文上限（约 40000）；留 1000 字符余量给截断提示。
+// maxContentRunes 是 Slack 每段消息上限；长回复继续发送后续分段。
 const maxContentRunes = 39000
-
-// contentTruncatedSuffix 在超长正文被截断时追加，让读者知道后面还有内容没送达。
-const contentTruncatedSuffix = "\n\n…（内容过长，已截断）"
 
 // apiError 保留 Slack 错误码与限流提示。
 //
@@ -62,32 +58,20 @@ type socketEnvelope struct {
 
 // slackEvent 是 message 事件的字段子集。
 type slackEvent struct {
-	Type        string `json:"type"`
-	Subtype     string `json:"subtype"`
-	User        string `json:"user"`
-	BotID       string `json:"bot_id"`
-	Text        string `json:"text"`
-	Channel     string `json:"channel"`
-	ChannelType string `json:"channel_type"`
-	TS          string `json:"ts"`
-	ThreadTS    string `json:"thread_ts"`
+	Type        string      `json:"type"`
+	Subtype     string      `json:"subtype"`
+	User        string      `json:"user"`
+	BotID       string      `json:"bot_id"`
+	Text        string      `json:"text"`
+	Channel     string      `json:"channel"`
+	ChannelType string      `json:"channel_type"`
+	TS          string      `json:"ts"`
+	ThreadTS    string      `json:"thread_ts"`
+	Files       []mediaFile `json:"files"`
 	Edited      *struct {
 		User string `json:"user"`
 		TS   string `json:"ts"`
 	} `json:"edited"`
-}
-
-// truncateContent 把出站正文压进 Slack 的字符上限。
-func truncateContent(content string) (string, bool) {
-	runes := []rune(content)
-	if len(runes) <= maxContentRunes {
-		return content, false
-	}
-	keep := maxContentRunes - utf8.RuneCountInString(contentTruncatedSuffix)
-	if keep < 0 {
-		keep = 0
-	}
-	return string(runes[:keep]) + contentTruncatedSuffix, true
 }
 
 // escapeText 转义 Slack 控制字符 &、<、>。

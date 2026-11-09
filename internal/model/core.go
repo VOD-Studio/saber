@@ -37,6 +37,7 @@ type Core struct {
 
 	// modelRegistry 管理模型注册和默认模型切换。
 	modelRegistry *ModelRegistry
+	runtime       *modelRuntime
 }
 
 // NewCore 创建一个新的 Core 实例。
@@ -105,9 +106,17 @@ func (c *Core) GetClient(modelName string) (*Client, error) {
 	}
 
 	// 获取模型配置
-	modelConfig, _ := c.globalConfig.GetModelConfig(modelName)
+	modelConfig, found := c.globalConfig.GetModelConfig(modelName)
+	// 配置了显式路由时只接受白名单模型，避免调用方用模型名绕过路由策略。
+	if !found && c.runtime != nil && len(c.runtime.cfg.Routes) > 0 {
+		return nil, fmt.Errorf("模型 %q 未配置", modelName)
+	}
 	if modelConfig.Model == "" || modelConfig.BaseURL == "" {
 		return nil, fmt.Errorf("模型 %q 缺少有效提供商配置", modelName)
+	}
+	providerName, provider := c.providerFor(modelName, modelConfig)
+	if err := configureGoogleEndpoint(&modelConfig, provider.Google); err != nil {
+		return nil, err
 	}
 	cfg := &modelConfig
 
@@ -115,6 +124,15 @@ func (c *Core) GetClient(modelName string) (*Client, error) {
 	newClient, err := NewClientWithModel(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("创建AI客户端失败 (模型: %s): %w", modelName, err)
+	}
+	newClient.provider = provider
+	newClient.modelID = modelName
+	if c.runtime != nil {
+		if err := c.runtime.configureClient(newClient, modelName, providerName, provider); err != nil {
+			return nil, err
+		}
+	} else if provider.OAuth.Enabled || len(provider.Credentials) > 0 || provider.Google.CredentialsFile != "" {
+		return nil, fmt.Errorf("provider authentication requires ConfigureRuntime")
 	}
 
 	c.clients[modelName] = newClient

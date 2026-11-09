@@ -53,14 +53,19 @@ type ConversationInfo struct {
 
 // Attachment 是 adapter 已解析的附件，不包含平台 SDK 对象。
 type Attachment struct {
-	// Kind 当前支持 image；其他附件由上层能力决定是否接受。
-	Kind string
-	// Name 保留附件显示名。
-	Name string
+	// Kind 区分 image、audio、video、file；接入端必须提供实际媒体而非仅元数据。
+	Kind string `json:"kind"`
+	// Name 保留附件显示名，不作为文件系统路径。
+	Name string `json:"name,omitempty"`
 	// MIMEType 是附件媒体类型。
-	MIMEType string
-	// URL 是可供模型使用的图片 URL 或 Data URL，私有媒体由 adapter 先下载。
-	URL string
+	MIMEType string `json:"mime_type,omitempty"`
+	// URL 是 HTTPS 或 Data URL；私有平台媒体应先由 adapter 下载。
+	URL string `json:"url,omitempty"`
+	// Data 保存已下载的媒体字节，JSON 传输使用标准 base64。
+	Data []byte `json:"data,omitempty"`
+	// Size 和 DurationMS 是接入端确认的大小与时长，零值表示未知。
+	Size       int64 `json:"size,omitempty"`
+	DurationMS int64 `json:"duration_ms,omitempty"`
 }
 
 // Message 是发送给 Agent 的规范化入站消息。
@@ -109,8 +114,8 @@ func (m Message) Validate() error {
 		return errors.New("chat message is empty")
 	}
 	for _, a := range m.Attachments {
-		if a.Kind != "image" || a.URL == "" {
-			return errors.New("unsupported or empty chat attachment")
+		if err := a.Validate(); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -126,6 +131,10 @@ type Capabilities struct {
 	Reply bool
 	// ReplyState 表示平台支持回复生命周期和独立 thinking 字段。
 	ReplyState bool
+	// Audio、Video 和 Files 表示接入端具备对应媒体出站能力。
+	Audio bool
+	Video bool
+	Files bool
 }
 
 // ReplyStatus 是平台持久化的回复状态，空值沿用普通文本消息协议。

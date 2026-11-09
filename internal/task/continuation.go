@@ -194,20 +194,32 @@ func (m *Manager) restoreContinuationRequest(ctx context.Context, t Task) (agent
 			responsesHistory[resp.ToolCalls[0].ID] = resp.ResponsesOutput
 		}
 		messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: resp.Content, ToolCalls: resp.ToolCalls})
+		records := make([]agent.ToolRecord, 0, len(resp.ToolCalls))
 		for _, call := range resp.ToolCalls {
-			content := "执行结果未知或尚未执行；先核查外部副作用，不要自动重放。"
-			for _, record := range round.Tools {
-				if record.Call.ID == call.ID {
-					content = record.Content
+			record := agent.ToolRecord{Call: call, Content: "执行结果未知或尚未执行；先核查外部副作用，不要自动重放。"}
+			for _, candidate := range round.Tools {
+				if candidate.Call.ID == call.ID {
+					record = candidate
 					break
 				}
 			}
-			messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleTool, ToolCallID: call.ID, Content: content})
+			records = append(records, record)
 		}
+		messages = agent.AppendToolMessages(messages, records)
 	}
 	if startRound == 0 && len(rounds) == 0 && parent.Result.Content != "" {
 		messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: parent.Result.Content})
 	}
+	received, err := m.receivedChildCompletions(ctx, parent.ID, startRound)
+	if err != nil {
+		return t.Request, err
+	}
+	messages = agent.AppendChildCompletionMessages(messages, received)
+	notices, err := m.contextNotifications(ctx, parent, startRound)
+	if err != nil {
+		return t.Request, err
+	}
+	messages = agent.AppendContextNotifications(messages, notices)
 	messages = append(messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: fmt.Sprintf("[任务续接] 前序任务 #%d 状态 %s。保留原目标与约束，结合以下补充继续；对未确认完成的操作先核查，不自动重放。", parent.ID, parent.Status)})
 	// 新请求的系统提示不覆盖原任务约束；当前授权工具由执行入口重新筛选。
 	for _, msg := range t.Request.Messages {
@@ -280,7 +292,7 @@ func (m *Manager) saveContinuationRequest(ctx context.Context, taskID int64, req
 }
 
 func historyDiagnostic(err error, record any) openai.ChatCompletionMessage {
-	return openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: fmt.Sprintf("[历史响应校验失败：%v；仅作文字诊断，不作为工具调用回放]\n%+v", err, record)}
+	return openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: fmt.Sprintf("[历史响应校验失败：%v；先核查外部副作用，不要自动重放。仅作文字诊断，不作为工具调用回放]\n%+v", err, record)}
 }
 
 // sanitizeToolHistory 同时修复旧版本已持久化的异常调用及孤立结果，不改写合法的工具失败记录。
@@ -329,4 +341,50 @@ func sanitizeToolHistory(messages []openai.ChatCompletionMessage) ([]openai.Chat
 		i++
 	}
 	return clean, changed
+}
+
+// RestoreRequest 把上一任务的真实轨迹并回当前 API 请求；
+// 只允许原会话拥有者续接，系统提示仍以本次请求为准。
+func (m *Manager) RestoreRequest(ctx context.Context, identity chat.Identity, id int64, req agent.Request) (agent.Request, error) {
+	if id <= 0 {
+		return req, nil
+	}
+	previous, err := m.ResolveOwnedTask(ctx, identity, id)
+	if err != nil {
+		return req, err
+	}
+	if previous.Message.Session != identity.Session || previous.Message.SenderID != identity.SenderID {
+		return req, errors.New("previous task belongs to another conversation")
+	}
+	prior, err := m.restoreContinuationRequest(ctx, previous)
+	if err != nil {
+		return req, err
+	}
+	merged := make([]openai.ChatCompletionMessage, 0, len(prior.Messages)+len(req.Messages))
+	keepSystem := func(msg openai.ChatCompletionMessage) bool {
+		return msg.Role != openai.ChatMessageRoleSystem && msg.Role != "developer"
+	}
+	for _, msg := range req.Messages {
+		if !keepSystem(msg) {
+			merged = append(merged, msg)
+		}
+	}
+	for _, msg := range prior.Messages {
+		if keepSystem(msg) {
+			merged = append(merged, msg)
+		}
+	}
+	for _, msg := range req.Messages {
+		if keepSystem(msg) {
+			merged = append(merged, msg)
+		}
+	}
+	req.Messages = merged
+	if req.Summary == "" {
+		req.Summary = prior.Summary
+	}
+	if len(req.ResponsesHistory) == 0 && len(prior.ResponsesHistory) > 0 {
+		req.ResponsesHistory = prior.ResponsesHistory
+	}
+	return req, nil
 }

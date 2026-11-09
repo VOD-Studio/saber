@@ -130,12 +130,12 @@ func TestModelRegistry_SetDefault(t *testing.T) {
 		t.Errorf("after SetDefault(\"openai.gpt-4o\") = %q, want %q", got, "openai.gpt-4o")
 	}
 
-	// 切换到不存在的模型（应该允许）
-	if err := registry.SetDefault("openai.custom-model"); err != nil {
-		t.Errorf("SetDefault(\"openai.custom-model\") error = %v", err)
+	// 未配置模型必须被拒绝，失败不改变当前默认模型。
+	if err := registry.SetDefault("openai.custom-model"); err == nil {
+		t.Fatal("unconfigured model was accepted")
 	}
-	if got := registry.GetDefault(); got != "openai.custom-model" {
-		t.Errorf("after SetDefault(\"openai.custom-model\") = %q, want %q", got, "openai.custom-model")
+	if got := registry.GetDefault(); got != "openai.gpt-4o" {
+		t.Fatalf("rejected switch changed model to %q", got)
 	}
 }
 
@@ -321,9 +321,9 @@ func TestModelRegistry_ValidateModel(t *testing.T) {
 		t.Errorf("ValidateModel(\"openai.default\") error = %v, want nil", err)
 	}
 
-	// 验证不存在的模型（全局配置存在，应该允许）
-	if err := registry.ValidateModel("openai.any-model"); err != nil {
-		t.Errorf("ValidateModel(\"openai.any-model\") error = %v, want nil (global config allows)", err)
+	// 即使有全局配置，模型白名单仍然有效。
+	if err := registry.ValidateModel("openai.any-model"); err == nil {
+		t.Fatal("unconfigured model was accepted")
 	}
 }
 

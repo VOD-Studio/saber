@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
@@ -46,6 +47,8 @@ type SkillFile struct {
 	Content string
 	// Path 是用于展示与审计的相对路径（如 deploy/SKILL.md），不含绝对路径。
 	Path string
+	// Metadata 保留完整 frontmatter，包含许可证、平台与 provider 配置声明。
+	Metadata map[string]any
 }
 
 // SkillFileListing 描述外部只读目录中的一个可用技能。
@@ -99,7 +102,11 @@ func ParseSkillFile(data []byte, path string) (SkillFile, error) {
 	if body == "" {
 		return SkillFile{}, fmt.Errorf("%s: %w", display, ErrSkillFileBody)
 	}
-	return SkillFile{Name: name, Description: description, Content: body, Path: filepath.ToSlash(display)}, nil
+	var metadata map[string]any
+	if err := yaml.Unmarshal([]byte(meta), &metadata); err != nil {
+		return SkillFile{}, fmt.Errorf("%s: %w", display, ErrSkillFileFrontmatter)
+	}
+	return SkillFile{Name: name, Description: description, Content: body, Path: filepath.ToSlash(display), Metadata: metadata}, nil
 }
 
 // skillDisplayPath 只保留用于展示的相对路径，避免错误信息泄露绝对路径。
@@ -152,15 +159,17 @@ func parseSkillMetadata(meta string) (name, description string, err error) {
 		return "", "", fmt.Errorf("%w：必须是键值映射", ErrSkillFileFrontmatter)
 	}
 	values := make(map[string]string, 2)
+	seen := make(map[string]bool)
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		keyNode, valueNode := root.Content[i], root.Content[i+1]
 		if keyNode.Kind != yaml.ScalarNode {
 			return "", "", fmt.Errorf("%w：键必须是字符串", ErrSkillFileFrontmatter)
 		}
 		key := keyNode.Value
-		if _, exists := values[key]; exists {
+		if seen[key] {
 			return "", "", fmt.Errorf("%w：重复键 %s", ErrSkillFileFrontmatter, key)
 		}
+		seen[key] = true
 		if key != "name" && key != "description" {
 			continue
 		}
@@ -210,6 +219,9 @@ func (s *Service) SyncExternalSkills(ctx context.Context, identity chat.Identity
 	files, errs := loadSkillFiles(dirs)
 	result := SkillImportResult{Errors: errs}
 	for _, src := range files {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
 		s.importSkillFile(ctx, identity, src, &result)
 	}
 	return result, nil
@@ -251,40 +263,11 @@ func (s *Service) ExportSkill(ctx context.Context, identity chat.Identity, name,
 	if rel, err := filepath.Rel(root, target); err != nil || rel != name {
 		return "", errors.New("非法的技能导出路径")
 	}
-	skill, err := s.GetSkill(ctx, identity, name)
+	pkg, err := s.GetSkillPackage(ctx, identity, name)
 	if err != nil {
 		return "", err
 	}
-	data, err := renderSkillFile(skill.Name, skill.Description, skill.Content)
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(target, 0o700); err != nil {
-		return "", errors.New("创建技能导出目录失败")
-	}
-	path := filepath.Join(target, SkillFileName)
-	if err := writeFileAtomic(path, data); err != nil {
-		return "", fmt.Errorf("写入 %s 失败", SkillFileName)
-	}
-	return path, nil
-}
-
-// renderSkillFile 生成与导入解析器对称的 SKILL.md 内容。
-func renderSkillFile(name, description, content string) ([]byte, error) {
-	meta, err := yaml.Marshal(struct {
-		Name        string `yaml:"name"`
-		Description string `yaml:"description"`
-	}{Name: name, Description: description})
-	if err != nil {
-		return nil, fmt.Errorf("生成技能元数据失败: %w", err)
-	}
-	var b bytes.Buffer
-	b.WriteString("---\n")
-	b.Write(meta)
-	b.WriteString("---\n\n")
-	b.WriteString(strings.TrimSpace(content))
-	b.WriteString("\n")
-	return b.Bytes(), nil
+	return exportSkillPackage(pkg, root)
 }
 
 // hasParentTraversal 判断路径是否包含 `..` 路径段，避免从导出目录向上穿越。
@@ -295,32 +278,6 @@ func hasParentTraversal(path string) bool {
 		}
 	}
 	return false
-}
-
-// writeFileAtomic 在同目录创建临时文件，写入完成后 rename 覆盖目标。
-func writeFileAtomic(path string, data []byte) (err error) {
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+SkillFileName+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer func() {
-		if err != nil {
-			_ = os.Remove(tmpName)
-		}
-	}()
-	if err = tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if _, err = tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err = tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
 }
 
 // validateSkillRoot 校验导入根目录：必须是存在的绝对路径目录。
@@ -343,106 +300,116 @@ func validateSkillRoot(root string) error {
 func loadSkillFiles(dirs []string) ([]skillFileSource, []error) {
 	var files []skillFileSource
 	var errs []error
+	seen := make(map[string]bool)
 	for _, raw := range dirs {
 		dir := filepath.Clean(strings.TrimSpace(raw))
-		if dir == "" || dir == "." || !filepath.IsAbs(dir) {
-			errs = append(errs, errors.New("技能目录必须是绝对路径"))
+		if err := validateSkillRoot(dir); err != nil {
+			errs = append(errs, err)
 			continue
 		}
-		entries, err := os.ReadDir(dir)
+		root, err := os.OpenRoot(dir)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: 无法读取技能目录", filepath.Base(dir)))
+			errs = append(errs, errors.New("无法读取技能目录"))
 			continue
 		}
-		for _, entry := range entries {
-			// DirEntry.IsDir 不跟随符号链接，这里再显式跳过符号链接，避免越界读取。
-			if entry.Type()&os.ModeSymlink != 0 || !entry.IsDir() {
-				continue
+		walkErr := fs.WalkDir(root.FS(), ".", func(rel string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: 无法读取技能目录", rel))
+				return nil
+			}
+			if entry.Type()&os.ModeSymlink != 0 {
+				return nil
+			}
+			if !entry.IsDir() {
+				return nil
+			}
+			if rel == "." {
+				return nil
 			}
 			name := entry.Name()
-			if validateSkillName(name) != nil {
-				continue
+			if validateSkillName(name) != nil || strings.HasPrefix(name, ".") {
+				return fs.SkipDir
 			}
-			file, err := readSkillDir(dir, name)
+			info, err := root.Lstat(filepath.Join(rel, SkillFileName))
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			if err != nil || !info.Mode().IsRegular() {
+				errs = append(errs, fmt.Errorf("%s: 技能入口不可读取", rel))
+				return fs.SkipDir
+			}
+			data, err := readPackageRootFile(root, filepath.Join(rel, SkillFileName))
 			if err != nil {
-				errs = append(errs, fmt.Errorf("%s: %w", filepath.ToSlash(filepath.Join(name, SkillFileName)), err))
-				continue
+				errs = append(errs, err)
+				return fs.SkipDir
 			}
-			files = append(files, skillFileSource{dir: dir, file: file})
+			file, err := ParseSkillFile(data, filepath.Join(rel, SkillFileName))
+			if err != nil {
+				errs = append(errs, err)
+				return fs.SkipDir
+			}
+			if file.Name != name {
+				errs = append(errs, fmt.Errorf("%s/SKILL.md: frontmatter 名称与目录名不一致", rel))
+				return fs.SkipDir
+			}
+			if !seen[file.Name] {
+				files = append(files, skillFileSource{dir: dir, file: file})
+				seen[file.Name] = true
+			}
+			return fs.SkipDir
+		})
+		if walkErr != nil {
+			errs = append(errs, walkErr)
+		}
+		if err := root.Close(); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	return files, errs
 }
 
-// readSkillDir 读取 `<root>/<name>/SKILL.md` 并校验符号链接、大小与名称一致性。
-func readSkillDir(root, name string) (SkillFile, error) {
-	rel := filepath.ToSlash(filepath.Join(name, SkillFileName))
-	path := filepath.Join(root, name, SkillFileName)
-	info, err := os.Lstat(path)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return SkillFile{}, fmt.Errorf("%s 不存在", SkillFileName)
-		}
-		return SkillFile{}, fmt.Errorf("无法读取 %s", SkillFileName)
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return SkillFile{}, fmt.Errorf("%s 不能是符号链接", SkillFileName)
-	}
-	if !info.Mode().IsRegular() {
-		return SkillFile{}, fmt.Errorf("%s 必须是普通文件", SkillFileName)
-	}
-	if info.Size() > MaxSkillFileBytes {
-		return SkillFile{}, ErrSkillFileTooLarge
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return SkillFile{}, fmt.Errorf("无法读取 %s", SkillFileName)
-	}
-	file, err := ParseSkillFile(data, rel)
-	if err != nil {
-		return SkillFile{}, err
-	}
-	if file.Name != name {
-		return SkillFile{}, fmt.Errorf("frontmatter name %q 与目录名 %q 不一致", file.Name, name)
-	}
-	return file, nil
-}
-
 // importSkillFile 导入单个技能文件：不存在则新增，内容不同则替换，相同则跳过。
 func (s *Service) importSkillFile(ctx context.Context, identity chat.Identity, src skillFileSource, result *SkillImportResult) {
-	source := Source{Message: skillFileSourcePrefix + src.file.Path}
-	current, err := s.GetSkill(ctx, identity, src.file.Name)
-	switch {
-	case err == nil:
-		if current.Description == src.file.Description && current.Content == src.file.Content {
-			result.Skipped++
-			return
-		}
-		mut, err := s.ReplaceSkill(ctx, identity, src.file.Name, current.Version, src.file.Description, src.file.Content, source)
-		if err != nil {
-			result.Errors = append(result.Errors, fmt.Errorf("%s: %w", src.file.Path, err))
-			return
-		}
-		if mut.Suggested {
-			result.Suggested++
-			return
-		}
-		result.Updated++
-	case errors.Is(err, ErrSkillNotFound):
-		mut, err := s.AddSkill(ctx, identity, src.file.Name, src.file.Description, src.file.Content, source)
-		if err != nil {
-			result.Errors = append(result.Errors, fmt.Errorf("%s: %w", src.file.Path, err))
-			return
-		}
-		switch {
-		case mut.Suggested:
-			result.Suggested++
-		case mut.Duplicate:
-			result.Skipped++
-		default:
-			result.Imported++
-		}
-	default:
+	pkg, err := ReadSkillPackageDirectory(ctx, filepath.Join(src.dir, filepath.Dir(src.file.Path)))
+	if err != nil {
 		result.Errors = append(result.Errors, fmt.Errorf("%s: %w", src.file.Path, err))
+		return
+	}
+	digest, err := skillPackageDigest(pkg)
+	if err != nil {
+		result.Errors = append(result.Errors, err)
+		return
+	}
+	pkg.Provenance = SkillProvenance{Source: skillFileSourcePrefix + src.file.Path, Digest: digest, InstalledAt: time.Now(), Scanner: skillScannerVersion}
+	current, err := s.GetSkillPackage(ctx, identity, pkg.Name)
+	var version int64
+	if err == nil {
+		version = current.Version
+		oldDigest, hashErr := skillPackageDigest(current)
+		if hashErr != nil {
+			result.Errors = append(result.Errors, hashErr)
+			return
+		}
+		if oldDigest == digest {
+			result.Skipped++
+			return
+		}
+	} else if !errors.Is(err, ErrSkillNotFound) {
+		result.Errors = append(result.Errors, err)
+		return
+	}
+	mut, err := s.PutSkillPackage(ctx, identity, pkg, version, Source{Message: pkg.Provenance.Source})
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Errorf("%s: %w", src.file.Path, err))
+		return
+	}
+	if mut.Suggested {
+		result.Suggested++
+	} else if mut.Duplicate {
+		result.Skipped++
+	} else if version > 0 {
+		result.Updated++
+	} else {
+		result.Imported++
 	}
 }

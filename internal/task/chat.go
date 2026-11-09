@@ -27,16 +27,19 @@ func (m *Manager) SubmitTurn(ctx context.Context, message chat.Message, dir stri
 		return Task{}, err
 	}
 	if len(existing) > 0 {
+		if err := m.verifyTaskSource(ctx, existing[0], message, dir, req); err != nil {
+			return Task{}, err
+		}
 		return existing[0], nil
 	}
-	latest, err := m.store.query(ctx, `platform=? AND account=? AND room=? ORDER BY id DESC LIMIT 1`, scope(message.Session)...)
+	latest, err := m.store.query(ctx, `platform=? AND account=? AND room=? AND id NOT IN (SELECT task_id FROM task_external) ORDER BY id DESC LIMIT 1`, scope(message.Session)...)
 	if err != nil {
 		return Task{}, err
 	}
 	var parent []int64
 	if len(latest) > 0 {
 		previous := latest[0]
-		if previous.Status == "queued" || previous.Status == "running" {
+		if previous.Status == "queued" || previous.Status == "running" || previous.Status == "blocked" || previous.Status == "review" || previous.Status == "waiting_input" {
 			return Task{}, ErrBusy
 		}
 		if previous.Message.SenderID != message.SenderID {

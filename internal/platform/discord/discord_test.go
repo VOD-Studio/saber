@@ -3,6 +3,7 @@ package discordplatform
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -46,12 +47,14 @@ func newFakeREST(t *testing.T, gateway string) (*httptest.Server, *fakeREST) {
 			var payload map[string]any
 			decodeJSON(t, r, &payload)
 			state.sends = append(state.sends, payload)
-			writeJSON(t, w, map[string]any{"id": "900"})
+			writeJSON(t, w, map[string]any{"id": fmt.Sprint(899 + len(state.sends))})
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/messages/"):
 			var payload map[string]any
 			decodeJSON(t, r, &payload)
 			state.edits = append(state.edits, payload)
 			writeJSON(t, w, map[string]any{"id": "900"})
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/messages/"):
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
 		}
@@ -181,7 +184,7 @@ func TestDiscordConfig_Validate(t *testing.T) {
 	}
 }
 
-// TestDiscordAdapter_SendEdit 验证发送、引用、幂等 nonce、截断与编辑。
+// TestDiscordAdapter_SendEdit 验证完整分段、引用、幂等 nonce 与编辑收尾。
 func TestDiscordAdapter_SendEdit(t *testing.T) {
 	t.Parallel()
 	p, state := newTestPlatform(t)
@@ -199,15 +202,20 @@ func TestDiscordAdapter_SendEdit(t *testing.T) {
 		t.Fatalf("Send 返回 ID = %q, want 900", id)
 	}
 	state.mu.Lock()
-	if len(state.sends) != 1 {
+	if len(state.sends) != 2 {
 		state.mu.Unlock()
-		t.Fatalf("发送次数 = %d, want 1", len(state.sends))
+		t.Fatalf("发送次数=%d, want 2", len(state.sends))
+	}
+	full := state.sends[0]["content"].(string) + state.sends[1]["content"].(string)
+	if full != long {
+		state.mu.Unlock()
+		t.Fatal("长回复未完整送达")
 	}
 	sent := state.sends[0]
 	state.mu.Unlock()
 	content, _ := sent["content"].(string)
 	if len([]rune(content)) > maxContentRunes {
-		t.Fatalf("截断后仍有 %d 个字符", len([]rune(content)))
+		t.Fatalf("分段后仍有 %d 个字符", len([]rune(content)))
 	}
 	reference, ok := sent["message_reference"].(map[string]any)
 	if !ok || reference["message_id"] != "123" {

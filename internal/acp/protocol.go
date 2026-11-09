@@ -66,7 +66,7 @@ type promptCapabilities struct {
 	EmbeddedContext bool `json:"embeddedContext"`
 }
 
-// agentCapabilities 声明 ACP 能力；本版本不支持从磁盘恢复会话。
+// agentCapabilities 声明可从服务端持久历史恢复会话。
 type agentCapabilities struct {
 	LoadSession        bool               `json:"loadSession"`
 	PromptCapabilities promptCapabilities `json:"promptCapabilities"`
@@ -91,10 +91,16 @@ type sessionDelta struct {
 	Content       contentBlock `json:"content"`
 }
 
-// contentBlock 是 ACP 的内容块；本版本只支持纯文本。
+// contentBlock 包含文本、图片和编辑器提供的嵌入文本资源。
 type contentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Data     string `json:"data,omitempty"`
+	MIMEType string `json:"mimeType,omitempty"`
+	Resource *struct {
+		URI  string `json:"uri"`
+		Text string `json:"text"`
+	} `json:"resource,omitempty"`
 }
 
 // newSessionResult 是 session/new 的响应。
@@ -118,9 +124,12 @@ type conn struct {
 
 	sessions *sessionStore
 
-	writeMu sync.Mutex
-	failMu  sync.Mutex
-	failure error
+	writeMu         sync.Mutex
+	failMu          sync.Mutex
+	failure         error
+	requestMu       sync.Mutex
+	requestSequence uint64
+	pendingRequests map[string]chan clientReply
 }
 
 // newConn 包装输入输出并准备内存会话表。
@@ -198,6 +207,9 @@ func (c *conn) dispatch(line []byte, wg *sync.WaitGroup) {
 		c.writeError(nil, codeInvalidRequest, "请求必须是单个 JSON 对象")
 		return
 	}
+	if c.acceptClientReply(raw) {
+		return
+	}
 	var req rpcRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		c.writeError(nil, codeInvalidRequest, "请求格式无效")
@@ -218,6 +230,9 @@ func (c *conn) dispatch(line []byte, wg *sync.WaitGroup) {
 		c.reply(req.ID, initialize(), nil, notification)
 	case "session/new":
 		result, rerr := c.newSession(req.Params)
+		c.reply(req.ID, result, rerr, notification)
+	case "session/load":
+		result, rerr := c.loadSession(req.Params)
 		c.reply(req.ID, result, rerr, notification)
 	case "session/prompt":
 		wg.Add(1)
@@ -244,8 +259,8 @@ func initialize() initializeResult {
 	return initializeResult{
 		ProtocolVersion: protocolVersion,
 		AgentCapabilities: agentCapabilities{
-			LoadSession:        false,
-			PromptCapabilities: promptCapabilities{Image: false, Audio: false, EmbeddedContext: false},
+			LoadSession:        true,
+			PromptCapabilities: promptCapabilities{Image: true, Audio: false, EmbeddedContext: true},
 		},
 		AuthMethods: []any{},
 	}

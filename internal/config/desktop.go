@@ -40,7 +40,7 @@ func (c DesktopConfig) Validate() error {
 		}
 		ip := net.ParseIP(u.Hostname())
 		local := u.Hostname() == "localhost" || ip != nil && ip.IsLoopback()
-		if u.Scheme != "https" && !(u.Scheme == "http" && local) {
+		if u.Scheme != "https" && (u.Scheme != "http" || !local) {
 			return fmt.Errorf("远程桌面连接必须使用 HTTPS")
 		}
 		if c.TokenFile != "" && !local {

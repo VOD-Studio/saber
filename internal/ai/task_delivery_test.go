@@ -62,7 +62,7 @@ func TestTaskDelivery_SlowMultipleFilesResumeWithoutReupload(t *testing.T) {
 		n := sends[content.Body]
 		mu.Unlock()
 		if content.Body == "second.txt" && n == 1 {
-			w.WriteHeader(503)
+			w.WriteHeader(http.StatusServiceUnavailable)
 			_, err := fmt.Fprint(w, `{"errcode":"M_UNKNOWN","error":"offline"}`)
 			if err != nil {
 				t.Error(err)

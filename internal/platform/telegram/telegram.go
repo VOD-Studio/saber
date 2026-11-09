@@ -216,6 +216,13 @@ func (p *Platform) handle(ctx context.Context, item message) {
 	if !ok {
 		return
 	}
+	attachments, err := p.receiveMedia(ctx, item)
+	if err != nil {
+		slog.Warn("telegram 媒体读取失败", "message", normalized.ID, "error", err)
+		return
+	}
+	normalized.Attachments = attachments
+	ctx = chat.WithIdentity(ctx, chat.Identity{Session: normalized.Session, SenderID: normalized.SenderID, Direct: normalized.Direct})
 	slog.Info("telegram 消息触发 AI 回复",
 		"conversation", normalized.Session.Conversation,
 		"sender", normalized.SenderID,
@@ -263,6 +270,10 @@ func (p *Platform) setIdentity(profile botUser) {
 
 // normalize 把 Telegram 消息翻译为 chat.Message，并按配置判定是否应当回答。
 func (p *Platform) normalize(item message) (chat.Message, bool) {
+	if item.Text == "" {
+		item.Text = item.Caption
+		item.Entities = item.CaptionEntities
+	}
 	botID, _ := p.identity()
 	if botID == 0 {
 		slog.Debug("telegram bot 身份未知，暂不处理消息", "message", item.MessageID)
@@ -280,8 +291,7 @@ func (p *Platform) normalize(item message) (chat.Message, bool) {
 		slog.Debug("跳过 telegram 频道消息", "message", item.MessageID)
 		return chat.Message{}, false
 	}
-	if strings.TrimSpace(item.Text) == "" {
-		slog.Debug("跳过 telegram 非文本消息", "message", item.MessageID)
+	if strings.TrimSpace(item.Text) == "" && !item.hasMedia() {
 		return chat.Message{}, false
 	}
 	direct := item.Chat.Type == "private"
@@ -303,8 +313,7 @@ func (p *Platform) normalize(item message) (chat.Message, bool) {
 		}
 	}
 	text := p.stripMentions(item.Text)
-	if strings.TrimSpace(text) == "" {
-		slog.Debug("telegram 消息剥离提及后为空，跳过", "message", item.MessageID)
+	if strings.TrimSpace(text) == "" && !item.hasMedia() {
 		return chat.Message{}, false
 	}
 	replyTo := ""

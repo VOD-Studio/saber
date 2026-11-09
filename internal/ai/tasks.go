@@ -55,6 +55,11 @@ func (s *Service) EnableTasks(path string) error {
 	if err != nil {
 		return err
 	}
+	if s.executor != nil {
+		if err := s.executor.ConfigureDevTools(s.config.DevTools); err != nil {
+			return err
+		}
+	}
 	ready := make(chan struct{})
 	manager, err := task.Open(path, func(ctx context.Context, req agent.Request, emit func(agent.Event)) (agent.Result, error) {
 		select {
@@ -62,11 +67,22 @@ func (s *Service) EnableTasks(path string) error {
 		case <-ctx.Done():
 			return agent.Result{}, ctx.Err()
 		}
+		if !s.featuresReady {
+			return agent.Result{}, errors.New("feature initialization did not complete")
+		}
+		if req.SubagentDepth > 0 {
+			ctx = agent.WithSubagentDepth(ctx, req.SubagentDepth)
+		}
+		if req.ToolScope != nil {
+			ctx = agent.WithToolScope(ctx, req.ToolScope)
+		}
 		expectedDir := s.taskDir
-		identity, _ := chat.IdentityFromContext(ctx)
 		if s.executor != nil {
-			if granted, err := s.executor.Workspace(identity); err == nil {
+			bound := execution.WithTask(ctx, task.ID(ctx), task.WorkDir(ctx))
+			if granted, err := s.executor.WorkspaceForContext(bound); err == nil {
 				expectedDir = granted
+			} else if req.SubagentDepth > 0 {
+				return agent.Result{}, err
 			}
 		}
 		// 定时计划按持久化计划重新确认工作目录与记忆作用域，不沿用实时聊天的授权结论。
@@ -90,23 +106,50 @@ func (s *Service) EnableTasks(path string) error {
 			return agent.Result{}, fmt.Errorf("任务工作目录 %q 与当前授权目录 %q 不同，停止执行", task.WorkDir(ctx), expectedDir)
 		}
 		ctx = execution.WithTask(ctx, task.ID(ctx), expectedDir)
-		// 续接恢复之后、运行之前装配当前记忆快照；定时任务先从计划来源快照重建作用域。
-		if scheduled {
-			ctx, req = s.scheduledMemoryRequest(ctx, plan.Message, req)
-		} else {
-			req = s.augmentMemory(ctx, req)
+		var err error
+		if req.SubagentDepth == 0 {
+			req, err = s.prepareTaskMedia(ctx, req)
+			if err != nil {
+				return agent.Result{}, err
+			}
 		}
-		// 上下文文件只在已授权工作区的持久任务中注入，同一次运行只读取一次。
-		if !scheduled || plan.RequiresExecution {
-			req = s.appendContextFiles(ctx, req)
+		includeContext := req.SubagentDepth == 0 && (!s.IsBatchTask(ctx) || s.config.Batch.IncludeMemory)
+		if includeContext {
+			if scheduled {
+				ctx, req = s.scheduledMemoryRequest(ctx, plan.Message, req)
+			} else {
+				req = s.augmentMemory(ctx, req)
+			}
+			if !scheduled || plan.RequiresExecution {
+				req = s.appendContextFiles(ctx, req)
+			}
+			req, err = s.prepareTaskReferences(ctx, req)
+			if err != nil {
+				return agent.Result{}, err
+			}
 		}
 		// 重启恢复时按当前权限重新筛选，旧请求快照不能保留已撤销能力。
+		originalTools := req.Tools
 		req.Tools, _ = s.toolExecutor.PrepareTools(ctx)
+		if req.SubagentDepth > 0 {
+			req.Tools = intersectTools(req.Tools, originalTools)
+		}
+		if req.ToolScope != nil {
+			req.Tools = scopedTools(ctx, req.Tools)
+		}
+		req, err = s.PrepareBatchTask(ctx, req)
+		if err != nil {
+			return agent.Result{}, err
+		}
+		req, err = s.PrepareAutomationTask(ctx, req)
+		if err != nil {
+			return agent.Result{}, err
+		}
 		if scheduled && !plan.RequiresExecution {
 			// 纯聊天计划不得因创建后新获得的授权而拿到执行或 MCP 工具。
 			req.Tools = filterChatTools(req.Tools)
 		}
-		if req.State != nil {
+		if req.State != nil && agent.ToolAllowed(ctx, "saber_task_state") {
 			// 状态工具由 Runtime 内部执行，不交给外部 ToolExecutor。
 			req.Tools = append(req.Tools, agent.TaskStateTool())
 		}
@@ -140,7 +183,27 @@ func (s *Service) EnableTasks(path string) error {
 		DeliveryMaxAttempts: s.config.Agent.TaskDeliveryMaxAttempts,
 		MaxConcurrent:       s.config.Agent.MaxConcurrentTasks,
 		Schedule:            s.authorizeSchedule,
-		Manage:              func(identity chat.Identity) bool { return s.executor != nil && s.executor.IsTaskAdmin(identity) },
+		Control:             s.config.Control,
+		Authorize:           s.authorizeControlWorkspace,
+		AuthorizeTask:       s.authorizeControlledTask,
+		PrepareSchedule: func(ctx context.Context, plan task.Schedule) (agent.Request, error) {
+			select {
+			case <-ready:
+			case <-ctx.Done():
+				return agent.Request{}, ctx.Err()
+			}
+			if s.automationService == nil {
+				return agent.Request{}, errors.New("automation service is unavailable")
+			}
+			return s.automationService.PrepareSchedule(ctx, plan)
+		},
+		TransferProcesses: func(source, target context.Context) error {
+			if s.executor == nil {
+				return nil
+			}
+			return s.executor.TransferProcesses(execution.WithTask(source, task.ID(source), task.WorkDir(source)), execution.WithTask(target, task.ID(target), task.WorkDir(target)))
+		},
+		Manage: func(identity chat.Identity) bool { return s.executor != nil && s.executor.IsTaskAdmin(identity) },
 		Finalize: func(ctx context.Context, taskID int64) error {
 			if s.executor == nil {
 				return nil
@@ -155,6 +218,9 @@ func (s *Service) EnableTasks(path string) error {
 		},
 		OnProjection: func() {
 			<-ready
+			if !s.featuresReady {
+				return
+			}
 			if s.memory != nil {
 				_ = s.syncHistoryProjections(context.Background())
 				s.triggerBackgroundReview()
@@ -173,6 +239,13 @@ func (s *Service) EnableTasks(path string) error {
 			}
 			return manager.AuthorizeOutput(ctx, identity, task.ID(ctx), sourceID)
 		})
+		s.executor.SetProcessTransferAuthorizer(manager.AuthorizeProcessTransfer)
+	}
+	if err := s.ConfigureFeatures(filepath.Dir(path)); err != nil {
+		close(ready)
+		closeErr := manager.Close()
+		s.tasks = nil
+		return errors.Join(err, closeErr)
 	}
 	close(ready)
 	if s.memory != nil {
@@ -240,6 +313,9 @@ func taskInput(message chat.Message) openai.ChatCompletionMessage {
 			current.MultiContent = append(current.MultiContent, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeText, Text: message.Text})
 		}
 		for _, a := range message.Attachments {
+			if a.Kind != "image" {
+				continue
+			}
 			current.MultiContent = append(current.MultiContent, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeImageURL, ImageURL: &openai.ChatMessageImageURL{URL: a.URL, Detail: openai.ImageURLDetailAuto}})
 		}
 	}

@@ -72,3 +72,12 @@ func (r *Registry) Lookup(name string) (Platform, bool) {
 	p, ok := r.platforms[name]
 	return p, ok
 }
+
+// All 返回登记顺序的平台快照，供宿主统一装配任务与计划投递。
+func (r *Registry) All() []Platform {
+	result := make([]Platform, 0, len(r.order))
+	for _, name := range r.order {
+		result = append(result, r.platforms[name])
+	}
+	return result
+}

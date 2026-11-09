@@ -28,3 +28,5 @@ func terminateGroup(pgid int) error { return syscall.Kill(-pgid, syscall.SIGTERM
 func killGroup(pgid int) error { return syscall.Kill(-pgid, syscall.SIGKILL) }
 
 func groupExists(pgid int) bool { return pgid > 0 && syscall.Kill(-pgid, 0) == nil }
+
+func signalGroup(pgid, signal int) error { return syscall.Kill(-pgid, syscall.Signal(signal)) }

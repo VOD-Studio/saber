@@ -12,15 +12,23 @@ import (
 	"github.com/sashabaranov/go-openai"
 
 	"rua.plus/saber/internal/agent"
+	"rua.plus/saber/internal/automation"
+	"rua.plus/saber/internal/batch"
+	"rua.plus/saber/internal/browser"
 	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/config"
 	"rua.plus/saber/internal/conversation"
 	"rua.plus/saber/internal/execution"
 	"rua.plus/saber/internal/matrix"
 	"rua.plus/saber/internal/mcp"
+	"rua.plus/saber/internal/media"
 	"rua.plus/saber/internal/memory"
+	"rua.plus/saber/internal/memoryproviders"
 	"rua.plus/saber/internal/model"
+	"rua.plus/saber/internal/plugins"
 	"rua.plus/saber/internal/task"
+	"rua.plus/saber/internal/toolkit"
+	"rua.plus/saber/internal/vault"
 )
 
 // PromptProvider 定义提示词提供者接口。
@@ -78,6 +86,20 @@ type Service struct {
 	avatarAdapters sync.Map
 	// tweetPosts 是主动发帖的进程内限流状态，按本地日期计次。
 	tweetPosts tweetPostLimiter
+	// 扩展能力只通过统一工具入口使用当前任务身份，不持有独立授权模型。
+	extensions               *toolkit.Registry
+	extensionPlugins         *plugins.Manager
+	featureMedia             *media.Service
+	featureBrowser           *browser.Service
+	featureVault             *vault.Store
+	automationService        *automation.Service
+	batchRunner              *batch.Runner
+	nativeMemory             *memoryproviders.Service
+	sessionCommandDispatcher func(context.Context, chat.Message) (string, error)
+	featuresMu               sync.Mutex
+	featuresReady            bool
+	featureStateDir          string
+	toolLease                agent.WorkspaceLease
 }
 
 // ServiceOption 配置 AI 服务的可选依赖。平台专属服务由接入端注入，
@@ -86,10 +108,16 @@ type ServiceOption func(*serviceOptions)
 
 // serviceOptions 汇集 NewService 的可选依赖。
 type serviceOptions struct {
-	matrixService *matrix.CommandService
-	mediaService  *matrix.MediaService
-	mcpManager    *mcp.Manager
-	memory        *memory.Service
+	matrixService            *matrix.CommandService
+	mediaService             *matrix.MediaService
+	mcpManager               *mcp.Manager
+	memory                   *memory.Service
+	sessionCommandDispatcher func(context.Context, chat.Message) (string, error)
+}
+
+// WithSessionCommands 注入共享命令注册表的分发器，使循环自动化复用平台命令的真实授权与回执。
+func WithSessionCommands(dispatch func(context.Context, chat.Message) (string, error)) ServiceOption {
+	return func(o *serviceOptions) { o.sessionCommandDispatcher = dispatch }
 }
 
 // WithMatrix 注入 Matrix 命令与媒体服务，是 Matrix 专属的兼容入口，
@@ -125,6 +153,9 @@ func NewService(appConfig *config.Config, opts ...ServiceOption) (*Service, erro
 	if appConfig == nil {
 		return nil, fmt.Errorf("AI配置不能为空")
 	}
+	if err := appConfig.ValidateFeatures(); err != nil {
+		return nil, err
+	}
 
 	var o serviceOptions
 	for _, opt := range opts {
@@ -149,19 +180,26 @@ func NewService(appConfig *config.Config, opts ...ServiceOption) (*Service, erro
 	if err != nil {
 		return nil, err
 	}
+	if err := core.ConfigureRuntime(appConfig.ModelRuntime); err != nil {
+		return nil, err
+	}
 
 	service := &Service{
-		config:         appConfig,
-		core:           core,
-		matrixService:  o.matrixService,
-		contextManager: contextManager,
-		mcpManager:     o.mcpManager,
-		mediaService:   o.mediaService,
-		memory:         o.memory,
-		toolExecutor:   NewToolExecutor(nil), // 将在下面重新初始化
+		config:                   appConfig,
+		core:                     core,
+		matrixService:            o.matrixService,
+		contextManager:           contextManager,
+		mcpManager:               o.mcpManager,
+		mediaService:             o.mediaService,
+		memory:                   o.memory,
+		sessionCommandDispatcher: o.sessionCommandDispatcher,
+		toolExecutor:             NewToolExecutor(nil), // 将在下面重新初始化
 	}
 	if c := appConfig.Agent.CircuitBreaker; c.Enabled {
 		service.circuitBreaker = NewCircuitBreaker(c.FailureThreshold, time.Duration(c.ResetTimeout)*time.Second)
+	}
+	if err := core.ConfigureRetryPolicy(service.agentRetry()); err != nil {
+		return nil, err
 	}
 
 	// 历史作用域账号取自平台注入的命令服务，未接入 Matrix 时留空
@@ -297,9 +335,29 @@ func (s *Service) GetModelRegistry() *ModelRegistry {
 // 必须在服务不再使用时调用，否则会导致 goroutine 泄漏。
 // 它会停止上下文管理器的后台清理 goroutine。
 func (s *Service) Stop() {
+	if s.automationService != nil {
+		if err := s.automationService.Close(); err != nil {
+			slog.Error("关闭自动化服务失败", "error", err)
+		}
+	}
 	if s.tasks != nil {
 		if err := s.tasks.Close(); err != nil {
 			slog.Error("关闭任务服务失败", "error", err)
+		}
+	}
+	if s.extensions != nil {
+		if err := s.extensions.Close(); err != nil {
+			slog.Error("关闭扩展工具失败", "error", err)
+		}
+	}
+	if s.extensionPlugins != nil {
+		if err := s.extensionPlugins.Close(); err != nil {
+			slog.Error("关闭插件服务失败", "error", err)
+		}
+	}
+	if s.nativeMemory != nil {
+		if err := s.nativeMemory.Close(); err != nil {
+			slog.Error("关闭原生记忆服务失败", "error", err)
 		}
 	}
 	if s.executor != nil {
@@ -418,6 +476,8 @@ func (s *Service) GenerateSimpleResponseWithModel(ctx context.Context, modelName
 		Messages:    messages,
 		MaxTokens:   cfg.MaxTokens,
 		Temperature: temperature,
+		// 辅助请求失败时调用方降级，不能占用主请求的重试与退避时间。
+		Purpose: "auxiliary",
 	}
 
 	slog.Debug("发送简单AI请求（指定模型）", "model", modelName, "temperature", temperature, "system_prompt", systemPrompt, "user_message", userMessage)

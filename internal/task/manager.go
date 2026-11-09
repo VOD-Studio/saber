@@ -11,6 +11,7 @@ import (
 
 	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/chat"
+	"rua.plus/saber/internal/config"
 )
 
 // RunFunc 使用持久化请求运行 Agent；事件回调必须在返回前串行调用。
@@ -50,6 +51,18 @@ type Options struct {
 	// MaxConcurrent 是同时执行的任务数上限；零值使用 DefaultMaxConcurrent，超出范围时收敛到 1..MaxConcurrentLimit。
 	// 工作目录互斥仍然生效：不同目录的任务才能并行到这个上限。
 	MaxConcurrent int
+	// Control 限制任务图和澄清请求；零值使用安全默认配置。
+	Control config.ControlConfig
+	// Authorize 在控制任务创建、恢复和派发时复核当前工作区授权。
+	Authorize ScheduleAuthorize
+	// AuthorizeTask 在任务编号已确定后复核绑定的派生工作区，不能由身份参数替代。
+	AuthorizeTask func(context.Context, Task) error
+	// PrepareSchedule 在实际执行前重新加载计划技能、模型与目的地授权。
+	PrepareSchedule func(context.Context, Schedule) (agent.Request, error)
+	// Handoff 只解析可信配置中的交接路由，不接受模型传入身份。
+	Handoff HandoffResolver
+	// TransferProcesses 在正常完成前把已授权续接的进程切换到独立目标生命周期。
+	TransferProcesses func(context.Context, context.Context) error
 }
 
 // Manager 管理单个机器人进程的队列；同一数据库只允许一个 Manager 实例。
@@ -62,7 +75,9 @@ type Manager struct {
 	wake          chan struct{}
 	done          chan struct{}
 	mu            sync.Mutex
+	deliveryMu    sync.Mutex
 	active        map[int64]context.CancelFunc
+	runContexts   map[int64]context.Context
 	workers       sync.WaitGroup
 	closeOnce     sync.Once
 	closeErr      error
@@ -76,7 +91,17 @@ type Manager struct {
 	// deliveryMaxAttempts 是结果投递的最大尝试次数，恒为正数。
 	deliveryMaxAttempts int
 	// maxConcurrent 是同时执行的任务数，恒在 1..MaxConcurrentLimit。
-	maxConcurrent int
+	maxConcurrent     int
+	control           config.ControlConfig
+	controlAuthorize  ScheduleAuthorize
+	authorizeTask     func(context.Context, Task) error
+	prepareSchedule   func(context.Context, Schedule) (agent.Request, error)
+	handoff           HandoffResolver
+	transientRequests map[int64]agent.Request
+	childFinalizers   map[int64]func() error
+	transferProcesses func(context.Context, context.Context) error
+	pendingContexts   map[int64]context.Context
+	pendingCancels    map[int64]context.CancelFunc
 }
 
 // Open 打开数据库，标记中断任务，并启动队列和结果投递。
@@ -89,7 +114,10 @@ func Open(path string, run RunFunc, send SendFunc, options ...Options) (*Manager
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &Manager{store: s, run: run, deliveries: make(map[string]SendFunc), ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), done: make(chan struct{}), active: make(map[int64]context.CancelFunc)}
+	m := &Manager{store: s, run: run, deliveries: make(map[string]SendFunc), ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), done: make(chan struct{}), active: make(map[int64]context.CancelFunc), transientRequests: make(map[int64]agent.Request), childFinalizers: make(map[int64]func() error), control: config.DefaultControlConfig()}
+	m.runContexts = make(map[int64]context.Context)
+	m.pendingContexts = make(map[int64]context.Context)
+	m.pendingCancels = make(map[int64]context.CancelFunc)
 	m.deliveryMaxAttempts = DefaultDeliveryMaxAttempts
 	m.maxConcurrent = DefaultMaxConcurrent
 	if len(options) > 0 {
@@ -103,6 +131,21 @@ func Open(path string, run RunFunc, send SendFunc, options ...Options) (*Manager
 		m.onProjection = options[0].OnProjection
 		m.finalize = options[0].Finalize
 		m.blocked = options[0].BlockedDirectories
+		if options[0].Control != (config.ControlConfig{}) {
+			m.control = options[0].Control
+		}
+		m.controlAuthorize = options[0].Authorize
+		m.authorizeTask = options[0].AuthorizeTask
+		if m.controlAuthorize == nil {
+			m.controlAuthorize = options[0].Schedule
+		}
+		m.prepareSchedule = options[0].PrepareSchedule
+		m.handoff = options[0].Handoff
+		m.transferProcesses = options[0].TransferProcesses
+	}
+	if err := m.control.Validate(); err != nil {
+		cancel()
+		return nil, errors.Join(err, s.db.Close())
 	}
 	var blocked []string
 	if m.blocked != nil {
@@ -152,6 +195,8 @@ func (m *Manager) Get(ctx context.Context, session chat.Session, taskID int64) (
 
 // Cancel 只允许发起人或同群授权管理员取消；运行中任务退出前不会释放工作目录。
 func (m *Manager) Cancel(ctx context.Context, identity chat.Identity, taskID int64) (Task, error) {
+	m.deliveryMu.Lock()
+	defer m.deliveryMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t, err := m.Get(ctx, identity.Session, taskID)
@@ -161,12 +206,38 @@ func (m *Manager) Cancel(ctx context.Context, identity chat.Identity, taskID int
 	if !m.CanManage(identity, t.Message.SenderID) {
 		return Task{}, errors.New("只有发起人或本群任务管理员可以取消任务")
 	}
+	var external bool
+	if err := m.store.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM task_external WHERE task_id=?)`, taskID).Scan(&external); err != nil {
+		return Task{}, err
+	}
+	if external {
+		if _, err := m.store.db.ExecContext(ctx, `UPDATE tasks SET cancel_requested=1 WHERE id=? AND status='running'`, taskID); err != nil {
+			return Task{}, err
+		}
+		return m.finishExternalLocked(ctx, t, "cancelled", "用户取消外部操作")
+	}
+	if m.active[taskID] == nil {
+		if m.pendingContexts[taskID] != nil && m.finalize != nil {
+			if cleanupErr := m.finalize(context.Background(), taskID); cleanupErr != nil {
+				_, saveErr := m.store.db.ExecContext(ctx, `UPDATE tasks SET status='running',error=? WHERE id=?`, "cleanup_failed: "+cleanupErr.Error(), taskID)
+				return Task{}, errors.Join(cleanupErr, saveErr)
+			}
+		}
+		if cleanup := m.childFinalizers[taskID]; cleanup != nil {
+			if cleanupErr := cleanup(); cleanupErr != nil {
+				_, saveErr := m.store.db.ExecContext(ctx, `UPDATE tasks SET status='running',error=? WHERE id=?`, "cleanup_failed: "+cleanupErr.Error(), taskID)
+				return Task{}, errors.Join(cleanupErr, saveErr)
+			}
+			delete(m.childFinalizers, taskID)
+			delete(m.transientRequests, taskID)
+		}
+	}
 	tx, err := m.store.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Task{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	res, err := tx.ExecContext(ctx, `UPDATE tasks SET cancel_requested=1,status=CASE WHEN status='queued' THEN 'cancelled' ELSE status END WHERE id=? AND status IN ('queued','running')`, taskID)
+	res, err := tx.ExecContext(ctx, `UPDATE tasks SET cancel_requested=1,status=CASE WHEN status IN ('queued','blocked','review','waiting_input') THEN 'cancelled' ELSE status END WHERE id=? AND status IN ('queued','running','blocked','review','waiting_input')`, taskID)
 	if err != nil {
 		return Task{}, err
 	}
@@ -190,6 +261,14 @@ func (m *Manager) Cancel(ctx context.Context, identity chat.Identity, taskID int
 	if cancel := m.active[taskID]; cancel != nil {
 		cancel()
 	}
+	if cancel := m.pendingCancels[taskID]; cancel != nil {
+		cancel()
+		delete(m.pendingContexts, taskID)
+		delete(m.pendingCancels, taskID)
+	}
+	if _, err := m.store.db.ExecContext(ctx, `UPDATE task_questions SET status='cancelled',answered_at=? WHERE task_id=? AND status='pending'`, time.Now().UnixMilli(), taskID); err != nil {
+		return Task{}, err
+	}
 	m.notify()
 	if m.onProjection != nil {
 		go m.onProjection()
@@ -197,7 +276,7 @@ func (m *Manager) Cancel(ctx context.Context, identity chat.Identity, taskID int
 	return m.Get(ctx, identity.Session, taskID)
 }
 
-// AuthorizeOutput 校验输出句柄属于当前任务或其祖先，并要求调用者为源任务发起人或本群任务管理员。
+// AuthorizeOutput 校验输出属于当前任务的续接祖先或真实委派树，并要求调用者为源任务发起人或本群任务管理员。
 // 不接受仅凭相同房间读取其他成员任务日志。
 func (m *Manager) AuthorizeOutput(ctx context.Context, identity chat.Identity, currentID, sourceID int64) error {
 	if currentID <= 0 || sourceID <= 0 {
@@ -207,9 +286,7 @@ func (m *Manager) AuthorizeOutput(ctx context.Context, identity chat.Identity, c
 		return err
 	}
 	var ancestor bool
-	err := m.store.db.QueryRowContext(ctx, `WITH RECURSIVE chain(id) AS (
-		SELECT ? UNION ALL SELECT l.parent_id FROM task_links l JOIN chain c ON l.task_id=c.id
-	) SELECT EXISTS(SELECT 1 FROM chain WHERE id=?)`, currentID, sourceID).Scan(&ancestor)
+	err := m.store.db.QueryRowContext(ctx, `WITH RECURSIVE edges(task_id,parent_id) AS (SELECT task_id,parent_id FROM task_links UNION ALL SELECT task_id,parent_id FROM task_children), ancestors(id) AS (SELECT ? UNION SELECT e.parent_id FROM edges e JOIN ancestors a ON e.task_id=a.id), descendants(id) AS (SELECT ? UNION SELECT c.task_id FROM task_children c JOIN descendants d ON c.parent_id=d.id) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=? UNION SELECT 1 FROM descendants WHERE id=?)`, currentID, currentID, sourceID, sourceID).Scan(&ancestor)
 	if err != nil {
 		return err
 	}
@@ -294,6 +371,9 @@ func (m *Manager) loop() {
 		if err := m.tickSchedules(m.ctx, time.Now()); err != nil && m.ctx.Err() == nil {
 			slog.Error("调度定时任务失败", "error", err)
 		}
+		if err := m.tickControl(m.ctx); err != nil && m.ctx.Err() == nil {
+			slog.Error("推进任务控制状态失败", "error", err)
+		}
 		m.dispatch()
 		select {
 		case <-m.ctx.Done():
@@ -320,9 +400,18 @@ func (m *Manager) dispatch() {
 			slog.Error("领取任务失败", "error", err)
 			return
 		}
-		ctx, cancel := context.WithCancel(m.ctx)
+		ctx, cancel := m.pendingContexts[t.ID], m.pendingCancels[t.ID]
+		if ctx == nil {
+			ctx, cancel = context.WithCancel(m.ctx)
+		}
+		delete(m.pendingContexts, t.ID)
+		delete(m.pendingCancels, t.ID)
 		m.active[t.ID] = cancel
+		m.runContexts[t.ID] = ctx
 		m.workers.Add(1)
+		if transient, ok := m.transientRequests[t.ID]; ok {
+			t.Request = mergeTransientRequest(t.Request, transient)
+		}
 		go m.execute(ctx, cancel, t)
 	}
 }
@@ -330,22 +419,33 @@ func (m *Manager) dispatch() {
 func (m *Manager) execute(ctx context.Context, cancel context.CancelFunc, t Task) {
 	defer m.workers.Done()
 	defer cancel()
-	defer func() { m.mu.Lock(); delete(m.active, t.ID); m.mu.Unlock(); m.notify() }()
+	defer func() { m.mu.Lock(); delete(m.active, t.ID); delete(m.runContexts, t.ID); m.mu.Unlock(); m.notify() }()
 	ctx = chat.WithIdentity(ctx, chat.Identity{Session: t.Message.Session, SenderID: t.Message.SenderID, Direct: t.Message.Direct})
 	ctx = context.WithValue(ctx, workDirKey{}, t.WorkDir)
 	ctx = context.WithValue(ctx, taskIDKey{}, t.ID)
-	scheduled, err := m.checkScheduledTask(ctx, t)
-	if err != nil {
-		if finishErr := m.store.finish(context.Background(), t, agent.Result{}, err, m.ctx.Err() != nil); finishErr != nil {
-			slog.Error("保存计划任务拒绝状态失败", "error", finishErr)
-		}
-		return
+	preflightErr := m.checkControlledTask(ctx, t)
+	scheduled := false
+	if preflightErr == nil {
+		scheduled, preflightErr = m.checkScheduledTask(ctx, t)
 	}
 	if scheduled {
 		ctx = withScheduled(ctx)
+		if preflightErr == nil && m.prepareSchedule != nil {
+			t, preflightErr = m.Get(ctx, t.Message.Session, t.ID)
+		}
+	}
+	if preflightErr == nil {
+		m.mu.Lock()
+		if transient, ok := m.transientRequests[t.ID]; ok {
+			t.Request = mergeTransientRequest(t.Request, transient)
+		}
+		m.mu.Unlock()
 	}
 	var journalErr error
-	req, resumeErr := m.continuationRequest(ctx, t)
+	req, resumeErr := t.Request, preflightErr
+	if resumeErr == nil {
+		req, resumeErr = m.continuationRequest(ctx, t)
+	}
 	if resumeErr == nil {
 		state, stateErr := m.initialTaskState(ctx, t)
 		if stateErr != nil {
@@ -373,6 +473,20 @@ func (m *Manager) execute(ctx context.Context, cancel context.CancelFunc, t Task
 	if journalErr != nil {
 		runErr = errors.Join(runErr, journalErr)
 	}
+	if runErr == nil && result.Status == agent.Completed && m.ctx.Err() == nil {
+		if transferErr := m.transferContinuationProcesses(ctx, t); transferErr != nil {
+			if recordErr := m.store.cleanupFailed(context.Background(), t.ID, transferErr); recordErr != nil {
+				slog.Error("保存进程移交失败状态失败", "error", recordErr)
+			}
+			return
+		}
+	}
+	if cleanupErr := m.finalizeChild(t.ID); cleanupErr != nil {
+		if recordErr := m.store.cleanupFailed(context.Background(), t.ID, cleanupErr); recordErr != nil {
+			slog.Error("保存子任务清理失败状态失败", "error", recordErr)
+		}
+		return
+	}
 	if m.finalize != nil {
 		if cleanupErr := m.finalize(context.Background(), t.ID); cleanupErr != nil {
 			// 保持 running 锁住目录；不宣布 cancelled/completed，等待人工核查。
@@ -382,9 +496,12 @@ func (m *Manager) execute(ctx context.Context, cancel context.CancelFunc, t Task
 			return
 		}
 	}
-	if err := m.store.finish(context.Background(), t, result, runErr, m.ctx.Err() != nil); err != nil {
+	m.deliveryMu.Lock()
+	finishErr := m.store.finish(context.Background(), t, result, runErr, m.ctx.Err() != nil)
+	m.deliveryMu.Unlock()
+	if finishErr != nil {
 		// 保持 running 以锁住目录；重启后转 interrupted，绝不重跑。
-		slog.Error("保存任务终态失败，需要人工核查", "error", taskError(t.ID, err))
+		slog.Error("保存任务终态失败，需要人工核查", "error", taskError(t.ID, finishErr))
 	} else if m.onProjection != nil {
 		go m.onProjection()
 	}
@@ -392,7 +509,7 @@ func (m *Manager) execute(ctx context.Context, cancel context.CancelFunc, t Task
 
 // Close 停止派发并等待运行退出；排队任务留待下次启动。
 func (m *Manager) Close() error {
-	m.closeOnce.Do(func() { m.cancel(); <-m.done; m.closeErr = m.store.db.Close() })
+	m.closeOnce.Do(func() { m.mu.Lock(); m.cancel(); m.mu.Unlock(); <-m.done; m.closeErr = m.store.db.Close() })
 	return m.closeErr
 }
 

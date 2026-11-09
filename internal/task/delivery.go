@@ -10,6 +10,9 @@ import (
 // DeliverPart 独立限时上传和发送一个交付项，持久化上传内容及消息 ID，重启后从失败步骤续传。
 // prepare 必须返回可重用的完整上传元数据，send 必须使用稳定的平台事务 ID。
 func (m *Manager) DeliverPart(ctx context.Context, taskID int64, part string, prepare func(context.Context) ([]byte, error), send func(context.Context, []byte) (string, error)) (string, error) {
+	if namespace, ok := ctx.Value(deliveryNamespaceKey{}).(string); ok {
+		part = namespace + part
+	}
 	var payload []byte
 	var messageID string
 	err := m.store.db.QueryRowContext(ctx, `SELECT payload,message_id FROM task_delivery_parts WHERE task_id=? AND part=?`, taskID, part).Scan(&payload, &messageID)

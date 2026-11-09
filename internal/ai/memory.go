@@ -23,10 +23,12 @@ func memoryTool() openai.Tool {
 			"身份与作用域由系统提供，不得代其他用户或群操作。只有工具返回成功才是已保存；返回待确认建议表示尚未生效。" +
 			"用户明确要求记住、纠正或忘记时使用；普通闲聊、猜测与临时任务状态不要保存。action=profile 只读查看当前空间画像，不接受作用域参数。",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{
-			"action":           map[string]any{"type": "string", "enum": []string{"list", "profile", "add", "replace", "remove"}},
+			"action":           map[string]any{"type": "string", "enum": []string{"list", "profile", "add", "replace", "remove", "provider_status", "provider_tools", "provider_call"}},
 			"content":          map[string]any{"type": "string", "description": "add 与 replace 的条目正文"},
-			"id":               map[string]any{"type": "integer", "minimum": 1, "description": "replace 与 remove 的目标条目编号"},
+			"id":               map[string]any{"type": "integer", "minimum": 1, "description": "replace/remove 的目标条目编号"},
 			"expected_version": map[string]any{"type": "integer", "minimum": 1, "description": "replace 与 remove 必须提供列表看到的当前版本，避免覆盖他人修改"},
+			"tool_name":        map[string]any{"type": "string", "description": "provider_tools 实际返回的工具名"},
+			"arguments":        map[string]any{"type": "object", "description": "provider 工具参数，不能提供身份、凭据或 URL"},
 		}, "required": []string{"action"}, "additionalProperties": false},
 	}}
 }
@@ -44,6 +46,9 @@ func isReviewContext(ctx context.Context) bool {
 
 // executeMemoryTool 执行模型发起的记忆操作，授权只取运行时可信身份。
 func (s *Service) executeMemoryTool(ctx context.Context, args map[string]any) (any, error) {
+	if isPublicThread(ctx) {
+		return nil, errors.New("公开互动回合不得使用记忆工具")
+	}
 	if s.memory == nil {
 		return nil, errors.New("记忆服务未启用")
 	}
@@ -60,6 +65,14 @@ func (s *Service) executeMemoryTool(ctx context.Context, args map[string]any) (a
 		return s.memoryListText(ctx, identity)
 	case "profile":
 		return s.memoryProfileView(ctx, identity)
+	case "provider_status":
+		return s.memory.MemoryProviderStatus(ctx)
+	case "provider_tools":
+		return s.memory.ProviderTools(ctx)
+	case "provider_call":
+		name, _ := args["tool_name"].(string)
+		arguments, _ := args["arguments"].(map[string]any)
+		return s.memory.ExecuteProviderTool(ctx, name, arguments)
 	case "add":
 		var mutation memory.Mutation
 		var err error
@@ -193,7 +206,7 @@ func (s *Service) skillBudget() int {
 // 快照只附加在本次运行的请求上，不写回持久化请求，因此下一次顶层任务会重新读取新版本。
 // 无法证明可信作用域或没有可注入内容时保持原请求不变。
 func (s *Service) augmentMemory(ctx context.Context, req agent.Request) agent.Request {
-	if s.memory == nil {
+	if s.memory == nil || isPublicThread(ctx) {
 		return req
 	}
 	identity, ok := chat.IdentityFromContext(ctx)
@@ -224,13 +237,29 @@ func (s *Service) augmentMemory(ctx context.Context, req agent.Request) agent.Re
 		req = appendRuntimeContext(req, snapshot.Text)
 	}
 
-	catalogSnap, err := s.memory.SkillCatalogSnapshot(ctx, identity, s.skillBudget())
+	catalogSnap, err := s.filteredSkillCatalog(ctx, identity, req.Tools)
 	if err != nil {
 		if !errors.Is(err, memory.ErrScope) {
 			slog.Warn("读取技能目录快照失败", "error", err)
 		}
 	} else if catalogSnap != "" {
 		req = appendRuntimeContext(req, catalogSnap)
+	}
+	if agent.SubagentDepth(ctx) == 0 {
+		query := ""
+		for i := len(req.Messages) - 1; i >= 0; i-- {
+			if req.Messages[i].Role == openai.ChatMessageRoleUser {
+				query = req.Messages[i].Content
+				break
+			}
+		}
+		text, err := s.memory.StartProviderTurn(ctx, query)
+		if err != nil {
+			logProviderContextError(err)
+			req = appendRuntimeContext(req, "【外部记忆不可用；不得声称已经召回】\n"+err.Error())
+		} else if text != "" {
+			req = appendRuntimeContext(req, text)
+		}
 	}
 
 	return req

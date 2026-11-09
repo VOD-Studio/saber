@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ import (
 	"rua.plus/saber/internal/config"
 )
 
-// newOpenAITestServer 创建指向假上游且不启用任务数据库的入口。
+// newOpenAITestServer 创建真实持久任务入口，提供商 HTTP 服务用于协议边界验证。
 func newOpenAITestServer(t *testing.T, upstream http.HandlerFunc, mutate func(*config.Config)) *httptest.Server {
 	t.Helper()
 	upstreamServer := httptest.NewServer(upstream)
@@ -33,6 +34,7 @@ func newOpenAITestServer(t *testing.T, upstream http.HandlerFunc, mutate func(*c
 	}
 	service, err := ai.NewService(&cfg)
 	require.NoError(t, err)
+	require.NoError(t, service.EnableTasks(filepath.Join(t.TempDir(), "tasks.db")))
 	t.Cleanup(service.Stop)
 	endpoint := httptest.NewServer(New(service, "test-token"))
 	t.Cleanup(endpoint.Close)
@@ -91,6 +93,11 @@ func TestOpenAI_ChatCompletion(t *testing.T) {
 			t.Errorf("解析上游请求失败: %v", err)
 			return
 		}
+		if stream, _ := received["stream"].(bool); stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"你好\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\ndata: [DONE]\n\n")
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, err := fmt.Fprint(w, `{"id":"x","object":"chat.completion","created":1,"model":"local","choices":[{"index":0,"message":{"role":"assistant","content":"你好"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`)
 		if err != nil {
@@ -115,11 +122,14 @@ func TestOpenAI_ChatCompletion(t *testing.T) {
 
 	messages, ok := received["messages"].([]any)
 	require.True(t, ok)
-	require.Len(t, messages, 2)
-	first, ok := messages[0].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, "system", first["role"])
-	require.Equal(t, "你是助手", first["content"])
+	foundUser := false
+	for _, item := range messages {
+		m, ok := item.(map[string]any)
+		if ok && m["role"] == "user" && m["content"] == "你好" {
+			foundUser = true
+		}
+	}
+	require.True(t, foundUser, "持久任务没有收到真实原始用户消息")
 	require.Equal(t, 0.2, received["temperature"])
 }
 
@@ -226,14 +236,14 @@ func TestOpenAI_ChatCompletionErrors(t *testing.T) {
 		{name: "无效 JSON", body: `{"model":`, status: http.StatusBadRequest, code: "invalid_json"},
 		{name: "空消息", body: `{"model":"openai.local","messages":[]}`, status: http.StatusBadRequest, code: "invalid_request"},
 		{name: "未知模型", body: `{"model":"openai.missing","messages":[{"role":"user","content":"x"}]}`, status: http.StatusNotFound, code: "model_not_found"},
-		{name: "工具参数", body: `{"model":"openai.local","messages":[{"role":"user","content":"x"}],"tools":[]}`, status: http.StatusBadRequest, code: "unsupported_parameter"},
-		{name: "工具选择", body: `{"model":"openai.local","messages":[{"role":"user","content":"x"}],"tool_choice":"auto"}`, status: http.StatusBadRequest, code: "unsupported_parameter"},
+		{name: "工具参数", body: `{"model":"openai.local","messages":[{"role":"user","content":"x"}],"tools":[{}]}`, status: http.StatusBadRequest, code: "invalid_request"},
+		{name: "工具选择", body: `{"model":"openai.local","messages":[{"role":"user","content":"x"}],"tool_choice":"invalid"}`, status: http.StatusBadRequest, code: "invalid_request"},
 		{name: "旧函数参数", body: `{"model":"openai.local","messages":[{"role":"user","content":"x"}],"functions":[]}`, status: http.StatusBadRequest, code: "unsupported_parameter"},
 		{name: "多个候选", body: `{"model":"openai.local","messages":[{"role":"user","content":"x"}],"n":2}`, status: http.StatusBadRequest, code: "unsupported_parameter"},
 		{name: "日志概率", body: `{"model":"openai.local","messages":[{"role":"user","content":"x"}],"logprobs":true}`, status: http.StatusBadRequest, code: "unsupported_parameter"},
-		{name: "流式选项", body: `{"model":"openai.local","messages":[{"role":"user","content":"x"}],"stream_options":{"include_usage":true}}`, status: http.StatusBadRequest, code: "unsupported_parameter"},
+		{name: "流式选项", body: `{"model":"openai.local","messages":[{"role":"user","content":"x"}],"stream_options":{"include_usage":"yes"}}`, status: http.StatusBadRequest, code: "invalid_request"},
 		{name: "工具角色", body: `{"model":"openai.local","messages":[{"role":"tool","content":"x"}]}`, status: http.StatusBadRequest, code: "unsupported_role"},
-		{name: "图片内容", body: `{"model":"openai.local","messages":[{"role":"user","content":[{"type":"text","text":"x"}]}]}`, status: http.StatusBadRequest, code: "unsupported_content"},
+		{name: "越权图片路径", body: `{"model":"openai.local","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"file:///etc/passwd"}}]}]}`, status: http.StatusBadRequest, code: "unsupported_content"},
 		{name: "过多消息", body: `{"model":"openai.local","messages":[` + strings.Join(manyMessages, ",") + `]}`, status: http.StatusBadRequest, code: "too_many_messages"},
 		{name: "单条过长", body: `{"model":"openai.local","messages":[{"role":"user","content":"` + longContent + `"}]}`, status: http.StatusBadRequest, code: "message_too_large"},
 		{name: "温度越界", body: `{"model":"openai.local","messages":[{"role":"user","content":"x"}],"temperature":3}`, status: http.StatusBadRequest, code: "invalid_request"},

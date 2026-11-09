@@ -55,7 +55,7 @@ func (te *ToolExecutor) ExecuteToolCallingLoop(ctx context.Context, messages []o
 // 返回值:
 //   - any: 工具执行结果
 //   - error: 错误信息
-func (te *ToolExecutor) ExecuteToolCall(ctx context.Context, toolName string, args map[string]any) (any, error) {
+func (te *ToolExecutor) ExecuteToolCall(ctx context.Context, toolName string, args map[string]any) (value any, callErr error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -63,6 +63,48 @@ func (te *ToolExecutor) ExecuteToolCall(ctx context.Context, toolName string, ar
 	// 因此这里整类拒绝；PrepareTools 已经不提供工具，这里是第二道防线。
 	if isPublicThread(ctx) {
 		return nil, fmt.Errorf("公开互动回合不允许调用工具")
+	}
+	if !agent.ToolAllowed(ctx, toolName) {
+		return nil, fmt.Errorf("tool %q is outside the current tool scope", toolName)
+	}
+	serial := execution.LocalTool(toolName) || (te.service.extensions != nil && te.service.extensions.Contains(toolName)) || (te.service.extensionPlugins != nil && te.service.extensionPlugins.Contains(toolName))
+	if te.service.mcpManager != nil && te.service.mcpManager.GetServerForTool(toolName) != "" {
+		serial = true
+	}
+	if serial {
+		leased, unlock, err := te.service.acquireToolLease(ctx)
+		if err != nil {
+			return nil, err
+		}
+		ctx = leased
+		defer unlock()
+	}
+	if active, _ := ctx.Value(pluginHookKey{}).(bool); !active && te.service.extensionPlugins != nil {
+		hookContext := context.WithValue(ctx, pluginHookKey{}, true)
+		if err := te.service.extensionPlugins.Hook(hookContext, "pre_tool_call", map[string]any{"tool_name": toolName, "arguments": args}); err != nil {
+			return nil, err
+		}
+		defer func() {
+			errorText := ""
+			if callErr != nil {
+				errorText = callErr.Error()
+			}
+			if err := te.service.extensionPlugins.Hook(hookContext, "post_tool_call", map[string]any{"tool_name": toolName, "arguments": args, "result": value, "error": errorText}); err != nil {
+				slog.Warn("插件工具观察钩子失败", "tool", toolName, "error", err)
+			}
+		}()
+	}
+	if te.service.isControlTool(toolName) {
+		return te.service.executeControlTool(ctx, toolName, args)
+	}
+	if isAutomationTool(toolName) {
+		return te.service.executeAutomationTool(ctx, toolName, args)
+	}
+	if te.service.extensionPlugins != nil && te.service.extensionPlugins.Contains(toolName) {
+		return te.service.extensionPlugins.Execute(ctx, toolName, args)
+	}
+	if te.service.extensions != nil && te.service.extensions.Contains(toolName) {
+		return te.service.extensions.Execute(ctx, toolName, args)
 	}
 	if execution.LocalTool(toolName) {
 		if te.service.executor == nil {
@@ -163,8 +205,15 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 	if te.service.executor != nil {
 		tools = append(tools, te.service.executor.Tools(ctx)...)
 	}
+	if te.service.extensions != nil {
+		tools = append(tools, te.service.extensions.Tools(ctx)...)
+	}
+	if te.service.extensionPlugins != nil {
+		tools = append(tools, te.service.extensionPlugins.Tools(ctx)...)
+	}
 	if te.service.tasks != nil {
 		tools = append(tools, taskTool())
+		tools = append(tools, te.service.controlDefinitions(ctx)...)
 		// 计划、轨迹与批次工具都不依赖执行后端，只要求可信身份；轨迹导出还要在运行时
 		// 有持久任务上下文并按 AuthorizeOutput 复核来源，批次还要按批次归属复核访问权，
 		// 故此处只做可见性判断。
@@ -196,13 +245,13 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 		}
 	}
 	if te.service.mcpManager == nil || !te.service.mcpManager.IsEnabled() {
-		tools = te.exposeDelegate(ctx, tools)
+		tools = te.service.filterDeferredTools(te.exposeDelegate(ctx, tools))
 		return tools, len(tools) > 0
 	}
 
 	mcpTools := te.service.mcpManager.ListTools()
 	if len(mcpTools) == 0 {
-		tools = te.exposeDelegate(ctx, tools)
+		tools = te.service.filterDeferredTools(te.exposeDelegate(ctx, tools))
 		return tools, len(tools) > 0
 	}
 
@@ -224,7 +273,7 @@ func (te *ToolExecutor) PrepareTools(contexts ...context.Context) ([]openai.Tool
 		})
 	}
 
-	tools = te.exposeDelegate(ctx, tools)
+	tools = te.service.filterDeferredTools(te.exposeDelegate(ctx, tools))
 	slog.Debug("启用工具调用", "tool_count", len(tools))
 	return tools, len(tools) > 0
 }

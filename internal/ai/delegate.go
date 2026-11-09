@@ -3,11 +3,11 @@ package ai
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"sort"
+	"time"
 
 	"github.com/sashabaranov/go-openai"
 	"rua.plus/saber/internal/agent"
-	"rua.plus/saber/internal/execution"
 	"rua.plus/saber/internal/task"
 )
 
@@ -23,10 +23,8 @@ func delegateTool() openai.Tool {
 		Type: openai.ToolTypeFunction,
 		Function: &openai.FunctionDefinition{
 			Name: agent.DelegateTool,
-			Description: "把一个目标明确、与当前步骤无串行依赖的子任务交给子代理并行完成。" +
-				"子代理有独立上下文，看不到本次对话历史和你的工具结果，只能看到 goal；" +
-				"它使用当前模型和本次已授权的工具子集，不能再次委派。" +
-				"同一轮可以多次调用以并行处理互不依赖的子目标；有先后依赖或需要你判断结果时，请等待返回后再调用。",
+			Description: "将目标明确且互不依赖的子任务交给子代理。每个子代理独立上下文，仅能使用父任务当前授权的工具子集；" +
+				"有持久结果出口且工作副本不冲突时可后台运行，返回持久任务编号，否则同步执行。可用 worker 由管理员配置。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -39,8 +37,13 @@ func delegateTool() openai.Tool {
 						"items":       map[string]any{"type": "string"},
 						"description": "可选：子代理可用的工具名子集，必须来自本次可用工具；省略表示沿用父请求的全部工具。",
 					},
+					"worker":        map[string]any{"type": "string", "description": "管理员配置的 worker 路由名称，不接受 provider、密钥或 URL。"},
+					"context":       map[string]any{"type": "string", "description": "子任务必需的背景和约束。"},
+					"images":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 8},
+					"output_schema": map[string]any{"type": "object", "description": "子任务最终 JSON 输出的 JSON Schema，只允许本地引用。"},
+					"tasks":         map[string]any{"type": "array", "items": map[string]any{"type": "object"}, "description": "一组独立子目标；每项可含 goal、tools、worker、context、images、output_schema。"},
 				},
-				"required": []string{"goal"},
+				"anyOf": []any{map[string]any{"required": []string{"goal"}}, map[string]any{"required": []string{"tasks"}}},
 			},
 		},
 	}
@@ -49,23 +52,41 @@ func delegateTool() openai.Tool {
 // exposeDelegate 在顶层运行且已有至少一个可用工具时追加 delegate。
 // 没有任何工具时委派不能带来新能力，只会多一次模型运行；子运行的请求也不会经过这里。
 func (te *ToolExecutor) exposeDelegate(ctx context.Context, tools []openai.Tool) []openai.Tool {
-	if len(tools) == 0 || !te.service.subagentsEnabled() || agent.SubagentDepth(ctx) > 0 {
+	if te.service == nil || te.service.config == nil {
 		return tools
 	}
-	return append(tools, delegateTool())
+	cfg := te.service.config.Agent.Subagents
+	cfg.ApplyDefaults()
+	if len(tools) == 0 || !te.service.subagentsEnabled() || agent.SubagentDepth(ctx) >= cfg.MaxDepth || isPublicThread(ctx) {
+		return tools
+	}
+	tool := delegateTool()
+	if len(cfg.Workers) > 0 {
+		names := make([]string, 0, len(cfg.Workers))
+		for name := range cfg.Workers {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		parameters := tool.Function.Parameters.(map[string]any)
+		properties := parameters["properties"].(map[string]any)
+		properties["worker"].(map[string]any)["enum"] = names
+	}
+	return append(tools, tool)
 }
 
 // subagentDelegator 为当前顶层运行组装委托器；未启用子代理或当前已是子代理时返回 nil。
 // 子代理只能拿到父请求中仍然获准的工具，旧请求快照里已撤销的能力会被重新筛掉。
 func (s *Service) subagentDelegator(ctx context.Context, req agent.Request, limits agent.Limits, modelFunc agent.ModelFunc, execute agent.ToolFunc) *agent.Delegator {
-	if !s.subagentsEnabled() || agent.SubagentDepth(ctx) > 0 {
+	cfg := s.config.Agent.Subagents
+	cfg.ApplyDefaults()
+	if !s.subagentsEnabled() || agent.SubagentDepth(ctx) >= cfg.MaxDepth || isPublicThread(ctx) {
 		return nil
 	}
-	cfg := s.config.Agent.Subagents
 	policy := agent.SubagentPolicy{
 		MaxRounds:      cfg.MaxRounds,
 		MaxTotalTokens: cfg.MaxTotalTokens,
 		MaxParallel:    cfg.MaxParallel,
+		MaxDepth:       cfg.MaxDepth,
 	}.Normalize()
 	delegator := &agent.Delegator{
 		Policy:    policy,
@@ -79,6 +100,18 @@ func (s *Service) subagentDelegator(ctx context.Context, req agent.Request, limi
 		Lease:     &agent.WorkspaceLease{},
 		LeaseKey:  subagentWorkspace(ctx),
 	}
+	delegator.Route = s.routeSubagent
+	delegator.Spawn = s.spawnSubagent
+	delegator.RunChild = func(ctx context.Context, child agent.Request) (agent.Result, error) {
+		child.RunLimits = &agent.Limits{MaxRounds: policy.MaxRounds, MaxTotalTokens: policy.MaxTotalTokens, Timeout: limits.Timeout, MaxToolOutputBytes: limits.MaxToolOutputBytes}
+		if cfg.ChildTimeoutSeconds > 0 {
+			child.RunLimits.Timeout = time.Duration(cfg.ChildTimeoutSeconds) * time.Second
+		}
+		return s.runAgent(ctx, child, nil, nil)
+	}
+	if cfg.WorktreeIsolation {
+		delegator.Prepare = s.prepareSubagentContext
+	}
 	taskID := task.ID(ctx)
 	if taskID <= 0 || s.tasks == nil {
 		return delegator
@@ -88,10 +121,8 @@ func (s *Service) subagentDelegator(ctx context.Context, req agent.Request, limi
 		Start: func(ctx context.Context, goal string) (int64, error) {
 			return s.tasks.RecordSubagentStart(ctx, taskID, goal)
 		},
-		Finish: func(ctx context.Context, id int64, status agent.Status, result string, usage openai.Usage) {
-			if err := s.tasks.RecordSubagentFinish(ctx, id, string(status), result, usage); err != nil {
-				slog.Error("记录子代理终态失败", "error", err, "task_id", taskID, "subagent_id", id)
-			}
+		Finish: func(ctx context.Context, id int64, status agent.Status, result string, usage openai.Usage) error {
+			return s.tasks.RecordSubagentFinish(ctx, id, string(status), result, usage)
 		},
 	}
 	return delegator
@@ -100,34 +131,29 @@ func (s *Service) subagentDelegator(ctx context.Context, req agent.Request, limi
 // subagentTools 按当前授权重新筛出父请求工具集，并去掉 delegate 与状态工具。
 func (s *Service) subagentTools(ctx context.Context, tools []openai.Tool) []openai.Tool {
 	filtered := make([]openai.Tool, 0, len(tools))
+	current, _ := s.toolExecutor.PrepareTools(ctx)
+	allowed := make(map[string]bool, len(current))
+	for _, tool := range current {
+		if tool.Function != nil {
+			allowed[tool.Function.Name] = true
+		}
+	}
 	for _, tool := range tools {
 		if tool.Function == nil {
 			continue
 		}
 		name := tool.Function.Name
-		if name == "" || name == agent.DelegateTool || name == "saber_task_state" {
+		cfg := s.config.Agent.Subagents
+		cfg.ApplyDefaults()
+		if name == "" || name == "saber_task_state" || (name == agent.DelegateTool && agent.SubagentDepth(ctx)+1 >= cfg.MaxDepth) {
 			continue
 		}
-		if !s.subagentToolAllowed(ctx, name) {
+		if !allowed[name] {
 			continue
 		}
 		filtered = append(filtered, tool)
 	}
 	return filtered
-}
-
-// subagentToolAllowed 对本地执行工具与 MCP 工具重新做程序层授权；
-// 内部工具没有额外授权层，能进入父请求即视为已授权。
-func (s *Service) subagentToolAllowed(ctx context.Context, name string) bool {
-	if execution.LocalTool(name) {
-		return s.executor != nil && s.executor.Check(ctx, name) == nil
-	}
-	if s.mcpManager != nil {
-		if server := s.mcpManager.GetServerForTool(name); server != "" {
-			return s.executor != nil && s.executor.CheckMCP(ctx, server, name) == nil
-		}
-	}
-	return true
 }
 
 // subagentWorkspace 返回工作区租约键：优先使用任务目录，其次任务编号。

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
 
@@ -92,24 +93,26 @@ func (m *Manager) deliverLoop() {
 		case <-ticker.C:
 		}
 		m.mu.Lock()
-		platforms := make([]any, 0, len(m.deliveries))
-		placeholders := make([]string, 0, len(m.deliveries))
+		registered := make([]string, 0, len(m.deliveries))
+		wildcard := m.deliveries["*"] != nil
 		for platform := range m.deliveries {
-			platforms = append(platforms, platform)
-			placeholders = append(placeholders, "?")
+			registered = append(registered, platform)
 		}
-		_, all := m.deliveries["*"]
 		m.mu.Unlock()
-		if len(platforms) == 0 {
+		if len(registered) == 0 {
 			continue
 		}
-		filter := ""
+		// 只查询已注册投递器的平台，避免未订阅平台的积压任务占满每轮窗口。
+		where := `(status IN ('completed','failed','cancelled','interrupted','blocked','review','waiting_input') OR (status='running' AND id IN (SELECT task_id FROM task_control WHERE phase='waiting_input'))) AND delivery='pending' AND next_delivery<=?`
 		args := []any{time.Now().UnixMilli()}
-		if !all {
-			filter = " AND platform IN (" + strings.Join(placeholders, ",") + ")"
-			args = append(args, platforms...)
+		if !wildcard {
+			sort.Strings(registered)
+			where += ` AND platform IN (?` + strings.Repeat(",?", len(registered)-1) + `)`
+			for _, platform := range registered {
+				args = append(args, platform)
+			}
 		}
-		tasks, err := m.store.query(m.ctx, `status NOT IN ('queued','running') AND delivery='pending' AND next_delivery<=?`+filter+` ORDER BY next_delivery,id LIMIT 20`, args...)
+		tasks, err := m.store.query(m.ctx, where+` ORDER BY next_delivery,id LIMIT 20`, args...)
 		if err != nil {
 			if m.ctx.Err() == nil {
 				slog.Error("读取待投递任务失败", "error", err)
@@ -120,20 +123,29 @@ func (m *Manager) deliverLoop() {
 			if m.ctx.Err() != nil {
 				return
 			}
+			m.deliveryMu.Lock()
+			sendCtx, noticeTask, noticeErr := m.controlDelivery(m.ctx, t)
+			deliveryTask, resolveErr := m.DeliveryTask(m.ctx, noticeTask)
+			resolveErr = errors.Join(noticeErr, resolveErr)
 			m.mu.Lock()
-			send := m.deliveries[t.Message.Session.Platform]
+			send := m.deliveries[deliveryTask.Message.Session.Platform]
 			if send == nil {
 				send = m.deliveries["*"]
 			}
 			m.mu.Unlock()
-			if send == nil {
+			if send == nil && resolveErr == nil {
+				m.deliveryMu.Unlock()
 				continue
 			}
 			// 服务停止时 m.ctx 被取消，正在进行的这次发送会以 context canceled 失败，
 			// 并像普通失败一样多消耗一次尝试次数（delivered 用独立的 Background 上下文落盘）。
 			// 每次停机最多影响当前这一个任务，对默认 20 次上限影响很小，因此不特殊处理。
-			messageID, sendErr := safeSend(m.ctx, send, t)
+			messageID, sendErr := "", resolveErr
+			if sendErr == nil {
+				messageID, sendErr = safeSend(sendCtx, send, deliveryTask)
+			}
 			status, err := m.store.delivered(context.Background(), t.ID, messageID, sendErr, t.DeliveryAttempts, m.deliveryMaxAttempts)
+			m.deliveryMu.Unlock()
 			if err != nil {
 				slog.Error("保存任务投递状态失败", "error", taskError(t.ID, err))
 				continue

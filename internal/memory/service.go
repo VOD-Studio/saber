@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"rua.plus/saber/internal/chat"
+	"rua.plus/saber/internal/config"
 )
 
 // Config 是记忆服务的可选参数。
@@ -25,16 +26,29 @@ type Config struct {
 	SkillDirs []string
 	// SkillExportDir 是默认技能导出目录；空值禁用 !skill export 的默认目标。
 	SkillExportDir string
+	// SkillCatalog 是允许安装的管理员 pin 来源；不接受模型提供 URL。
+	SkillCatalog       map[string]config.SkillCatalogSource
+	SkillAllowNetwork  bool
+	SkillWriteApproval bool
+	SkillConfig        map[string]any
 }
 
 // Service 是长期记忆的唯一读写入口，隐藏作用域判断、容量与版本冲突。
 type Service struct {
-	store       *store
-	maxChars    int
-	injectBytes int
-	groupWriter func(chat.Identity) bool
-	skillDirs   []string
-	skillExport string
+	store              *store
+	maxChars           int
+	injectBytes        int
+	groupWriter        func(chat.Identity) bool
+	skillDirs          []string
+	skillExport        string
+	skillCatalog       map[string]config.SkillCatalogSource
+	skillAllowNetwork  bool
+	skillWriteApproval bool
+	skillConfig        map[string]any
+	skillWritable      func(context.Context, string) error
+	skillDeletable     func(context.Context, string) error
+	skillAudit         func(context.Context, chat.Identity, string, *SkillPackage, *SkillPackage) error
+	providers          providerManager
 }
 
 // Open 打开或创建记忆数据库，并返回服务实例。
@@ -53,17 +67,19 @@ func Open(path string, cfg Config) (*Service, error) {
 		cfg.InjectBytes = DefaultInjectBytes
 	}
 	return &Service{store: st, maxChars: cfg.MaxChars, injectBytes: cfg.InjectBytes, groupWriter: cfg.GroupWriter,
-		skillDirs: cfg.SkillDirs, skillExport: cfg.SkillExportDir}, nil
+		skillDirs: append([]string(nil), cfg.SkillDirs...), skillExport: cfg.SkillExportDir,
+		skillCatalog: cfg.SkillCatalog, skillAllowNetwork: cfg.SkillAllowNetwork,
+		skillWriteApproval: cfg.SkillWriteApproval, skillConfig: cfg.SkillConfig}, nil
 }
 
 // SkillDirs 返回配置的只读外部技能目录，调用方不得修改返回切片。
-func (s *Service) SkillDirs() []string { return s.skillDirs }
+func (s *Service) SkillDirs() []string { return append([]string(nil), s.skillDirs...) }
 
 // SkillExportDir 返回默认技能导出目录，空值表示未配置导出。
 func (s *Service) SkillExportDir() string { return s.skillExport }
 
 // Close 关闭数据库连接。
-func (s *Service) Close() error { return s.store.Close() }
+func (s *Service) Close() error { return errors.Join(s.providers.close(), s.store.Close()) }
 
 // MaxChars 返回每个空间的存储字符上限。
 func (s *Service) MaxChars() int { return s.maxChars }
@@ -253,11 +269,26 @@ func (s *Service) applyTx(ctx context.Context, tx *sql.Tx, scope Scope, in mutat
 			return Entry{}, false, err
 		}
 		entry, err := queryEntryByID(ctx, tx, key, id)
+		if err == nil {
+			err = s.queueProviderMirrorTx(ctx, tx, scope, ActionAdd, id, entry.Content, "")
+		}
 		return entry, false, err
 	case ActionReplace:
-		return s.replaceTx(ctx, tx, key, in, now)
+		current, err := queryEntryByID(ctx, tx, key, in.EntryID)
+		if err != nil {
+			return Entry{}, false, err
+		}
+		entry, duplicate, err := s.replaceTx(ctx, tx, key, in, now)
+		if err == nil && current.Content != entry.Content {
+			err = s.queueProviderMirrorTx(ctx, tx, scope, ActionReplace, entry.ID, entry.Content, current.Content)
+		}
+		return entry, duplicate, err
 	default:
-		return s.removeTx(ctx, tx, key, in)
+		entry, duplicate, err := s.removeTx(ctx, tx, key, in)
+		if err == nil {
+			err = s.queueProviderMirrorTx(ctx, tx, scope, ActionRemove, entry.ID, "", entry.Content)
+		}
+		return entry, duplicate, err
 	}
 }
 

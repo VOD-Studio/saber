@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -79,7 +80,11 @@ func (s *Service) GetSkill(ctx context.Context, identity chat.Identity, name str
 	if err := validateSkillName(name); err != nil {
 		return SkillEntry{}, err
 	}
-	return s.getSkill(ctx, scope, name)
+	entry, err := s.getSkill(ctx, scope, name)
+	if err == nil {
+		err = s.recordSkillUse(ctx, identity, name)
+	}
+	return entry, err
 }
 
 func (s *Service) getSkill(ctx context.Context, scope Scope, name string) (SkillEntry, error) {
@@ -143,6 +148,7 @@ type skillMutationInput struct {
 	Description     string
 	Content         string
 	Source          Source
+	Package         *SkillPackage
 }
 
 func validateSkillMutation(in skillMutationInput) error {
@@ -166,11 +172,18 @@ func validateSkillMutation(in skillMutationInput) error {
 }
 
 func (s *Service) writeSkill(ctx context.Context, identity chat.Identity, scope Scope, in skillMutationInput) (SkillMutation, error) {
+	ctx = chat.WithIdentity(ctx, identity)
+	if (in.Action == ActionReplace || in.Action == ActionRemove) && in.ExpectedVersion <= 0 {
+		return SkillMutation{}, ErrSkillConflict
+	}
 	if err := validateSkillMutation(in); err != nil {
 		return SkillMutation{}, err
 	}
 	in.Source = sourceWithCreator(in.Source, identity)
-	if s.writeAllowed(identity, scope) {
+	if err := s.checkSkillGuard(ctx, in); err != nil {
+		return SkillMutation{}, err
+	}
+	if s.writeAllowed(identity, scope) && !s.skillWriteApproval {
 		skill, duplicate, err := s.applySkill(ctx, scope, in)
 		return SkillMutation{Skill: skill, Duplicate: duplicate}, err
 	}
@@ -179,12 +192,22 @@ func (s *Service) writeSkill(ctx context.Context, identity chat.Identity, scope 
 }
 
 func (s *Service) applySkill(ctx context.Context, scope Scope, in skillMutationInput) (SkillEntry, bool, error) {
+	if err := s.checkSkillGuard(ctx, in); err != nil {
+		return SkillEntry{}, false, err
+	}
 	tx, err := s.store.db.BeginTx(ctx, nil)
 	if err != nil {
 		return SkillEntry{}, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	var before *SkillPackage
+	if s.skillAudit != nil {
+		before, err = currentSkillPackageTx(ctx, tx, scope, in.Name)
+		if err != nil {
+			return SkillEntry{}, false, err
+		}
+	}
 	key := scope.Key()
 	now := nowMillis()
 
@@ -192,7 +215,11 @@ func (s *Service) applySkill(ctx context.Context, scope Scope, in skillMutationI
 	case ActionAdd:
 		current, err := querySkillByName(ctx, tx, scope, in.Name)
 		if err == nil {
-			if current.Description == in.Description && current.Content == in.Content {
+			same, err := sameSkillPackageTx(ctx, tx, scope, in)
+			if err != nil {
+				return SkillEntry{}, false, err
+			}
+			if current.Description == in.Description && current.Content == in.Content && same {
 				return current, true, nil
 			}
 			return SkillEntry{}, false, ErrSkillDuplicate
@@ -213,7 +240,10 @@ func (s *Service) applySkill(ctx context.Context, scope Scope, in skillMutationI
 		if err != nil {
 			return SkillEntry{}, false, err
 		}
-		return skill, false, tx.Commit()
+		if err := saveSkillPackageTx(ctx, tx, scope, in); err != nil {
+			return SkillEntry{}, false, err
+		}
+		return skill, false, s.commitSkillMutation(ctx, tx, scope, in, skill, before)
 
 	case ActionReplace:
 		current, err := querySkillByName(ctx, tx, scope, in.Name)
@@ -223,7 +253,11 @@ func (s *Service) applySkill(ctx context.Context, scope Scope, in skillMutationI
 		if in.ExpectedVersion > 0 && current.Version != in.ExpectedVersion {
 			return SkillEntry{}, false, fmt.Errorf("%w：技能 %s 当前版本 %d，预期版本 %d", ErrSkillConflict, current.Name, current.Version, in.ExpectedVersion)
 		}
-		if current.Description == in.Description && current.Content == in.Content {
+		same, err := sameSkillPackageTx(ctx, tx, scope, in)
+		if err != nil {
+			return SkillEntry{}, false, err
+		}
+		if current.Description == in.Description && current.Content == in.Content && same {
 			return current, false, nil
 		}
 		res, err := tx.ExecContext(ctx, `UPDATE skill_entries SET description=?,content=?,version=version+1,updated_at=? WHERE id=? AND scope_key=? AND version=?`,
@@ -242,7 +276,10 @@ func (s *Service) applySkill(ctx context.Context, scope Scope, in skillMutationI
 		if err != nil {
 			return SkillEntry{}, false, err
 		}
-		return skill, false, tx.Commit()
+		if err := saveSkillPackageTx(ctx, tx, scope, in); err != nil {
+			return SkillEntry{}, false, err
+		}
+		return skill, false, s.commitSkillMutation(ctx, tx, scope, in, skill, before)
 
 	case ActionRemove:
 		current, err := querySkillByName(ctx, tx, scope, in.Name)
@@ -268,7 +305,7 @@ func (s *Service) applySkill(ctx context.Context, scope Scope, in skillMutationI
 				return SkillEntry{}, false, err
 			}
 		}
-		return current, false, tx.Commit()
+		return current, false, s.commitSkillMutation(ctx, tx, scope, in, current, before)
 
 	default:
 		return SkillEntry{}, false, fmt.Errorf("未知技能操作 %q", in.Action)
@@ -276,6 +313,9 @@ func (s *Service) applySkill(ctx context.Context, scope Scope, in skillMutationI
 }
 
 func (s *Service) proposeSkill(ctx context.Context, scope Scope, in skillMutationInput) (SkillChange, error) {
+	if err := s.checkSkillGuard(ctx, in); err != nil {
+		return SkillChange{}, err
+	}
 	key := scope.Key()
 	now := nowMillis()
 
@@ -291,13 +331,30 @@ func (s *Service) proposeSkill(ctx context.Context, scope Scope, in skillMutatio
 		}
 	}
 
-	res, err := s.store.db.ExecContext(ctx, `INSERT INTO skill_changes(scope_key,action,skill_id,expected_version,name,description,content,proposer,source_task,status,created_at)
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return SkillChange{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `INSERT INTO skill_changes(scope_key,action,skill_id,expected_version,name,description,content,proposer,source_task,status,created_at)
 		VALUES(?,?,?,?,?,?,?,?,?,'pending',?)`, key, in.Action, skillID, in.ExpectedVersion, in.Name, in.Description, in.Content, in.Source.Creator, in.Source.Task, now)
 	if err != nil {
 		return SkillChange{}, err
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
+		return SkillChange{}, err
+	}
+	if in.Package != nil {
+		data, err := json.Marshal(in.Package)
+		if err != nil {
+			return SkillChange{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO skill_package_changes(change_id,scope_key,data) VALUES(?,?,?)`, id, key, data); err != nil {
+			return SkillChange{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return SkillChange{}, err
 	}
 	return s.getSkillChange(ctx, scope, id)
@@ -351,6 +408,7 @@ func (s *Service) PendingSkillChanges(ctx context.Context, identity chat.Identit
 
 // ApproveSkillChange 审批通过一条待确认技能建议，将其应用至生效条目。
 func (s *Service) ApproveSkillChange(ctx context.Context, identity chat.Identity, changeID int64) (SkillEntry, error) {
+	ctx = chat.WithIdentity(ctx, identity)
 	scope, err := space(identity)
 	if err != nil {
 		return SkillEntry{}, err
@@ -380,6 +438,21 @@ func (s *Service) ApproveSkillChange(ctx context.Context, identity chat.Identity
 		Description:     change.Description,
 		Content:         change.Content,
 		Source:          Source{Creator: change.Proposer, Task: change.SourceTask},
+	}
+	if err := s.checkSkillGuard(ctx, in); err != nil {
+		return SkillEntry{}, err
+	}
+	pkg, err := loadSkillPackageTx(ctx, tx, scope, in.Name, true, changeID)
+	if err != nil {
+		return SkillEntry{}, err
+	}
+	in.Package = pkg
+	var before *SkillPackage
+	if s.skillAudit != nil {
+		before, err = currentSkillPackageTx(ctx, tx, scope, in.Name)
+		if err != nil {
+			return SkillEntry{}, err
+		}
 	}
 
 	now := nowMillis()
@@ -462,12 +535,15 @@ func (s *Service) ApproveSkillChange(ctx context.Context, identity chat.Identity
 	default:
 		return SkillEntry{}, fmt.Errorf("未知技能操作 %q", in.Action)
 	}
+	if err := saveSkillPackageTx(ctx, tx, scope, in); err != nil {
+		return SkillEntry{}, err
+	}
 
 	if _, err := tx.ExecContext(ctx, `UPDATE skill_changes SET status='applied', decided_at=? WHERE id=?`, now, changeID); err != nil {
 		return SkillEntry{}, err
 	}
 
-	return skill, tx.Commit()
+	return skill, s.commitSkillMutation(ctx, tx, scope, in, skill, before)
 }
 
 // RejectSkillChange 驳回一条待确认技能建议，将其标记为 rejected 并记录来源排除。
@@ -512,6 +588,7 @@ func (s *Service) RejectSkillChange(ctx context.Context, identity chat.Identity,
 //
 // 个人空间直接生效；群共享空间一律先转为待确认建议。
 func (s *Service) AutoAddSkill(ctx context.Context, identity chat.Identity, name, description, content string, source Source) (SkillMutation, error) {
+	ctx = chat.WithIdentity(ctx, identity)
 	scope, err := space(identity)
 	if err != nil {
 		return SkillMutation{}, err
@@ -539,6 +616,7 @@ func (s *Service) AutoAddSkill(ctx context.Context, identity chat.Identity, name
 //
 // 为防止自动复盘静默覆盖已有流程，无论个人还是群空间均转为待确认建议。
 func (s *Service) AutoReplaceSkill(ctx context.Context, identity chat.Identity, name string, expectedVersion int64, description, content string, source Source) (SkillMutation, error) {
+	ctx = chat.WithIdentity(ctx, identity)
 	scope, err := space(identity)
 	if err != nil {
 		return SkillMutation{}, err
@@ -563,6 +641,7 @@ func (s *Service) AutoReplaceSkill(ctx context.Context, identity chat.Identity, 
 //
 // 为防止误删已生效流程，无论个人还是群空间均转为待确认建议。
 func (s *Service) AutoRemoveSkill(ctx context.Context, identity chat.Identity, name string, expectedVersion int64, source Source) (SkillMutation, error) {
+	ctx = chat.WithIdentity(ctx, identity)
 	scope, err := space(identity)
 	if err != nil {
 		return SkillMutation{}, err

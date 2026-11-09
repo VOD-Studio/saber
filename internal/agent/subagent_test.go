@@ -138,7 +138,7 @@ func TestDelegator_ParallelKeepsCallOrder(t *testing.T) {
 			started++
 			return int64(started), nil
 		},
-		Finish: func(_ context.Context, id int64, status agent.Status, _ string, _ openai.Usage) {
+		Finish: func(_ context.Context, id int64, status agent.Status, _ string, _ openai.Usage) error {
 			hookMu.Lock()
 			defer hookMu.Unlock()
 			finished++
@@ -146,6 +146,7 @@ func TestDelegator_ParallelKeepsCallOrder(t *testing.T) {
 			if id <= 0 {
 				t.Errorf("结束记录缺少编号: %d", id)
 			}
+			return nil
 		},
 	}
 	runtime := agent.Runtime{

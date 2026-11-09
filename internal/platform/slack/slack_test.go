@@ -3,6 +3,7 @@ package slackplatform
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,7 +49,7 @@ func newFakeSlack(t *testing.T, socket string) (*httptest.Server, *fakeSlack) {
 				"text":      r.FormValue("text"),
 				"thread_ts": r.FormValue("thread_ts"),
 			})
-			writeJSON(t, w, map[string]any{"ok": true, "ts": "900.1"})
+			writeJSON(t, w, map[string]any{"ok": true, "ts": fmt.Sprintf("900.%d", len(state.sends))})
 		case "chat.update":
 			state.edits = append(state.edits, map[string]string{
 				"channel": r.FormValue("channel"),
@@ -60,6 +61,8 @@ func newFakeSlack(t *testing.T, socket string) (*httptest.Server, *fakeSlack) {
 				return
 			}
 			writeJSON(t, w, map[string]any{"ok": true, "ts": r.FormValue("ts")})
+		case "chat.delete":
+			writeJSON(t, w, map[string]any{"ok": true})
 		default:
 			http.NotFound(w, r)
 		}
@@ -170,7 +173,7 @@ func TestSlackConfig_Validate(t *testing.T) {
 	}
 }
 
-// TestSlackAdapter_SendEdit 验证发送线程、转义、截断与编辑。
+// TestSlackAdapter_SendEdit 验证完整分段、线程、转义与编辑收尾。
 func TestSlackAdapter_SendEdit(t *testing.T) {
 	t.Parallel()
 	p, state := newTestPlatform(t)
@@ -187,9 +190,13 @@ func TestSlackAdapter_SendEdit(t *testing.T) {
 		t.Fatalf("Send 返回 ts = %q, want 900.1", id)
 	}
 	state.mu.Lock()
-	if len(state.sends) != 1 {
+	if len(state.sends) != 2 {
 		state.mu.Unlock()
-		t.Fatalf("发送次数 = %d, want 1", len(state.sends))
+		t.Fatalf("发送次数=%d, want 2", len(state.sends))
+	}
+	if state.sends[0]["text"]+state.sends[1]["text"] != escapeText("<@U9> & "+long) {
+		state.mu.Unlock()
+		t.Fatal("长回复未完整送达")
 	}
 	sent := state.sends[0]
 	state.mu.Unlock()
@@ -200,7 +207,7 @@ func TestSlackAdapter_SendEdit(t *testing.T) {
 		t.Fatalf("正文未转义 Slack 控制字符: %q", sent["text"])
 	}
 	if len([]rune(sent["text"])) > maxContentRunes {
-		t.Fatalf("截断后仍有 %d 个字符", len([]rune(sent["text"])))
+		t.Fatalf("分段后仍有 %d 个字符", len([]rune(sent["text"])))
 	}
 
 	if err := p.DeliveryAdapter().Edit(context.Background(), "900.1", chat.Reply{

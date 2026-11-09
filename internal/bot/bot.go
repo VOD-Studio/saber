@@ -19,6 +19,7 @@ import (
 	"github.com/lmittmann/tint"
 
 	"rua.plus/saber/internal/ai"
+	"rua.plus/saber/internal/chat"
 	"rua.plus/saber/internal/cli"
 	"rua.plus/saber/internal/command"
 	"rua.plus/saber/internal/config"
@@ -376,7 +377,22 @@ func (s *appState) initServices() error {
 
 	configDir := filepath.Dir(s.flags.ConfigPath)
 
-	aiService, err := ai.NewService(s.cfg, ai.WithMatrix(svc.commandService, svc.mediaService), ai.WithMCP(svc.mcpManager), ai.WithMemory(svc.memoryService))
+	aiService, err := ai.NewService(s.cfg,
+		ai.WithMatrix(svc.commandService, svc.mediaService),
+		ai.WithMCP(svc.mcpManager),
+		ai.WithMemory(svc.memoryService),
+		// 命令注册表在本函数末尾才构建，因此闭包延迟解析，循环自动化复用同一套授权与回执。
+		ai.WithSessionCommands(func(ctx context.Context, message chat.Message) (string, error) {
+			commands := localCommands{registry: svc.commandRegistry, capabilities: s.commandCapabilities}
+			text, handled, err := commands.Dispatch(ctx, message.Session, message.SenderID, message.ID, message.Text)
+			if err != nil {
+				return "", err
+			}
+			if !handled {
+				return "", errors.New("会话指令未被命令注册表处理")
+			}
+			return text, nil
+		}))
 	if err != nil {
 		return fmt.Errorf("AI服务初始化失败: %w", err)
 	}

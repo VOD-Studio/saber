@@ -5,14 +5,10 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
-// maxMessageRunes 是 Telegram sendMessage 的字符上限（4096）；留 96 字符余量给截断提示。
+// maxMessageRunes 是 Telegram 每段消息上限；长回复继续发送后续分段。
 const maxMessageRunes = 4000
-
-// contentTruncatedSuffix 在超长正文被截断时追加，让读者知道后面还有内容没送达。
-const contentTruncatedSuffix = "\n\n…（内容过长，已截断）"
 
 // apiEnvelope 是 Telegram Bot API 的统一响应信封。
 type apiEnvelope struct {
@@ -74,14 +70,22 @@ type update struct {
 
 // message 是 Telegram 消息的快照，只保留规范化需要的字段。
 type message struct {
-	MessageID       int64    `json:"message_id"`
-	From            *user    `json:"from"`
-	Chat            chatRef  `json:"chat"`
-	Date            int64    `json:"date"`
-	Text            string   `json:"text"`
-	ReplyToMessage  *message `json:"reply_to_message"`
-	MessageThreadID int      `json:"message_thread_id"`
-	Entities        []entity `json:"entities"`
+	MessageID       int64       `json:"message_id"`
+	From            *user       `json:"from"`
+	Chat            chatRef     `json:"chat"`
+	Date            int64       `json:"date"`
+	Text            string      `json:"text"`
+	ReplyToMessage  *message    `json:"reply_to_message"`
+	MessageThreadID int         `json:"message_thread_id"`
+	Entities        []entity    `json:"entities"`
+	Caption         string      `json:"caption"`
+	CaptionEntities []entity    `json:"caption_entities"`
+	Photo           []mediaFile `json:"photo"`
+	Voice           *mediaFile  `json:"voice"`
+	Audio           *mediaFile  `json:"audio"`
+	Video           *mediaFile  `json:"video"`
+	Document        *mediaFile  `json:"document"`
+	Animation       *mediaFile  `json:"animation"`
 }
 
 // user 是消息发送者。
@@ -106,20 +110,4 @@ type entity struct {
 	Offset int    `json:"offset"`
 	Length int    `json:"length"`
 	User   *user  `json:"user"`
-}
-
-// truncateContent 把出站正文压进平台字符上限。
-//
-// 按 Unicode 字符而非字节计：中文按字节截断会切出半个字。
-// 第二个返回值表示是否发生截断。
-func truncateContent(content string) (string, bool) {
-	runes := []rune(content)
-	if len(runes) <= maxMessageRunes {
-		return content, false
-	}
-	keep := maxMessageRunes - utf8.RuneCountInString(contentTruncatedSuffix)
-	if keep < 0 {
-		keep = 0
-	}
-	return string(runes[:keep]) + contentTruncatedSuffix, true
 }

@@ -59,6 +59,24 @@ type Checkpoint struct {
 
 // Request 保留现有模型协议，供流式和非流式 adapter 共用。
 type Request struct {
+	// SubagentDepth 持久保存程序创建的委派深度；外部请求不能设置它。
+	SubagentDepth int `json:"subagent_depth,omitempty"`
+	// ParentAttemptGate 仅在进程内连接父预算，不接受反序列化或跨重启重放。
+	ParentAttemptGate AttemptGate `json:"-"`
+	// IsolateWorkspace 标记程序创建的独立工作副本，不允许外部请求伪造。
+	IsolateWorkspace bool `json:"isolate_workspace,omitempty"`
+	// PrepareChild 在子任务有持久 ID、尚未派发时绑定独立工作副本授权。
+	PrepareChild func(context.Context, int64) error `json:"-"`
+	// ChildCleanup 在子任务终态时释放独立工作副本，不进入持久化协议。
+	ChildCleanup func(context.Context) error `json:"-"`
+	// RunLimits 是程序分配给子任务的硬限制；不由模型或外部 API 传入。
+	RunLimits *Limits `json:"run_limits,omitempty"`
+	// OutputSchema 是委派子任务的 JSON 输出契约，只允许本地引用。
+	OutputSchema map[string]any `json:"output_schema,omitempty"`
+	// ToolScope 保存父任务授予的工具名称，后台派发与续接都不可扩大。
+	ToolScope []string `json:"tool_scope"`
+	// ChildMaxParallel 是父任务树后台子运行的容量上限，仅由程序配置设置。
+	ChildMaxParallel int `json:"child_max_parallel,omitempty"`
 	// ReasoningEffort 非空时覆盖当前模型的默认思考等级，不修改共享客户端配置。
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// ResponsesHistory 按首个工具调用 ID 保存原始输出，保留加密推理和消息 phase。
@@ -85,7 +103,7 @@ type Request struct {
 	// Tools 是本次运行允许调用的工具快照。
 	Tools []openai.Tool `json:"tools,omitempty"`
 	// ToolChoice 保留调用方指定的工具选择策略。
-	ToolChoice *string `json:"tool_choice,omitempty"`
+	ToolChoice any `json:"tool_choice,omitempty"`
 
 	// reservedTokens 是 Admit 在本账本与父账本上预留的 token 数，仅供 Record 精确释放。
 	// 不参与序列化，也不来自模型或外部请求。
@@ -137,6 +155,10 @@ type ToolOutput struct {
 	OutputID string
 	// Structured 表示 Value 是结构化结果，超预算时应改用可回读句柄。
 	Structured bool
+	// Images 是提供者校验过的模型可见图片 URL 或 data URL。
+	Images []string
+	// Files 是提供者生成的产物引用；投递端必须按源任务身份重新校验后读取。
+	Files []string
 }
 
 // ModelFunc 取得一轮响应，可通过 emit 发出文本和尝试事件。
@@ -172,6 +194,10 @@ type ToolRecord struct {
 	OutputID string
 	// Truncated 表示结果被长度限制截断。
 	Truncated bool
+	// Images 与工具文本一起落盘，恢复时在完整工具回复批次之后注入。
+	Images []string `json:"images,omitempty"`
+	// Files 保留经提供者产生的产物，不从工具文本猜测宿主路径。
+	Files []string `json:"files,omitempty"`
 	// Duration 是解析和执行耗时。
 	Duration time.Duration
 }
@@ -206,6 +232,10 @@ type Result struct {
 	Checkpoint *Checkpoint
 	// Budget 是本次运行的预算与用量快照；未启用账本时为 nil。
 	Budget *BudgetStats
+	// ChildCompletions 是本次运行领取的持久子结果，投递端按 TaskID 校验产物来源。
+	ChildCompletions []ChildCompletion `json:"child_completions,omitempty"`
+	// Notifications 是本次运行领取的真实进程与诊断消息，恢复时无需重新执行工具。
+	Notifications []string `json:"notifications,omitempty"`
 }
 
 // EventKind 表示可由聊天 adapter 或测试消费的运行事件。
@@ -248,6 +278,10 @@ const (
 	SubagentStarted EventKind = "subagent_started"
 	// SubagentFinished 表示子代理已结束，结果与用量对父任务可见。
 	SubagentFinished EventKind = "subagent_finished"
+	// ChildResultsReceived 表示子任务结果已被父运行消费并准备注入模型。
+	ChildResultsReceived EventKind = "child_results_received"
+	// ContextNotificationsReceived 表示后台通知已准备注入模型，供任务恢复保留事实。
+	ContextNotificationsReceived EventKind = "context_notifications_received"
 	// BatchSubmitted 表示一次批次提交已落库，Batch 给出批次编号与条目数。
 	BatchSubmitted EventKind = "batch_submitted"
 	// BatchFinished 表示批次内所有条目都已终态，Batch.Counts 是终态分布。
@@ -287,6 +321,10 @@ type Event struct {
 	Checkpoint *Checkpoint
 	// Budget 是预算追加或停止时的快照。
 	Budget *BudgetStats
+	// ChildCompletions 只在子结果领取事件设置，源任务保持持久权限边界。
+	ChildCompletions []ChildCompletion `json:"child_completions,omitempty"`
+	// Notifications 只在后台通知领取事件设置。
+	Notifications []string `json:"notifications,omitempty"`
 	// Subagent 是子代理生命周期事件的最小事实。
 	Subagent *SubagentInfo
 	// Batch 是批次事件的归属与计数；非批次事件为 nil。

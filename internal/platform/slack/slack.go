@@ -267,6 +267,13 @@ func (p *Platform) handle(ctx context.Context, item slackEvent) {
 	if !ok {
 		return
 	}
+	attachments, err := p.receiveMedia(ctx, item)
+	if err != nil {
+		slog.Warn("slack 媒体读取失败", "message", normalized.ID, "error", err)
+		return
+	}
+	normalized.Attachments = attachments
+	ctx = chat.WithIdentity(ctx, chat.Identity{Session: normalized.Session, SenderID: normalized.SenderID, Direct: normalized.Direct})
 	slog.Info("slack 消息触发 AI 回复",
 		"conversation", normalized.Session.Conversation,
 		"sender", normalized.SenderID,
@@ -318,11 +325,11 @@ func (p *Platform) normalize(item slackEvent) (chat.Message, bool) {
 		slog.Debug("slack bot 身份未知，暂不处理消息", "ts", item.TS)
 		return chat.Message{}, false
 	}
-	if item.Type != "" && item.Type != "message" {
+	if item.Type != "" && item.Type != "message" && item.Type != "app_mention" {
 		slog.Debug("跳过非 message 的 slack 事件", "type", item.Type)
 		return chat.Message{}, false
 	}
-	if item.Subtype != "" {
+	if item.Subtype != "" && item.Subtype != "file_share" {
 		// message_changed/message_deleted/bot_message 等系统事件不是新提问。
 		slog.Debug("跳过 slack 消息子类型", "subtype", item.Subtype, "ts", item.TS)
 		return chat.Message{}, false
@@ -335,7 +342,7 @@ func (p *Platform) normalize(item slackEvent) (chat.Message, bool) {
 		slog.Debug("跳过 slack 编辑事件", "ts", item.TS)
 		return chat.Message{}, false
 	}
-	if item.Channel == "" || strings.TrimSpace(item.Text) == "" {
+	if item.Channel == "" || (strings.TrimSpace(item.Text) == "" && len(item.Files) == 0) {
 		slog.Debug("跳过 slack 空正文或缺少频道的消息", "ts", item.TS)
 		return chat.Message{}, false
 	}
@@ -357,8 +364,7 @@ func (p *Platform) normalize(item slackEvent) (chat.Message, bool) {
 		}
 	}
 	text := p.stripMentions(item.Text)
-	if strings.TrimSpace(text) == "" {
-		slog.Debug("slack 消息剥离提及后为空，跳过", "ts", item.TS)
+	if strings.TrimSpace(text) == "" && len(item.Files) == 0 {
 		return chat.Message{}, false
 	}
 	return chat.Message{

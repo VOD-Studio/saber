@@ -38,8 +38,11 @@ type scheduleInput struct {
 var chatToolNames = map[string]bool{
 	"saber_task": true, "saber_schedule": true, "saber_memory": true,
 	"saber_history": true, "saber_skill": true, "saber_task_state": true,
-	"saber_trace":      true,
-	"saber_batch":      true,
+	"saber_trace": true,
+	"saber_batch": true,
+	"clarify":     true,
+	// 工具发现只在当前可见集合内检索，不触碰工作区或外部服务。
+	"tool_search": true, "tool_describe": true, "tool_call": true,
 	tweetToolName:      true,
 	emojiToolName:      true,
 	avatarToolName:     true,

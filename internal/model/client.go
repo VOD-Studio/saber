@@ -40,6 +40,9 @@ type Client struct {
 	config       *config.ModelConfig
 	httpClient   *http.Client
 	openaiClient *openai.Client
+	provider     config.ProviderConfig
+	runtime      *modelRuntime
+	modelID      string
 }
 
 // ChatCompletionRequest 表示聊天完成请求。
@@ -122,6 +125,7 @@ func NewClientWithModel(cfg *config.ModelConfig) (*Client, error) {
 		Timeout:   time.Duration(timeout) * time.Second,
 		Transport: sharedTransport,
 	}
+	httpClient.CheckRedirect = rejectProviderRedirect
 
 	slog.Debug("创建AI客户端",
 		"model", cfg.Model,
@@ -161,6 +165,17 @@ func NewClientWithModel(cfg *config.ModelConfig) (*Client, error) {
 //   - *ChatCompletionResponse: 聊天完成响应
 //   - error: 操作过程中发生的错误
 func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionRequest) (*ChatCompletionResponse, error) {
+	ctx = context.WithValue(ctx, modelHTTPKey{}, c.getModelName(req.Model))
+	choice, choiceErr := completionToolChoice(req.ToolChoice)
+	if choiceErr != nil {
+		return nil, choiceErr
+	}
+	if c.runtime != nil {
+		return c.runtime.complete(ctx, c, req, nil)
+	}
+	if c.usesNative() {
+		return c.createNative(ctx, req, nil)
+	}
 	if c.usesResponses() {
 		return c.createResponse(ctx, req, nil)
 	}
@@ -182,7 +197,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 				MaxTokens:   req.MaxTokens,
 				Temperature: float32(req.Temperature),
 				Tools:       req.Tools,
-				ToolChoice:  req.ToolChoice,
+				ToolChoice:  choice,
 			},
 		)
 		if err != nil {
@@ -223,7 +238,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 			Temperature: float32(req.Temperature),
 			Stream:      true,
 			Tools:       req.Tools,
-			ToolChoice:  req.ToolChoice,
+			ToolChoice:  choice,
 		},
 	)
 	if err != nil {
@@ -298,6 +313,20 @@ func (c *Client) CreateStreamingChatCompletion(
 	req ChatCompletionRequest,
 	handler StreamingChatCompletionHandler,
 ) error {
+	ctx = context.WithValue(ctx, modelHTTPKey{}, c.getModelName(req.Model))
+	choice, choiceErr := completionToolChoice(req.ToolChoice)
+	if choiceErr != nil {
+		handler.OnError(ctx, choiceErr)
+		return choiceErr
+	}
+	if c.runtime != nil || c.usesNative() {
+		req.Stream = true
+		_, err := c.completeRequest(ctx, req, handler)
+		if err != nil {
+			handler.OnError(ctx, err)
+		}
+		return err
+	}
 	if c.usesResponses() {
 		req.Stream = true
 		_, err := c.createResponse(ctx, req, handler)
@@ -321,7 +350,7 @@ func (c *Client) CreateStreamingChatCompletion(
 			Temperature: float32(req.Temperature),
 			Stream:      true,
 			Tools:       req.Tools,
-			ToolChoice:  req.ToolChoice,
+			ToolChoice:  choice,
 		},
 	)
 	if err != nil {
@@ -394,6 +423,20 @@ func (c *Client) CreateStreamingChatCompletionWithTools(
 	req ChatCompletionRequest,
 	handler StreamingToolCallHandler,
 ) error {
+	ctx = context.WithValue(ctx, modelHTTPKey{}, c.getModelName(req.Model))
+	choice, choiceErr := completionToolChoice(req.ToolChoice)
+	if choiceErr != nil {
+		handler.OnError(ctx, choiceErr)
+		return choiceErr
+	}
+	if c.runtime != nil || c.usesNative() {
+		req.Stream = true
+		_, err := c.completeRequest(ctx, req, handler)
+		if err != nil {
+			handler.OnError(ctx, err)
+		}
+		return err
+	}
 	if c.usesResponses() {
 		req.Stream = true
 		_, err := c.createResponse(ctx, req, handler)
@@ -416,7 +459,7 @@ func (c *Client) CreateStreamingChatCompletionWithTools(
 			Temperature: float32(req.Temperature),
 			Stream:      true,
 			Tools:       req.Tools,
-			ToolChoice:  req.ToolChoice,
+			ToolChoice:  choice,
 		},
 	)
 	if err != nil {

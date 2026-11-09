@@ -67,12 +67,10 @@ func TestToolExecutor_PrepareTools(t *testing.T) {
 		}
 		executor := NewToolExecutor(service)
 
+		// 未装配任何能力时必须安全返回空集合，而不是 panic。
 		tools, hasTools := executor.PrepareTools()
-		if hasTools {
-			t.Error("PrepareTools should return false for nil MCP manager")
-		}
-		if tools != nil {
-			t.Error("PrepareTools should return nil tools for nil MCP manager")
+		if hasTools || len(tools) != 0 {
+			t.Errorf("PrepareTools with no configured capability = %v, %t", tools, hasTools)
 		}
 	})
 

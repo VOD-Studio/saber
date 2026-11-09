@@ -132,6 +132,67 @@ CREATE TABLE IF NOT EXISTS skill_changes (
 );
 CREATE INDEX IF NOT EXISTS skill_changes_pending ON skill_changes(scope_key, status, id);
 
+CREATE TABLE IF NOT EXISTS skill_packages (
+	scope_key TEXT NOT NULL,
+	name TEXT NOT NULL,
+	data BLOB NOT NULL,
+	PRIMARY KEY(scope_key,name)
+);
+CREATE TABLE IF NOT EXISTS skill_package_changes (
+	change_id INTEGER PRIMARY KEY,
+	scope_key TEXT NOT NULL,
+	data BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS skill_usage (
+	scope_key TEXT NOT NULL,
+	name TEXT NOT NULL,
+	use_count INTEGER NOT NULL DEFAULT 0,
+	last_used INTEGER NOT NULL,
+	PRIMARY KEY(scope_key,name)
+);
+CREATE TRIGGER IF NOT EXISTS skill_entries_delete_package AFTER DELETE ON skill_entries BEGIN
+	DELETE FROM skill_packages WHERE scope_key=old.scope_key AND name=old.name;
+	DELETE FROM skill_usage WHERE scope_key=old.scope_key AND name=old.name;
+END;
+
+CREATE TABLE IF NOT EXISTS memory_provider_outbox (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	scope_key TEXT NOT NULL,
+	provider TEXT NOT NULL,
+	payload BLOB NOT NULL,
+	status TEXT NOT NULL,
+	error TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS memory_provider_outbox_scope ON memory_provider_outbox(scope_key,provider,status,id);
+CREATE TABLE IF NOT EXISTS memory_native_operations (
+	provider TEXT NOT NULL,
+	scope_key TEXT NOT NULL,
+	event_key TEXT NOT NULL,
+	status TEXT NOT NULL,
+	result BLOB NOT NULL DEFAULT 'null',
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY(provider,scope_key,event_key)
+);
+CREATE TABLE IF NOT EXISTS memory_native_links (
+	provider TEXT NOT NULL,
+	scope_key TEXT NOT NULL,
+	entry_id INTEGER NOT NULL,
+	ids BLOB NOT NULL,
+	PRIMARY KEY(provider,scope_key,entry_id)
+);
+CREATE TABLE IF NOT EXISTS memory_native_events (
+	provider TEXT NOT NULL,
+	scope_key TEXT NOT NULL,
+	session_key TEXT NOT NULL,
+	event_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	result BLOB NOT NULL,
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY(provider,scope_key,event_id)
+);
+
+
 CREATE TABLE IF NOT EXISTS history_summaries (
 	scope_key TEXT NOT NULL,
 	query_hash TEXT NOT NULL,

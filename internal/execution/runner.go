@@ -34,6 +34,8 @@ type Result struct {
 	Data any `json:"data,omitempty"`
 	// Error 是启动、取消、超时或存储故障，不包含环境变量。
 	Error string `json:"error,omitempty"`
+	// Edits 携带成功写入前后的真实文本，供 ACP 和桌面显示文件差异。
+	Edits []FileEdit `json:"edits,omitempty"`
 }
 
 // Artifact 表示从授权工作区导出并保存的文件快照。
@@ -64,10 +66,22 @@ func (e *Executor) Recover(ctx context.Context) error {
 			needDocker = true
 		}
 	}
-	if !needDocker {
-		return nil
+	if needDocker {
+		if err = e.backend("docker").Recover(ctx); err != nil {
+			return err
+		}
 	}
-	return e.backend("docker").Recover(ctx)
+	for _, name := range []string{"ssh", "modal", "daytona", "vercel"} {
+		if err = e.recoverRemote(ctx, name); err != nil {
+			return err
+		}
+	}
+	for name := range e.cfg.Extensions {
+		if err = e.recoverRemote(ctx, name); err != nil {
+			return err
+		}
+	}
+	return e.recoverWorktrees(ctx)
 }
 
 func (e *Executor) activeWorkspaces() map[string]bool {
@@ -220,11 +234,11 @@ func validateArgs(tool string, args map[string]any) error {
 		"read_output":  {"output_id", "offset", "limit"},
 		"read_file":    {"path", "offset", "limit", "byte_offset", "deliver"},
 		"list_files":   {"path"},
-		"write_file":   {"path", "content"},
-		"apply_patch":  {"path", "edits"},
+		"write_file":   {"path", "content", "expected_sha256"},
+		"apply_patch":  {"path", "edits", "expected_sha256"},
 		"search_files": {"pattern", "path", "file_glob", "case_sensitive", "offset", "limit", "include_hidden"},
 		"glob_files":   {"pattern", "path", "offset", "limit", "include_hidden"},
-		"process":      {"action", "command", "id", "offset", "limit", "wait_seconds"},
+		"process":      {"action", "command", "id", "offset", "limit", "wait_seconds", "stdin", "pty", "rows", "cols", "notify", "watch_patterns", "heartbeat_seconds", "data", "signal"},
 		"snapshot":     {"action", "snapshot_id", "path"},
 	}
 	for key := range args {
@@ -338,6 +352,14 @@ func validateArgs(tool string, args map[string]any) error {
 			return err
 		}
 	}
+	if tool == "write_file" || tool == "apply_patch" {
+		if value, ok := args["expected_sha256"]; ok {
+			digest, valid := value.(string)
+			if !valid || len(digest) != 64 || strings.Trim(digest, "0123456789abcdef") != "" {
+				return errors.New("expected_sha256 must be a 64-character lowercase SHA-256 digest")
+			}
+		}
+	}
 	if tool == "write_file" && !text("content", true) {
 		return errors.New("content must be a string")
 	}
@@ -364,56 +386,7 @@ func validateArgs(tool string, args map[string]any) error {
 }
 
 // validateProcessArgs 只接受当前 action 适用的参数，未知字段一律拒绝。
-func validateProcessArgs(args map[string]any) error {
-	action, ok := args["action"].(string)
-	if !ok || action == "" {
-		return errors.New("action is required")
-	}
-	allowed := map[string]map[string]bool{
-		"start":  {"action": true, "command": true},
-		"list":   {"action": true},
-		"status": {"action": true, "id": true},
-		"kill":   {"action": true, "id": true},
-		"wait":   {"action": true, "id": true, "wait_seconds": true},
-		"logs":   {"action": true, "id": true, "offset": true, "limit": true},
-	}
-	fields, ok := allowed[action]
-	if !ok {
-		return fmt.Errorf("unknown process action %q", action)
-	}
-	for key := range args {
-		if !fields[key] {
-			return fmt.Errorf("argument %q is not valid for process action %q", key, action)
-		}
-	}
-	if action == "start" {
-		command, valid := args["command"].(string)
-		if !valid || command == "" || strings.ContainsRune(command, 0) {
-			return errors.New("command is required")
-		}
-		return nil
-	}
-	if action != "list" {
-		id, valid := args["id"].(string)
-		if !valid || id == "" || strings.ContainsRune(id, 0) {
-			return errors.New("id is required")
-		}
-	}
-	if action == "wait" {
-		if err := validateInteger(args, "wait_seconds", 0, processWaitMax); err != nil {
-			return err
-		}
-	}
-	if action == "logs" {
-		if err := validateInteger(args, "offset", 0, 0); err != nil {
-			return err
-		}
-		if err := validateInteger(args, "limit", outputPageMin, outputPageMax); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+func validateProcessArgs(args map[string]any) error { return validateProcessInput(args) }
 
 // validateInteger 校验可选整数参数；max 为 0 表示只要求非负。
 func validateInteger(args map[string]any, key string, minValue, maxValue int) error {

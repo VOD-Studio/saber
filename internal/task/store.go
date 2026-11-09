@@ -134,11 +134,14 @@ func openStore(path string) (*store, error) {
  CREATE TABLE IF NOT EXISTS task_runtime_state (
   task_id INTEGER PRIMARY KEY REFERENCES tasks(id), state BLOB, checkpoint BLOB
  );
+ CREATE TABLE IF NOT EXISTS task_sources (
+  task_id INTEGER PRIMARY KEY REFERENCES tasks(id), fingerprint BLOB NOT NULL
+ );
  CREATE TABLE IF NOT EXISTS task_steering (
   id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL REFERENCES tasks(id),
   text TEXT NOT NULL, created_at INTEGER NOT NULL, delivered_at INTEGER
  );
- CREATE INDEX IF NOT EXISTS task_steering_pending ON task_steering(task_id, delivered_at);` + scheduleSchema)
+ CREATE INDEX IF NOT EXISTS task_steering_pending ON task_steering(task_id, delivered_at);` + scheduleSchema + controlSchema)
 	if err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
@@ -159,6 +162,8 @@ func (s *store) migrateColumns() error {
 		{"tasks", "batch_index", "INTEGER NOT NULL DEFAULT -1"},
 		{"schedules", "requires_execution", "INTEGER NOT NULL DEFAULT 1"},
 		{"schedules", "delivery", "TEXT NOT NULL DEFAULT 'origin'"},
+		{"task_children", "detached", "INTEGER NOT NULL DEFAULT 0"},
+		{"task_child_received", "delivered_round", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		var exists int
 		if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info('`+c.table+`') WHERE name=?)`, c.column).Scan(&exists); err != nil {
@@ -208,6 +213,20 @@ func (s *store) submit(ctx context.Context, message chat.Message, dir string, re
 	if err != nil {
 		return Task{}, err
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Task{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	t, err := insertTaskTx(ctx, tx, message, dir, req, parent...)
+	if err != nil {
+		return Task{}, err
+	}
+	return t, tx.Commit()
+}
+
+// insertTaskTx 在调用方事务中保存任务及来源代号，控制图和子任务不能留下半提交记录。
+func insertTaskTx(ctx context.Context, tx *sql.Tx, message chat.Message, dir string, req agent.Request, parent ...int64) (Task, error) {
 	m, err := json.Marshal(message)
 	if err != nil {
 		return Task{}, err
@@ -216,11 +235,6 @@ func (s *store) submit(ctx context.Context, message chat.Message, dir string, re
 	if err != nil {
 		return Task{}, err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Task{}, err
-	}
-	defer func() { _ = tx.Rollback() }()
 	inserted, err := tx.ExecContext(ctx, `INSERT INTO tasks(platform, account, room, event, sender, work_dir, message, request, created_at)
 		VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(platform,account,room,event) DO NOTHING`,
 		message.Session.Platform, message.Session.Account, message.Session.Conversation, message.ID, message.SenderID, dir, m, r, time.Now().UnixMilli())
@@ -237,6 +251,13 @@ func (s *store) submit(ctx context.Context, message chat.Message, dir string, re
 		return Task{}, err
 	}
 	if count > 0 {
+		fingerprint, err := taskSourceFingerprint(message, dir, req)
+		if err != nil {
+			return Task{}, err
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO task_sources(task_id,fingerprint) VALUES(?,?)`, t.ID, fingerprint); err != nil {
+			return Task{}, err
+		}
 		var generation int64
 		err = tx.QueryRowContext(ctx, `SELECT generation FROM session_contexts WHERE platform=? AND account=? AND room=? AND thread=?`,
 			message.Session.Platform, message.Session.Account, message.Session.Conversation, message.Session.Thread).Scan(&generation)
@@ -252,7 +273,7 @@ func (s *store) submit(ctx context.Context, message chat.Message, dir string, re
 			return Task{}, err
 		}
 	}
-	return t, tx.Commit()
+	return t, nil
 }
 
 const taskColumns = `id,message,work_dir,request,status,result,error,cancel_requested,delivery,delivery_attempts,delivery_error,delivery_id,created_at,event,silent,batch_id,batch_index`
@@ -294,7 +315,7 @@ func (s *store) recover(ctx context.Context, blocked []string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	query := `UPDATE tasks SET status='interrupted',error='进程停止，执行结果可能包含外部副作用；请核查执行记录，不自动重放' WHERE status='running'`
+	query := `UPDATE tasks SET status=CASE WHEN cancel_requested=1 THEN 'cancelled' ELSE 'interrupted' END,error='进程停止，执行结果可能包含外部副作用；请核查执行记录，不自动重放' WHERE status='running'`
 	args := []any{}
 	if len(blocked) > 0 {
 		query += ` AND work_dir NOT IN (` + placeholders(len(blocked)) + `)`
@@ -303,6 +324,12 @@ func (s *store) recover(ctx context.Context, blocked []string) error {
 		}
 	}
 	if _, err = tx.ExecContext(ctx, query, args...); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE tasks SET status='failed',error='后台子任务在重启前尚未派发，父预算和工作副本授权不可恢复，未自动重放' WHERE status='queued' AND id IN (SELECT task_id FROM task_children WHERE detached=1)`); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE tasks SET status=(SELECT phase FROM task_control WHERE task_id=tasks.id) WHERE status='interrupted' AND cancel_requested=0 AND EXISTS(SELECT 1 FROM task_control WHERE task_id=tasks.id AND phase IN ('blocked','review','waiting_input'))`); err != nil {
 		return err
 	}
 	projection := `INSERT INTO task_pending_projections(task_id,created_at)
@@ -325,7 +352,11 @@ func (s *store) recover(ctx context.Context, blocked []string) error {
 func (s *store) claim(ctx context.Context, blocked []string) (Task, error) {
 	query := `UPDATE tasks SET status='running' WHERE id=(
 		SELECT id FROM tasks q WHERE status='queued' AND NOT EXISTS (
-   SELECT 1 FROM task_links l JOIN tasks p ON p.id=l.parent_id WHERE l.task_id=q.id AND p.status IN ('queued','running')
+   SELECT 1 FROM task_links l JOIN tasks p ON p.id=l.parent_id WHERE l.task_id=q.id AND p.status IN ('queued','running','blocked','review','waiting_input')
+  ) AND NOT EXISTS (
+   SELECT 1 FROM task_dependencies d JOIN tasks p ON p.id=d.dependency_id WHERE d.task_id=q.id AND p.status<>'completed'
+  ) AND NOT EXISTS (
+   SELECT 1 FROM task_control c WHERE c.task_id=q.id AND c.phase IN ('blocked','review','waiting_input')
   ) AND NOT EXISTS (
 			SELECT 1 FROM tasks r WHERE r.status='running' AND r.work_dir=q.work_dir
 		)`
@@ -382,6 +413,13 @@ func (s *store) record(ctx context.Context, taskID int64, event agent.Event) err
 	defer func() { _ = tx.Rollback() }()
 	if _, err = tx.ExecContext(ctx, `INSERT INTO task_events(task_id,created_at,record) VALUES(?,?,?)`, taskID, time.Now().UnixMilli(), data); err != nil {
 		return err
+	}
+	if event.Kind == agent.ChildResultsReceived {
+		for _, completion := range event.ChildCompletions {
+			if _, err := tx.ExecContext(ctx, `UPDATE task_child_received SET delivered_round=? WHERE parent_id=? AND child_id=?`, event.Round, taskID, completion.TaskID); err != nil {
+				return err
+			}
+		}
 	}
 	if event.State != nil || event.Checkpoint != nil {
 		var stateJSON, checkpointJSON []byte
@@ -458,7 +496,7 @@ func (s *store) finish(ctx context.Context, t Task, result agent.Result, runErr 
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	res, err := tx.ExecContext(ctx, `UPDATE tasks SET status=CASE WHEN cancel_requested=1 THEN 'cancelled' ELSE ? END,result=?,error=? WHERE id=? AND status='running'`, status, data, message, t.ID)
+	res, err := tx.ExecContext(ctx, `UPDATE tasks SET status=CASE WHEN cancel_requested=1 THEN 'cancelled' WHEN EXISTS(SELECT 1 FROM task_control WHERE task_id=tasks.id AND phase IN ('blocked','review','waiting_input')) THEN (SELECT phase FROM task_control WHERE task_id=tasks.id) ELSE ? END,result=?,error=? WHERE id=? AND status='running'`, status, data, message, t.ID)
 	if err != nil {
 		return err
 	}
@@ -467,6 +505,9 @@ func (s *store) finish(ctx context.Context, t Task, result agent.Result, runErr 
 		return err
 	}
 	if affected > 0 {
+		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET delivery='pending',delivery_attempts=0,delivery_error='',delivery_id='',next_delivery=0 WHERE id=? AND status IN ('completed','failed','cancelled','interrupted') AND id IN (SELECT task_id FROM task_control_delivery)`, t.ID); err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO task_pending_projections(task_id,created_at) VALUES(?,?) ON CONFLICT(task_id) DO NOTHING`, t.ID, time.Now().UnixMilli())
 		if err != nil {
 			return err

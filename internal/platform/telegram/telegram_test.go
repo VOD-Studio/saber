@@ -60,7 +60,7 @@ func newFakeAPI(t *testing.T, state *fakeAPI) *httptest.Server {
 			var payload map[string]any
 			decodeBody(t, r, &payload)
 			state.sends = append(state.sends, payload)
-			writeEnvelope(t, w, true, message{MessageID: 42}, "")
+			writeEnvelope(t, w, true, message{MessageID: int64(41 + len(state.sends))}, "")
 		case "editMessageText":
 			var payload map[string]any
 			decodeBody(t, r, &payload)
@@ -167,8 +167,8 @@ func TestTelegramConfig_Validate(t *testing.T) {
 	}
 }
 
-// TestTelegramAdapter_SendAndTruncate 验证发送参数、引用以及超长截断。
-func TestTelegramAdapter_SendAndTruncate(t *testing.T) {
+// TestTelegramAdapter_SendAllSegments 验证超长回复完整分段并保留首段引用。
+func TestTelegramAdapter_SendAllSegments(t *testing.T) {
 	t.Parallel()
 	p, state := newTestPlatform(t)
 	long := strings.Repeat("汉", maxMessageRunes+500)
@@ -181,12 +181,19 @@ func TestTelegramAdapter_SendAndTruncate(t *testing.T) {
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if len(state.sends) != 1 {
-		t.Fatalf("sendMessage 调用次数 = %d, want 1", len(state.sends))
+	if len(state.sends) != 2 {
+		t.Fatalf("sendMessage 调用次数 = %d, want 2", len(state.sends))
 	}
-	text, _ := state.sends[0]["text"].(string)
-	if len([]rune(text)) > maxMessageRunes {
-		t.Fatalf("截断后仍有 %d 个字符，超过上限 %d", len([]rune(text)), maxMessageRunes)
+	var full strings.Builder
+	for _, sent := range state.sends {
+		text, _ := sent["text"].(string)
+		if len([]rune(text)) > maxMessageRunes {
+			t.Fatal("消息分段超过平台上限")
+		}
+		full.WriteString(text)
+	}
+	if full.String() != long {
+		t.Fatal("长回复未完整送达")
 	}
 	if state.sends[0]["chat_id"] != float64(-1001) {
 		t.Fatalf("chat_id = %v, want -1001", state.sends[0]["chat_id"])

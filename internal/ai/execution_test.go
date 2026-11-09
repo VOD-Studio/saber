@@ -117,7 +117,7 @@ func TestTaskAutonomousDockerWorkflow(t *testing.T) {
 				filePaths = append(filePaths, r.URL.Path)
 				mu.Unlock()
 				if failFile.Swap(false) {
-					w.WriteHeader(503)
+					w.WriteHeader(http.StatusServiceUnavailable)
 					if _, err := fmt.Fprint(w, `{"errcode":"M_UNKNOWN","error":"offline"}`); err != nil {
 						t.Error(err)
 					}

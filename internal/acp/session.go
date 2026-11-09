@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 )
 
@@ -18,23 +17,23 @@ type promptParams struct {
 	Prompt    []contentBlock `json:"prompt"`
 }
 
-// newSessionParams 是 session/new 的参数；cwd 与 mcpServers 只记录，不参与运行。
+// newSessionParams 引用服务端授权目录和已配置的 MCP 服务器。
 type newSessionParams struct {
 	CWD        string            `json:"cwd"`
 	MCPServers []json.RawMessage `json:"mcpServers"`
 	Model      string            `json:"model"`
 }
 
-// session 是一次编辑器会话的内存状态，进程退出即丢失。
+// session 仅保存连接状态；历史和自主运行由服务端持久任务保存。
 type session struct {
-	id    string
-	model string
+	id            string
+	model         string
+	cwd           string
+	mcp           []string
+	pendingAnswer *pendingAnswerError
 
 	// promptMu 串行化同一会话的提示，避免历史交错。
 	promptMu sync.Mutex
-	// historyMu 保护 history，允许取消通知与提示并发读取。
-	historyMu sync.Mutex
-	history   []chatMessage
 	// cancelMu 保护 inFlight，使 session/cancel 能打断正在进行的请求。
 	cancelMu sync.Mutex
 	inFlight context.CancelFunc
@@ -105,24 +104,7 @@ func (s *session) cancelPrompt() {
 	}
 }
 
-// historySnapshot 复制当前历史，避免上游请求期间被改写。
-func (s *session) historySnapshot() []chatMessage {
-	s.historyMu.Lock()
-	defer s.historyMu.Unlock()
-	return append([]chatMessage(nil), s.history...)
-}
-
-// commit 在请求成功后一次性写入本轮用户与助手消息。
-func (s *session) commit(user, assistant string) {
-	s.historyMu.Lock()
-	defer s.historyMu.Unlock()
-	s.history = append(s.history,
-		chatMessage{Role: "user", Content: user},
-		chatMessage{Role: "assistant", Content: assistant},
-	)
-}
-
-// newSession 创建会话；cwd 与 mcpServers 本版本不支持，但会明确记录。
+// newSession 创建自主任务会话，目录和 MCP 引用在服务端授权后才生效。
 func (c *conn) newSession(raw json.RawMessage) (any, *rpcError) {
 	var params newSessionParams
 	if rerr := decodeParams(raw, &params); rerr != nil {
@@ -132,23 +114,20 @@ func (c *conn) newSession(raw json.RawMessage) (any, *rpcError) {
 	if err != nil {
 		return nil, &rpcError{Code: codeInternalError, Message: "无法创建会话"}
 	}
-	c.log.Info("ACP 创建会话",
-		"session", s.id,
-		"cwd", params.CWD,
-		"mcp_servers", len(params.MCPServers),
-		"ignored_cwd", params.CWD != "",
-		"ignored_mcp_servers", len(params.MCPServers) > 0,
-	)
+	s.cwd = params.CWD
+	if err := parseMCP(params.MCPServers, s); err != nil {
+		return nil, &rpcError{Code: codeInvalidParams, Message: err.Error()}
+	}
 	return newSessionResult{SessionID: s.id}, nil
 }
 
-// prompt 把会话历史与本轮文本转成 OpenAI 消息，流式转发文本增量。
+// prompt 通过持久任务运行自主编码并转发真实工具和文本事件。
 func (c *conn) prompt(ctx context.Context, params promptParams) (any, *rpcError) {
 	s, ok := c.sessions.get(params.SessionID)
 	if !ok {
 		return nil, &rpcError{Code: codeInvalidParams, Message: "会话不存在: " + params.SessionID}
 	}
-	userText, rerr := promptText(params.Prompt)
+	userText, attachments, rerr := promptContent(params.Prompt)
 	if rerr != nil {
 		return nil, rerr
 	}
@@ -162,43 +141,29 @@ func (c *conn) prompt(ctx context.Context, params promptParams) (any, *rpcError)
 	pctx, finish := s.beginPrompt(ctx)
 	defer finish()
 
-	history := s.historySnapshot()
-	messages := make([]chatMessage, 0, len(history)+1)
-	messages = append(messages, history...)
-	messages = append(messages, chatMessage{Role: "user", Content: userText})
-
-	var assistant strings.Builder
-	err := c.client.stream(pctx, s.model, messages, func(delta string) error {
-		assistant.WriteString(delta)
-		return c.notifyChunk(s.id, delta)
-	})
+	turn, err := c.promptTask(pctx, s, userText, attachments)
 	if err != nil {
+		if _, pending := err.(*pendingAnswerError); pending {
+			return promptResult{StopReason: "end_turn"}, nil
+		}
+		if _, failed := err.(*cancelTaskError); failed {
+			return nil, rpcErrorFromUpstream(err)
+		}
 		if pctx.Err() != nil {
 			return promptResult{StopReason: "cancelled"}, nil
 		}
 		return nil, rpcErrorFromUpstream(err)
 	}
-	s.commit(userText, assistant.String())
+	if turn.Status == "cancelled" {
+		return promptResult{StopReason: "cancelled"}, nil
+	}
+	if turn.Status == "budget_exhausted" {
+		return promptResult{StopReason: "max_turn_requests"}, nil
+	}
+	if turn.Status == "blocked" || turn.Status == "review" || turn.Status == "waiting_input" {
+		return nil, &rpcError{Code: codeUpstreamError, Message: fmt.Sprintf("任务 #%d 正在等待 %s；通过 /v1/control 回答或审批后恢复", turn.ID, turn.Status)}
+	}
 	return promptResult{StopReason: "end_turn"}, nil
-}
-
-// promptText 拼接文本内容块；非文本类型明确拒绝而不是静默丢弃。
-func promptText(blocks []contentBlock) (string, *rpcError) {
-	if len(blocks) == 0 {
-		return "", &rpcError{Code: codeInvalidParams, Message: "prompt 不能为空"}
-	}
-	texts := make([]string, 0, len(blocks))
-	for _, block := range blocks {
-		if block.Type != "text" {
-			return "", &rpcError{Code: codeInvalidParams, Message: "仅支持 type=text 的提示内容"}
-		}
-		texts = append(texts, block.Text)
-	}
-	text := strings.Join(texts, "\n")
-	if strings.TrimSpace(text) == "" {
-		return "", &rpcError{Code: codeInvalidParams, Message: "提示内容为空"}
-	}
-	return text, nil
 }
 
 // rpcErrorFromUpstream 把 HTTP 错误映射为 JSON-RPC 错误，不回显令牌。

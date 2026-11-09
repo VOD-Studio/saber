@@ -255,7 +255,7 @@ func finishBatchIfDone(ctx context.Context, tx *sql.Tx, taskID int64) error {
 		return nil
 	}
 	var pending int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE batch_id=? AND status IN ('queued','running')`, batchID).Scan(&pending); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE batch_id=? AND status IN ('queued','running','blocked','review','waiting_input')`, batchID).Scan(&pending); err != nil {
 		return err
 	}
 	if pending > 0 {

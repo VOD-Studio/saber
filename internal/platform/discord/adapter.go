@@ -6,12 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log/slog"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"rua.plus/saber/internal/chat"
+	"rua.plus/saber/internal/platform"
 )
 
 // nonceBytes 是 Discord nonce 字段的字符上限（25）。
@@ -54,9 +55,10 @@ type Adapter struct {
 	api      *client
 	account  string
 	throttle *editThrottle
+	pager    platform.ReplyPager
 }
 
-// 编译期断言：Discord 只实现文本能力，没有图片/文件方法，任务投递会自动降级。
+// 编译期断言：Discord 支持文本与真实附件上传。
 var _ chat.Adapter = (*Adapter)(nil)
 
 // newAdapter 构造出站 adapter；throttle 在同一平台实例间共享。
@@ -66,7 +68,7 @@ func newAdapter(api *client, account string, throttle *editThrottle) *Adapter {
 
 // Capabilities 返回 Discord 的展示能力：支持编辑、输入状态与引用回复。
 func (a *Adapter) Capabilities() chat.Capabilities {
-	return chat.Capabilities{Edit: true, Typing: true, Reply: true}
+	return chat.Capabilities{Edit: true, Typing: true, Reply: true, Audio: true, Video: true, Files: true}
 }
 
 // Send 发送一条文本消息并返回可用于编辑的消息 ID。
@@ -74,15 +76,12 @@ func (a *Adapter) Send(ctx context.Context, reply chat.Reply) (string, error) {
 	if err := a.validate(ctx, reply.Session); err != nil {
 		return "", err
 	}
-	text, err := prepareText(reply)
-	if err != nil {
-		return "", err
+	if strings.TrimSpace(reply.Text) == "" {
+		return "", errors.New("discord 不接受空白正文")
 	}
-	id, err := a.api.sendMessage(ctx, reply.Session.Conversation, text, reply.ReplyTo, nonce(reply.TransactionID))
-	if err != nil {
-		return "", fmt.Errorf("discord 发送消息失败: %w", err)
-	}
-	return id, nil
+	return a.pager.Send(ctx, reply, reply.Text, maxContentRunes, func(ctx context.Context, item chat.Reply, text string) (string, error) {
+		return a.api.sendMessage(ctx, item.Session.Conversation, text, item.ReplyTo, nonce(item.TransactionID))
+	})
 }
 
 // Edit 原地更新已发送消息的正文。
@@ -93,17 +92,22 @@ func (a *Adapter) Edit(ctx context.Context, messageID string, reply chat.Reply) 
 	if strings.TrimSpace(messageID) == "" {
 		return errors.New("discord 编辑消息缺少消息 ID")
 	}
-	text, err := prepareText(reply)
-	if err != nil {
-		return err
+	if strings.TrimSpace(reply.Text) == "" {
+		return errors.New("discord 不接受空白正文")
 	}
-	if err := a.throttle.wait(ctx); err != nil {
-		return err
-	}
-	if err := a.api.editMessage(ctx, reply.Session.Conversation, messageID, text); err != nil {
-		return fmt.Errorf("discord 编辑消息失败: %w", err)
-	}
-	return nil
+	return a.pager.Edit(ctx, messageID, reply, reply.Text, maxContentRunes,
+		func(ctx context.Context, item chat.Reply, text string) (string, error) {
+			return a.api.sendMessage(ctx, item.Session.Conversation, text, "", nonce(item.TransactionID))
+		},
+		func(ctx context.Context, id string, item chat.Reply, text string) error {
+			if err := a.throttle.wait(ctx); err != nil {
+				return err
+			}
+			return a.api.editMessage(ctx, item.Session.Conversation, id, text)
+		},
+		func(ctx context.Context, id string, item chat.Reply) error {
+			return a.api.do(ctx, "DELETE", "/channels/"+url.PathEscape(item.Session.Conversation)+"/messages/"+url.PathEscape(id), nil, nil)
+		})
 }
 
 // SetTyping 上报输入状态。active 为 false 时 Discord 没有对应语义，是空操作。
@@ -135,21 +139,6 @@ func (a *Adapter) validate(ctx context.Context, session chat.Session) error {
 		return fmt.Errorf("回复的 discord 账号 %q 与当前接入账号 %q 不一致", session.Account, a.account)
 	}
 	return nil
-}
-
-// prepareText 截断并校验出站正文。
-func prepareText(reply chat.Reply) (string, error) {
-	if reply.Session.Platform != platformName {
-		return "", fmt.Errorf("discord adapter 只接受 discord 会话，收到 %q", reply.Session.Platform)
-	}
-	if strings.TrimSpace(reply.Text) == "" {
-		return "", errors.New("discord 不接受空白正文")
-	}
-	text, truncated := truncateContent(reply.Text)
-	if truncated {
-		slog.Warn("discord 出站正文超长已截断", "conversation", reply.Session.Conversation, "runes", len([]rune(reply.Text)))
-	}
-	return text, nil
 }
 
 // nonce 把事务 ID 压成 Discord 接受的 25 字符 nonce。

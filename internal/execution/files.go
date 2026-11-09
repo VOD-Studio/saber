@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"rua.plus/saber/internal/devtools"
 )
 
 const (
@@ -107,16 +109,51 @@ func (w *workspaceRoot) openDir(rel string) (*os.File, error) {
 	return file, nil
 }
 
-func (e *Executor) runFileTool(ctx context.Context, tool string, args map[string]any, run scope) (Result, error) {
+func (e *Executor) runFileTool(ctx context.Context, tool string, args map[string]any, run scope) (result Result, err error) {
+	if remote := e.currentRemote(run); remote != nil {
+		if err = remote.syncWorkspace(ctx); err != nil {
+			return Result{ExitCode: -1}, err
+		}
+	}
+	ctx = context.WithValue(ctx, workspaceSyncedKey{}, true)
+	if p, ok := args["path"].(string); ok && (tool == "read_file" || tool == "write_file" || tool == "apply_patch") {
+		lock := e.fileLock(run.dir, p)
+		lock.Lock()
+		defer lock.Unlock()
+	}
+	defer func() {
+		if remote := e.currentRemote(run); remote != nil && err == nil && (tool == "write_file" || tool == "apply_patch" || tool == "snapshot") {
+			err = remote.syncWorkspace(ctx)
+		}
+		if e.devtools != nil {
+			pending, drainErr := e.devtools.DrainDiagnostics(ctx, developerScope(run.id, run.dir), false)
+			if len(pending) > 0 || drainErr != nil {
+				data, ok := result.Data.(map[string]any)
+				if !ok {
+					data = map[string]any{}
+					result.Data = data
+				}
+				data["developer_diagnostics"] = pending
+				if drainErr != nil {
+					data["diagnostic_error"] = drainErr.Error()
+				}
+			}
+		}
+	}()
 	switch tool {
 	case "read_file":
-		return e.readFile(args, run)
+		if e.devtools != nil && args["deliver"] != true {
+			if p, _ := args["path"].(string); e.devtools.IsDocument(p) {
+				return e.readDocument(ctx, args, run)
+			}
+		}
+		return e.readFile(ctx, args, run)
 	case "list_files":
 		return e.listFiles(args, run)
 	case "write_file":
-		return e.writeFile(args, run)
+		return e.writeFile(ctx, args, run)
 	case "apply_patch":
-		return e.applyPatch(args, run)
+		return e.applyPatch(ctx, args, run)
 	case "snapshot":
 		return e.runSnapshotTool(ctx, args, run)
 	case "search_files":
@@ -128,7 +165,7 @@ func (e *Executor) runFileTool(ctx context.Context, tool string, args map[string
 	}
 }
 
-func (e *Executor) readFile(args map[string]any, run scope) (Result, error) {
+func (e *Executor) readFile(ctx context.Context, args map[string]any, run scope) (Result, error) {
 	result := Result{ExitCode: -1}
 	path, _ := args["path"].(string)
 	deliver, _ := args["deliver"].(bool)
@@ -175,6 +212,11 @@ func (e *Executor) readFile(args map[string]any, run scope) (Result, error) {
 	text, next, nextByte, eof, err := readFilePage(file, offset, limit, byteOffset)
 	if err != nil {
 		return result, err
+	}
+	if e.devtools != nil {
+		if err = observeFilePage(e.devtools, developerScope(run.id, run.dir), path, file, offset, byteOffset, text); err != nil {
+			return result, err
+		}
 	}
 	result.ExitCode = 0
 	result.Data = map[string]any{
@@ -478,7 +520,7 @@ func (e *Executor) listFiles(args map[string]any, run scope) (Result, error) {
 	return result, nil
 }
 
-func (e *Executor) writeFile(args map[string]any, run scope) (Result, error) {
+func (e *Executor) writeFile(ctx context.Context, args map[string]any, run scope) (Result, error) {
 	result := Result{ExitCode: -1}
 	path, _ := args["path"].(string)
 	content, _ := args["content"].(string)
@@ -487,19 +529,45 @@ func (e *Executor) writeFile(args map[string]any, run scope) (Result, error) {
 		return result, err
 	}
 	defer func() { _ = root.close() }()
-	// 先保存原内容，写入失败时仍可用 snapshot 工具回滚。
-	if err = e.snapshotBeforeChange(root, run, path); err != nil {
+	before, exists, err := readCurrentContent(root, path)
+	if err != nil {
 		return result, err
 	}
-	if err = writeWorkspaceFile(root, path, []byte(content)); err != nil {
+	if e.devtools != nil {
+		if err = e.devtools.CheckOverwrite(developerScope(run.id, run.dir), path, before, exists); err != nil {
+			return result, err
+		}
+	}
+	if err = checkExpectedDigest(args, before, exists); err != nil {
 		return result, err
 	}
+	after := []byte(content)
+	if e.devtools != nil {
+		if err = e.devtools.Preflight(ctx, run.dir, filepath.Join(run.dir, path), after); err != nil {
+			return result, err
+		}
+	}
+	if _, err = e.saveSnapshot(run.id, path, before, !exists); err != nil {
+		return result, err
+	}
+	current, currentExists, err := readCurrentContent(root, path)
+	if err != nil {
+		return result, err
+	}
+	if currentExists != exists || !bytes.Equal(current, before) {
+		return result, errors.New("file changed before overwrite; reload current content")
+	}
+	if err = writeWorkspaceFile(root, path, after); err != nil {
+		return result, err
+	}
+	e.editDiagnostics(ctx, run, path, before, after, !exists, &result)
+	result.Edits = []FileEdit{newFileEdit(path, before, after, !exists)}
 	result.ExitCode = 0
 	result.Summary = "written: " + path
 	return result, nil
 }
 
-func (e *Executor) applyPatch(args map[string]any, run scope) (Result, error) {
+func (e *Executor) applyPatch(ctx context.Context, args map[string]any, run scope) (Result, error) {
 	result := Result{ExitCode: -1}
 	path, _ := args["path"].(string)
 	edits, _ := args["edits"].([]any)
@@ -527,6 +595,12 @@ func (e *Executor) applyPatch(args map[string]any, run scope) (Result, error) {
 	if len(data) > maxPatchBytes {
 		return result, errors.New("file exceeds patch size limit")
 	}
+	if err = devtools.CheckTextWrite(path, true, data); err != nil {
+		return result, err
+	}
+	if err = checkExpectedDigest(args, data, true); err != nil {
+		return result, err
+	}
 	if !utf8.Valid(data) {
 		return result, errors.New("file is not valid UTF-8")
 	}
@@ -540,9 +614,21 @@ func (e *Executor) applyPatch(args map[string]any, run scope) (Result, error) {
 		}
 		text = strings.Replace(text, old, replacement, 1)
 	}
+	if e.devtools != nil {
+		if err = e.devtools.Preflight(ctx, run.dir, filepath.Join(run.dir, path), []byte(text)); err != nil {
+			return result, err
+		}
+	}
 	// 验证通过、写回之前保存原内容，避免不可逆编辑。
 	if err = e.snapshotBeforeWriteData(run, path, data); err != nil {
 		return result, err
+	}
+	current, exists, err := readCurrentContent(root, path)
+	if err != nil {
+		return result, err
+	}
+	if !exists || !bytes.Equal(current, data) {
+		return result, errors.New("file changed before patch; reload current content")
 	}
 	if err = file.Truncate(0); err != nil {
 		return result, err
@@ -559,6 +645,8 @@ func (e *Executor) applyPatch(args map[string]any, run scope) (Result, error) {
 	if err = file.Sync(); err != nil {
 		return result, err
 	}
+	e.editDiagnostics(ctx, run, path, data, []byte(text), false, &result)
+	result.Edits = []FileEdit{newFileEdit(path, data, []byte(text), false)}
 	result.ExitCode = 0
 	result.Summary = "patched: " + path
 	return result, nil

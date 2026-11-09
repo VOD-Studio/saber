@@ -125,7 +125,7 @@ func (s *store) redirect(ctx context.Context, taskID int64, text string) error {
 		}
 		return err
 	}
-	if status != "queued" && status != "running" {
+	if status != "queued" && status != "running" && status != "blocked" && status != "review" && status != "waiting_input" {
 		return ErrTaskFinished
 	}
 	pending, err := storePendingSteering(ctx, tx, taskID)
@@ -137,7 +137,7 @@ func (s *store) redirect(ctx context.Context, taskID int64, text string) error {
 	}
 	// 条件插入与状态检查在同一事务内，任务在此期间结束时不会留下无效行。
 	res, err := tx.ExecContext(ctx, `INSERT INTO task_steering(task_id,text,created_at)
-		SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM tasks WHERE id=? AND status IN ('queued','running'))`,
+		SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM tasks WHERE id=? AND status IN ('queued','running','blocked','review','waiting_input'))`,
 		taskID, text, time.Now().UnixMilli(), taskID)
 	if err != nil {
 		return err

@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -25,8 +26,8 @@ func skillTool() openai.Tool {
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
-					"enum":        []string{"catalog", "read", "add", "replace", "remove"},
-					"description": "操作类型：catalog 查看可用技能清单；read 按需读取指定技能完整正文；add 新增技能；replace 更新已有技能；remove 删除技能",
+					"enum":        []string{"catalog", "read", "add", "replace", "remove", "hub", "search", "inspect", "install", "update", "check", "audit", "file", "write_file", "remove_file", "patch", "export", "bundle_export", "bundle_import"},
+					"description": "catalog 当前可用技能；read 完整正文与 metadata；file 分页附属资源；hub/search 配置 catalog；inspect/install/update 已 pin 来源；check/audit 更新及安全扫描；patch/write_file/remove_file 版本化修改；bundle_export/import 完整包迁移",
 				},
 				"name": map[string]any{
 					"type":        "string",
@@ -45,6 +46,14 @@ func skillTool() openai.Tool {
 					"minimum":     1,
 					"description": "replace 与 remove 时必须传入当前技能版本号，防止并发覆盖他人更新",
 				},
+				"identifier": map[string]any{"type": "string", "description": "管理员配置 catalog 的来源标识；不能传 URL"},
+				"query":      map[string]any{"type": "string"},
+				"path":       map[string]any{"type": "string", "description": "技能包内 references/templates/scripts/examples/assets 相对路径"},
+				"offset":     map[string]any{"type": "integer", "minimum": 0},
+				"limit":      map[string]any{"type": "integer", "minimum": 1, "maximum": 200},
+				"old_text":   map[string]any{"type": "string", "description": "patch 必须唯一匹配的原正文"},
+				"force":      map[string]any{"type": "boolean", "description": "覆盖用户修改或 high 扫描需独立 skills_force grant，critical 无法绕过"},
+				"package":    map[string]any{"type": "object", "description": "bundle_export 返回的完整 metadata/resources 包"},
 			},
 			"required":             []string{"action"},
 			"additionalProperties": false,
@@ -54,6 +63,9 @@ func skillTool() openai.Tool {
 
 // executeSkillTool 执行模型发起的技能操作，授权只取运行时可信身份。
 func (s *Service) executeSkillTool(ctx context.Context, args map[string]any) (any, error) {
+	if isPublicThread(ctx) {
+		return nil, errors.New("公开互动回合不允许调用技能工具")
+	}
 	if s.memory == nil {
 		return nil, errors.New("技能与记忆服务未启用")
 	}
@@ -73,6 +85,18 @@ func (s *Service) executeSkillTool(ctx context.Context, args map[string]any) (an
 		if err != nil {
 			return nil, err
 		}
+		allowed := s.skillToolNames(ctx)
+		visible := skills[:0]
+		for _, sk := range skills {
+			pkg, err := s.memory.GetSkillPackage(ctx, identity, sk.Name)
+			if err != nil {
+				return nil, err
+			}
+			if skillAllowed(pkg, allowed) {
+				visible = append(visible, sk)
+			}
+		}
+		skills = visible
 		if len(skills) == 0 {
 			return "当前空间暂无可用技能。可使用 add 操作沉淀复杂工作流与排错经验。", nil
 		}
@@ -87,14 +111,16 @@ func (s *Service) executeSkillTool(ctx context.Context, args map[string]any) (an
 		if strings.TrimSpace(name) == "" {
 			return nil, errors.New("read 操作必须指定技能名称 name")
 		}
-		entry, err := s.memory.GetSkill(ctx, identity, strings.TrimSpace(name))
+		view, err := s.skillPackageView(ctx, identity, strings.TrimSpace(name))
 		if err != nil {
 			return nil, err
 		}
-		var b strings.Builder
-		fmt.Fprintf(&b, "【技能：%s (v%d)】\n适用场景：%s\n更新时间：%s\n\n%s",
-			entry.Name, entry.Version, entry.Description, entry.UpdatedAt.Format("2006-01-02 15:04:05"), entry.Content)
-		return b.String(), nil
+		data := view.(map[string]any)
+		metadata, err := json.Marshal(data["metadata"])
+		if err != nil {
+			return nil, err
+		}
+		return fmt.Sprintf("【技能：%s (v%d)】\n适用场景：%s\n\n%s\n\nmetadata: %s\n附属文件: %v\n缺少环境变量: %v\n%s", name, data["version"], data["description"], data["content"], metadata, data["files"], data["missing_environment_variables"], data["setup_notice"]), nil
 
 	case "add":
 		source := memory.Source{Task: task.ID(ctx)}
@@ -143,7 +169,7 @@ func (s *Service) executeSkillTool(ctx context.Context, args map[string]any) (an
 		return skillMutationText(mut), nil
 
 	default:
-		return nil, fmt.Errorf("未知技能操作 %q", action)
+		return s.executeSkillExtension(ctx, args)
 	}
 }
 

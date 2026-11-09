@@ -60,29 +60,11 @@ type localEnvironment struct {
 
 // Start 启动独立进程组的 /bin/sh；输出合流写入任务归档。
 func (l *localEnvironment) Start(ctx context.Context, command string, out io.Writer) (ownedProcess, error) {
-	l.mu.Lock()
-	if l.dead {
-		l.mu.Unlock()
-		return nil, errors.New("local environment is closed")
+	p, err := l.StartInteractive(ctx, launchOptions{Command: command}, out)
+	if err == nil {
+		err = p.CloseWrite()
 	}
-	cmd := exec.Command("/bin/sh", "-c", command)
-	cmd.Dir = l.dir
-	cmd.Env = append([]string(nil), l.env...)
-	cmd.Stdout = out
-	cmd.Stderr = out
-	setProcessGroup(cmd)
-	if err := cmd.Start(); err != nil {
-		l.mu.Unlock()
-		return nil, err
-	}
-	process := &localProcess{cmd: cmd, pgid: processGroup(cmd), done: make(chan struct{})}
-	if l.live == nil {
-		l.live = make(map[*localProcess]struct{})
-	}
-	l.live[process] = struct{}{}
-	l.mu.Unlock()
-	go process.watch(ctx)
-	return process, nil
+	return p, err
 }
 
 func (l *localEnvironment) Close(context.Context) error {
@@ -104,12 +86,18 @@ func (l *localEnvironment) Close(context.Context) error {
 }
 
 type localProcess struct {
-	cmd  *exec.Cmd
-	pgid int
-	once sync.Once
-	done chan struct{}
-	code int
-	err  error
+	cmd      *exec.Cmd
+	pgid     int
+	once     sync.Once
+	done     chan struct{}
+	code     int
+	err      error
+	input    io.WriteCloser
+	tty      *os.File
+	inputMu  sync.Mutex
+	pumpDone chan struct{}
+	pumpErr  error
+	onExit   func()
 }
 
 // watch 在调用方取消时终止整组进程，不等待 Wait 主动检查。
@@ -138,6 +126,22 @@ func (p *localProcess) Wait() (int, error) {
 		p.err = err
 		if p.pgid > 0 {
 			cleanupProcessGroup(p.pgid)
+		}
+		if p.pumpDone != nil {
+			<-p.pumpDone
+			p.err = errors.Join(p.err, p.pumpErr)
+		}
+		if p.tty != nil {
+			_ = p.tty.Close()
+		}
+		p.inputMu.Lock()
+		if p.input != nil {
+			_ = p.input.Close()
+			p.input = nil
+		}
+		p.inputMu.Unlock()
+		if p.onExit != nil {
+			p.onExit()
 		}
 		close(p.done)
 	})

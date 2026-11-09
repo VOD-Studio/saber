@@ -1,0 +1,6 @@
+package execution
+
+func processToolProperties() map[string]any {
+	text := func() map[string]any { return map[string]any{"type": "string"} }
+	return map[string]any{"action": map[string]any{"type": "string", "enum": []string{"start", "list", "status", "wait", "logs", "kill", "write", "close_stdin", "resize", "signal", "notifications"}}, "command": text(), "id": text(), "stdin": text(), "data": text(), "pty": map[string]any{"type": "boolean"}, "notify": map[string]any{"type": "boolean"}, "rows": map[string]any{"type": "integer", "minimum": 1, "maximum": 1000}, "cols": map[string]any{"type": "integer", "minimum": 1, "maximum": 1000}, "heartbeat_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 3600}, "watch_patterns": map[string]any{"type": "array", "maxItems": 16, "items": map[string]any{"type": "string", "minLength": 1, "maxLength": 256}}, "signal": map[string]any{"type": "string", "enum": []string{"HUP", "INT", "TERM", "KILL", "USR1", "USR2", "STOP", "CONT"}}, "offset": map[string]any{"type": "integer", "minimum": 0}, "limit": map[string]any{"type": "integer", "minimum": 4, "maximum": 4096}, "wait_seconds": map[string]any{"type": "integer", "minimum": 0, "maximum": 30}}
+}

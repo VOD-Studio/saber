@@ -8,6 +8,8 @@ import (
 	"net"
 	"strings"
 	"time"
+
+	"github.com/sashabaranov/go-openai"
 )
 
 // RetryableError 判断错误是否可重试。
@@ -20,6 +22,24 @@ import (
 func RetryableError(err error) bool {
 	if err == nil {
 		return false
+	}
+	var partial *partialModelError
+	if errors.As(err, &partial) {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var protocol *ProtocolError
+	if errors.As(err, &protocol) {
+		if strings.Contains(strings.ToLower(protocol.Code), "quota") || strings.Contains(strings.ToLower(protocol.Code), "billing") {
+			return false
+		}
+		return protocol.Status == 429 || protocol.Status >= 500
+	}
+	var api *openai.APIError
+	if errors.As(err, &api) {
+		return api.HTTPStatusCode == 429 && !strings.Contains(strings.ToLower(api.Message), "quota") || api.HTTPStatusCode >= 500
 	}
 
 	// 检查 HTTP 状态码错误
@@ -204,6 +224,17 @@ func (fmh *FallbackModelHandler) TryWithFallback(ctx context.Context, operation 
 	})
 	if err == nil {
 		return result, nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return nil, err
+	}
+	var protocol *ProtocolError
+	if errors.As(err, &protocol) && (protocol.Status == 403 || protocol.Status == 400) {
+		return nil, err
+	}
+	var api *openai.APIError
+	if errors.As(err, &api) && (api.HTTPStatusCode == 403 || api.HTTPStatusCode == 400) {
+		return nil, err
 	}
 
 	// 如果主模型失败且有备用模型，尝试备用模型

@@ -1,0 +1,4 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');const {endpoint,route}=require('./security.cjs');
+test('Remote HTTP credentials are rejected, HTTPS and loopback are accepted',()=>{assert.throws(()=>endpoint('http://example.com'));assert.throws(()=>endpoint('https://user:secret@example.com'));assert.throws(()=>endpoint('https://example.com/?key=secret'));assert.equal(endpoint('http://127.0.0.1:8320').local,true);assert.equal(endpoint('http://[::1]:8320').local,true);assert.equal(endpoint('https://example.com').local,false);});
+test('IPC route cannot escape authenticated API namespace',()=>{for(const p of ['https://attacker.test','//attacker.test/v1/info','/v1/../secrets','/v1/%2e%2e/secrets','/v1/x%2fy','/v1/x%5cy'])assert.throws(()=>route(p));assert.equal(route('/v1/sessions/test/tasks/1/events?cursor=3'),'/v1/sessions/test/tasks/1/events?cursor=3');});

@@ -41,7 +41,15 @@ func (e *Executor) ReadReference(ctx context.Context, p string) (Reference, erro
 	if err != nil {
 		return Reference{}, err
 	}
-	if err = e.Check(WithTask(ctx, 0, dir), "read_file"); err != nil {
+	if run, ok := ctx.Value(scopeKey{}).(scope); ok {
+		if !e.authorizedDirectory(identity, run, dir) {
+			return Reference{}, errors.New("reference workspace does not match current task")
+		}
+		dir = run.dir
+	} else {
+		ctx = WithTask(ctx, 0, dir)
+	}
+	if err = e.Check(ctx, "read_file"); err != nil {
 		return Reference{}, err
 	}
 	clean, err := cleanSnapshotPath(p)

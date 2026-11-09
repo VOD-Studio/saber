@@ -39,6 +39,18 @@ type Runtime struct {
 	// 每条文本以 user 消息追加到本轮请求并发出一条 Steered 事件；空文本忽略，
 	// 同一运行内相同文本只注入一次。为空时改用 WithSteering 绑定的来源。
 	Steering func() []string
+	// ChildResults 在每轮请求前领取已持久化的子任务结果；失败会停止运行而不是丢失结果。
+	ChildResults func(context.Context) ([]ChildCompletion, error)
+	// Completion 读取任务权威完成请求；只在完整工具批次之后进入正常完成终态。
+	Completion func(context.Context) (string, bool, error)
+	// Notifications 领取真实后台通知；最终回答前 wait=true 等待已经发起的诊断。
+	Notifications func(context.Context, bool) ([]string, error)
+	// BeforeRun 在预算和时限已经生效后注入受信生命周期上下文。
+	BeforeRun func(context.Context, Request) (Request, error)
+	// AfterRun 在环境仍活跃且父预算仍有效时完成持久质量门与记忆同步。
+	AfterRun func(context.Context, Request, Result, error) error
+	// OnCompaction 在成功压缩提交前撤销已遗忘的全文覆盖授权。
+	OnCompaction func(context.Context) error
 }
 
 // Run 顺序执行模型与工具，任何终态都返回已有记录并发出一次 RunFinished。
@@ -46,6 +58,15 @@ type Runtime struct {
 // emit 可为空；非空时必须及时返回，否则会阻塞当前运行。
 func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result Result, err error) {
 	started := time.Now()
+	if req.SubagentDepth > 0 {
+		ctx = WithSubagentDepth(ctx, req.SubagentDepth)
+	}
+	if req.ParentAttemptGate != nil {
+		ctx = WithAttemptGate(ctx, req.ParentAttemptGate)
+	}
+	if req.ToolScope != nil || req.SubagentDepth > 0 {
+		ctx = WithToolScope(ctx, req.ToolScope)
+	}
 	if emit == nil {
 		emit = func(Event) {}
 	}
@@ -121,6 +142,20 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 			result.Usage = led.mainUsage()
 		}
 	}()
+	defer func() {
+		if r.AfterRun != nil {
+			snapshot := result
+			snapshot.State, snapshot.Checkpoint = CloneTaskState(finalState), checkpoint
+			snapshot.Duration = time.Since(started)
+			snapshot.Budget = budgetSnapshot(led, len(result.Rounds), soft, hard, extensions, stopReason)
+			if hookErr := r.AfterRun(ctx, req, snapshot, err); hookErr != nil {
+				err = errors.Join(err, hookErr)
+				if result.Status == Completed {
+					result.Status = Failed
+				}
+			}
+		}
+	}()
 	stop := func(cause error) (Result, error) {
 		if ctx.Err() != nil {
 			cause = ctx.Err()
@@ -143,8 +178,27 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 	if err := ctx.Err(); err != nil {
 		return stop(err)
 	}
+	if r.BeforeRun != nil {
+		req, err = r.BeforeRun(ctx, req)
+		if err != nil {
+			return stop(err)
+		}
+	}
 	if r.Model == nil {
 		return stop(errors.New("agent model is not configured"))
+	}
+	outputSchema, schemaErr := ResolveOutputSchema(req.OutputSchema)
+	if schemaErr != nil {
+		return stop(schemaErr)
+	}
+	schemaRetried := false
+	req.Tools = scopedTools(ctx, req.Tools)
+	choice, choiceErr := toolChoiceConstraint(req.ToolChoice, req.Tools)
+	if choiceErr != nil {
+		return stop(choiceErr)
+	}
+	if choice.mode == "none" {
+		req.Tools = nil
 	}
 	// 新建切片防止追加历史覆盖调用方预留的容量。
 	req.Messages = append([]openai.ChatCompletionMessage(nil), req.Messages...)
@@ -173,6 +227,16 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 		if err := ctx.Err(); err != nil {
 			return stop(err)
 		}
+		if r.Completion != nil {
+			content, completed, completeErr := r.Completion(ctx)
+			if completeErr != nil {
+				return stop(completeErr)
+			}
+			if completed {
+				result.Status, result.Content = Completed, content
+				return result, nil
+			}
+		}
 		var roundCheckpoint *Checkpoint
 		req, compacted, roundCheckpoint, err = r.prepareContext(ctx, req, number, limits.MaxRounds, emit, compacted)
 		if err != nil {
@@ -194,6 +258,35 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 		// 注入位置固定在发送模型之前，子代理与并行工具的事件顺序保持不变。
 		if steering != nil {
 			req.Messages = injectSteering(req.Messages, number, steering(), injected, emit)
+		}
+		if r.ChildResults != nil {
+			completions, drainErr := r.ChildResults(ctx)
+			if drainErr != nil {
+				return stop(drainErr)
+			}
+			for _, completion := range completions {
+				for _, image := range completion.Images {
+					if imageErr := ValidateImageReference(image); imageErr != nil {
+						return stop(imageErr)
+					}
+				}
+			}
+			if len(completions) > 0 {
+				result.ChildCompletions = append(result.ChildCompletions, completions...)
+				emit(Event{Kind: ChildResultsReceived, Round: number, ChildCompletions: completions})
+				req.Messages = AppendChildCompletionMessages(req.Messages, completions)
+			}
+		}
+		if r.Notifications != nil {
+			notices, noticeErr := r.Notifications(ctx, false)
+			if len(notices) > 0 {
+				req.Messages = AppendContextNotifications(req.Messages, notices)
+				result.Notifications = append(result.Notifications, notices...)
+				emit(Event{Kind: ContextNotificationsReceived, Round: number, Notifications: notices})
+			}
+			if noticeErr != nil {
+				return stop(noticeErr)
+			}
 		}
 		emit(Event{Kind: ModelStarted, Round: number})
 		if err := ctx.Err(); err != nil {
@@ -239,7 +332,39 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 		if err := ValidateResponse(response); err != nil {
 			return stop(err)
 		}
+		if choiceErr := validateToolChoiceResponse(choice, response); choiceErr != nil {
+			return stop(choiceErr)
+		}
 		if len(response.ToolCalls) == 0 {
+			if r.Notifications != nil {
+				notices, noticeErr := r.Notifications(ctx, true)
+				if len(notices) > 0 {
+					req.Messages = append(req.Messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: response.Content})
+					req.Messages = AppendContextNotifications(req.Messages, notices)
+					result.Notifications = append(result.Notifications, notices...)
+					emit(Event{Kind: ContextNotificationsReceived, Round: number, Notifications: notices})
+					if noticeErr != nil {
+						return stop(noticeErr)
+					}
+					if number == hard {
+						return stop(fmt.Errorf("%w: 待消费的最终诊断或进程通知", ErrBudgetExhausted))
+					}
+					continue
+				}
+				if noticeErr != nil {
+					return stop(noticeErr)
+				}
+			}
+			if schemaErr := validateOutput(outputSchema, response.Content); schemaErr != nil {
+				if schemaRetried || number == hard {
+					return stop(fmt.Errorf("output_schema 校验失败: %w", schemaErr))
+				}
+				schemaRetried = true
+				req.Messages = append(req.Messages,
+					openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: response.Content},
+					openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: "输出契约校验失败，请仅返回符合既有 JSON Schema 的 JSON。错误: " + schemaErr.Error()})
+				continue
+			}
 			result.Status, result.Content = Completed, response.Content
 			return result, nil
 		}
@@ -277,6 +402,10 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 			extensions++
 			emit(Event{Kind: BudgetExtended, Round: number, Budget: budgetSnapshot(led, number, soft, hard, extensions, "")})
 		}
+		if choice.mode == "required" || choice.mode == "function" {
+			// 首个模型回复满足调用约束后，内部续轮需能正常给出最终回答。
+			req.ToolChoice, choice = "auto", choiceConstraint{mode: "auto"}
+		}
 		if len(response.ResponsesOutput) > 0 {
 			if req.ResponsesHistory == nil {
 				req.ResponsesHistory = make(map[string][]json.RawMessage)
@@ -305,7 +434,7 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 					return stop(err)
 				}
 				var record ToolRecord
-				if call.Function.Name == "saber_task_state" && req.State != nil {
+				if call.Function.Name == "saber_task_state" && req.State != nil && allowed[call.Function.Name] && ToolAllowed(ctx, call.Function.Name) {
 					record = r.callStateTool(ctx, call, &req.State, number, limits.MaxToolOutputBytes, emit)
 				} else {
 					record = r.callTool(ctx, call, allowed, limits.MaxToolOutputBytes)
@@ -349,6 +478,8 @@ func (r Runtime) Run(ctx context.Context, req Request, emit func(Event)) (result
 				return stop(err)
 			}
 		}
+		// 并行工具批次必须全部回复后再追加图片 user 消息，否则破坏 assistant/tool 配对。
+		req.Messages = appendToolImages(req.Messages, result.Rounds[number-1].Tools)
 	}
 	return stop(ErrBudgetExhausted)
 }
@@ -463,6 +594,18 @@ func (r Runtime) callTool(ctx context.Context, call openai.ToolCall, allowed map
 		}
 	}
 	record.OutputID = output.OutputID
+	if err == nil {
+		record.Files = append([]string(nil), output.Files...)
+		for _, ref := range output.Images {
+			if imageErr := ValidateImageReference(ref); imageErr != nil {
+				record.ErrorCode, err = "invalid_tool_image", imageErr
+				break
+			}
+		}
+		if err == nil {
+			record.Images = append([]string(nil), output.Images...)
+		}
+	}
 	var data []byte
 	if err != nil {
 		data = errorContent(record.ErrorCode, err.Error())

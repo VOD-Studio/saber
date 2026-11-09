@@ -388,16 +388,6 @@ func (e *Executor) rollbackSnapshot(args map[string]any, run scope) (Result, err
 	return result, nil
 }
 
-// snapshotBeforeChange 在写文件前保存原内容，返回是否记录了 absent。
-func (e *Executor) snapshotBeforeChange(root *workspaceRoot, run scope, p string) error {
-	content, exists, err := readCurrentContent(root, p)
-	if err != nil {
-		return err
-	}
-	_, err = e.saveSnapshot(run.id, p, content, !exists)
-	return err
-}
-
 // snapshotBeforeWriteData 用已经读出的原内容保存快照，避免重复读取。
 func (e *Executor) snapshotBeforeWriteData(run scope, p string, data []byte) error {
 	_, err := e.saveSnapshot(run.id, p, data, false)

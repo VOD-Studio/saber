@@ -145,7 +145,7 @@ func TestRuntime_CompactionFailureDoesNotCommitCheckpoint(t *testing.T) {
 
 func TestRuntime_StateToolUpdatesWorkFieldsOnly(t *testing.T) {
 	state := &TaskState{Instructions: []Instruction{{TaskID: 1, Text: "原始约束"}}}
-	request := Request{Model: "test", Messages: []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "原始约束"}}, State: state}
+	request := Request{Model: "test", Messages: []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "原始约束"}}, State: state, Tools: []openai.Tool{TaskStateTool()}}
 	calls := 0
 	var updated *TaskState
 	runtime := Runtime{

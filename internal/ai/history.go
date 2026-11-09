@@ -18,14 +18,14 @@ func historyTool() openai.Tool {
 	return openai.Tool{Type: openai.ToolTypeFunction, Function: &openai.FunctionDefinition{
 		Name: "saber_history",
 		Description: "检索与查阅当前会话所属空间的真实历史对话原文，回答关于较久以前对话细节、已有约定或结论的问题。" +
-			"支持关键词检索（search）和围绕指定记录前后翻阅原文（context）。" +
+			"支持关键词检索（search）、会话与时间浏览（browse/sessions/session）、原文分页（raw）及恢复（restore），历史副作用不会重新执行。" +
 			"身份与作用域由系统严格限定，私聊仅能检索本人历史，群聊仅能检索本群历史；不得代其他用户或跨群查询。" +
 			"返回内容包含记录 ID、时间、发言人、来源任务与原文片段；若内容过长会截断并提供游标或翻阅提示。",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{
 			"action": map[string]any{
 				"type":        "string",
-				"enum":        []string{"search", "context"},
-				"description": "操作类型：search 关键词检索历史；context 查阅指定记录的前后文",
+				"enum":        []string{"search", "context", "browse", "sessions", "session", "raw", "restore"},
+				"description": "search 关键词；browse 时间页；sessions 会话目录；session 会话记录；raw 原文分页；restore 原始user/assistant消息；context 前后文",
 			},
 			"query": map[string]any{
 				"type":        "string",
@@ -44,8 +44,8 @@ func historyTool() openai.Tool {
 			"limit": map[string]any{
 				"type":        "integer",
 				"minimum":     1,
-				"maximum":     20,
-				"description": "search 操作返回的最大记录数，默认 5，最大 20",
+				"maximum":     8000,
+				"description": "browse/search/session 上限20条；raw 按字符分页上限8000字符，默认2000",
 			},
 			"before": map[string]any{
 				"type":        "integer",
@@ -59,12 +59,20 @@ func historyTool() openai.Tool {
 				"maximum":     10,
 				"description": "context 操作向后读取的条数（较新的记录），默认 2，最大 10",
 			},
+			"session_id": map[string]any{"type": "string", "description": "sessions 返回的会话标识，不是身份参数"},
+			"since":      map[string]any{"type": "string", "description": "RFC3339、YYYY-MM-DD、7d/24h/2w"},
+			"until":      map[string]any{"type": "string", "description": "排除该时间及之后的记录"},
+			"role":       map[string]any{"type": "string", "enum": []string{"user", "assistant"}},
+			"offset":     map[string]any{"type": "integer", "minimum": 0},
 		}, "required": []string{"action"}, "additionalProperties": false},
 	}}
 }
 
 // executeHistoryTool 执行模型发起的历史回忆与上下文读取，授权只取运行时可信身份。
 func (s *Service) executeHistoryTool(ctx context.Context, args map[string]any) (any, error) {
+	if isPublicThread(ctx) {
+		return nil, errors.New("公开互动回合不得读取历史")
+	}
 	if s.memory == nil {
 		return nil, errors.New("记忆服务未启用")
 	}
@@ -74,6 +82,8 @@ func (s *Service) executeHistoryTool(ctx context.Context, args map[string]any) (
 	}
 	action, _ := args["action"].(string)
 	switch action {
+	case "browse", "sessions", "session", "raw", "restore":
+		return s.executeHistoryBrowse(ctx, args)
 	case "search":
 		query, _ := args["query"].(string)
 		if strings.TrimSpace(query) == "" {
@@ -87,11 +97,16 @@ func (s *Service) executeHistoryTool(ctx context.Context, args map[string]any) (
 		if err != nil {
 			return nil, err
 		}
-		res, err := s.memory.SearchHistory(ctx, identity, memory.HistorySearchOptions{
-			Query:  query,
-			Limit:  int(limit),
-			Cursor: cursor,
-		})
+		var res memory.HistorySearchResult
+		if args["since"] != nil || args["until"] != nil || args["session_id"] != nil {
+			browseArgs := make(map[string]any, len(args))
+			for k, v := range args {
+				browseArgs[k] = v
+			}
+			browseArgs["action"] = "browse"
+			return s.executeHistoryBrowse(ctx, browseArgs)
+		}
+		res, err = s.memory.SearchHistory(ctx, identity, memory.HistorySearchOptions{Query: query, Limit: int(limit), Cursor: cursor})
 		if err != nil {
 			return nil, err
 		}
@@ -235,7 +250,10 @@ func formatHistoryContextResult(res memory.HistoryContextResult) string {
 	}
 	targetTime := res.Target.CreatedAt.Format("2006-01-02 15:04:05")
 	fmt.Fprintf(&b, "\n--- 目标记录 #%d (%s, 发送人: %s, 来源任务: #%d, 状态: %s) ---\n  用户: %s\n  Saber: %s",
-		res.Target.ID, targetTime, res.Target.SenderID, res.Target.TaskID, res.Target.TaskStatus, res.Target.UserText, res.Target.AssistantText)
+		res.Target.ID, targetTime, res.Target.SenderID, res.Target.TaskID, res.Target.TaskStatus, truncateSnippet(res.Target.UserText, 2000), truncateSnippet(res.Target.AssistantText, 2000))
+	if len(res.Target.UserText) > 2000 || len(res.Target.AssistantText) > 2000 {
+		b.WriteString("\n[完整原文可用 action=raw, id=<记录>, role=user/assistant, offset=<字符偏移> 分页恢复]")
+	}
 	if len(res.After) > 0 {
 		fmt.Fprintf(&b, "\n--- 后文（%d 条）---", len(res.After))
 		for _, r := range res.After {

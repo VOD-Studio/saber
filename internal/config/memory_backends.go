@@ -42,7 +42,7 @@ func (c MemoryBackendsConfig) Validate() error {
 		}
 		if backend.Endpoint != "" {
 			u, err := url.Parse(backend.Endpoint)
-			if err != nil || u.Hostname() == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "https" && !(backend.AllowPrivate && u.Scheme == "http")) {
+			if err != nil || u.Hostname() == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "https" && (!backend.AllowPrivate || u.Scheme != "http")) {
 				return fmt.Errorf("memory backend %s requires a credential-free HTTPS endpoint", name)
 			}
 		}

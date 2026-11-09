@@ -90,7 +90,7 @@ models:
 	require.Equal(t, float32(.7), *request.Temperature)
 	require.Equal(t, "none", request.Reasoning.Effort)
 	require.Equal(t, "medium", cfg.ReasoningEffort)
-	for _, api := range []string{"anthropic-messages", "typo"} {
+	for _, api := range []string{"anthropic-unknown", "typo"} {
 		cfg.API = api
 		_, err = NewClientWithModel(&cfg)
 		require.ErrorContains(t, err, "unsupported api")

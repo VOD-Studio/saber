@@ -5,14 +5,10 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
-// maxContentRunes 是 Discord 消息正文上限（2000）；留 100 字符余量给截断提示。
+// maxContentRunes 是 Discord 每段消息上限；长回复继续发送后续分段。
 const maxContentRunes = 1900
-
-// contentTruncatedSuffix 在超长正文被截断时追加，让读者知道后面还有内容没送达。
-const contentTruncatedSuffix = "\n\n…（内容过长，已截断）"
 
 // gatewayIntents 是接入所需的最小 intent 集合：
 // GUILDS、GUILD_MESSAGES、DIRECT_MESSAGES 与 MESSAGE_CONTENT。
@@ -84,24 +80,12 @@ type gatewayMessage struct {
 	Mentions          []struct {
 		ID string `json:"id"`
 	} `json:"mentions"`
+	Attachments []mediaAttachment `json:"attachments"`
 }
 
 // gatewayBot 是 GET /gateway/bot 的响应。
 type gatewayBot struct {
 	URL string `json:"url"`
-}
-
-// truncateContent 把出站正文压进 Discord 的字符上限。
-func truncateContent(content string) (string, bool) {
-	runes := []rune(content)
-	if len(runes) <= maxContentRunes {
-		return content, false
-	}
-	keep := maxContentRunes - utf8.RuneCountInString(contentTruncatedSuffix)
-	if keep < 0 {
-		keep = 0
-	}
-	return string(runes[:keep]) + contentTruncatedSuffix, true
 }
 
 // stripMentionTokens 移除正文里对本 bot 的提及，保留其余文本。

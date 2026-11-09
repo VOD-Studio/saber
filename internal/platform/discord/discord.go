@@ -187,6 +187,13 @@ func (p *Platform) handle(ctx context.Context, item gatewayMessage) {
 	if !ok {
 		return
 	}
+	attachments, err := p.receiveMedia(ctx, item)
+	if err != nil {
+		slog.Warn("discord 媒体读取失败", "message", normalized.ID, "error", err)
+		return
+	}
+	normalized.Attachments = attachments
+	ctx = chat.WithIdentity(ctx, chat.Identity{Session: normalized.Session, SenderID: normalized.SenderID, Direct: normalized.Direct})
 	slog.Info("discord 消息触发 AI 回复",
 		"conversation", normalized.Session.Conversation,
 		"sender", normalized.SenderID,
@@ -238,9 +245,7 @@ func (p *Platform) normalize(item gatewayMessage) (chat.Message, bool) {
 		slog.Debug("跳过 discord 系统事件消息", "message", item.ID, "type", item.Type)
 		return chat.Message{}, false
 	}
-	if strings.TrimSpace(item.Content) == "" {
-		// 目前不实现图片/文件能力，纯附件消息没有可交给模型的正文。
-		slog.Debug("跳过 discord 非文本消息", "message", item.ID)
+	if strings.TrimSpace(item.Content) == "" && len(item.Attachments) == 0 {
 		return chat.Message{}, false
 	}
 	direct := item.GuildID == ""
@@ -261,8 +266,7 @@ func (p *Platform) normalize(item gatewayMessage) (chat.Message, bool) {
 		}
 	}
 	text := stripMentionTokens(item.Content, botID)
-	if strings.TrimSpace(text) == "" {
-		slog.Debug("discord 消息剥离提及后为空，跳过", "message", item.ID)
+	if strings.TrimSpace(text) == "" && len(item.Attachments) == 0 {
 		return chat.Message{}, false
 	}
 	replyTo := ""

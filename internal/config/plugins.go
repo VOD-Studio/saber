@@ -80,7 +80,7 @@ func (c PluginsConfig) Validate() error {
 	}
 	for name := range c.Connectors {
 		for _, r := range name {
-			if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' && r != '-' {
 				return errors.New("connector names must be safe lowercase slugs")
 			}
 		}
@@ -101,7 +101,7 @@ func (c PluginConnectorConfig) Validate() error {
 			continue
 		}
 		u, err := url.Parse(value)
-		if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"))) {
+		if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "https" && (u.Scheme != "http" || (u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" && u.Hostname() != "::1"))) {
 			return errors.New("connector endpoints require HTTPS or loopback HTTP without embedded credentials")
 		}
 		for key := range u.Query() {

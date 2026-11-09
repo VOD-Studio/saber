@@ -139,7 +139,7 @@ func TestPresenter_ReplyStateRecoversFailedPlaceholder(t *testing.T) {
 
 func TestMessage_IdentityAndValidation(t *testing.T) {
 	session := chat.Session{Platform: "p", Account: "a", Conversation: "c"}
-	for _, m := range []chat.Message{{}, {Session: session}, {Session: session, SenderID: "42"}, {Session: session, SenderID: "42", Attachments: []chat.Attachment{{Kind: "file", URL: "x"}}}} {
+	for _, m := range []chat.Message{{}, {Session: session}, {Session: session, SenderID: "42"}, {Session: session, SenderID: "42", Attachments: []chat.Attachment{{Kind: "file", URL: "file:///etc/passwd"}}}} {
 		if m.Validate() == nil {
 			t.Fatalf("invalid message accepted: %+v", m)
 		}

@@ -126,8 +126,15 @@ func (r *ModelRegistry) SetDefault(modelID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// 允许设置任意模型名（即使不在预定义列表中）
-	// 这样用户可以使用不在 Models map 中的模型
+	if _, ok := r.models[modelID]; !ok {
+		found := false
+		if r.globalConfig != nil {
+			_, found = r.globalConfig.GetModelConfig(modelID)
+		}
+		if !found {
+			return fmt.Errorf("模型 %q 不在可用模型列表中", modelID)
+		}
+	}
 	r.currentDefault = modelID
 
 	return nil
@@ -237,9 +244,7 @@ func (r *ModelRegistry) RegisterModel(id, model string) {
 
 // ValidateModel 验证模型是否可用。
 //
-// 模型可用是指：
-// 1. 模型在 Models map 中有定义，或
-// 2. 模型可以与全局配置一起使用（任意模型名）
+// 模型必须已由可信配置或宿主显式登记，不接受模型自行提供的新 ID。
 //
 // 参数:
 //   - modelID: 模型标识符
@@ -254,12 +259,11 @@ func (r *ModelRegistry) ValidateModel(modelID string) error {
 	if _, exists := r.models[modelID]; exists {
 		return nil
 	}
-
-	// 如果不在预定义列表中，检查全局配置是否允许使用任意模型
-	if r.globalConfig == nil {
-		return fmt.Errorf("模型 %q 不在可用模型列表中", modelID)
+	if r.globalConfig != nil {
+		if _, found := r.globalConfig.GetModelConfig(modelID); found {
+			return nil
+		}
 	}
 
-	// 全局配置存在，允许使用任意模型名（将使用全局配置）
-	return nil
+	return fmt.Errorf("模型 %q 不在可用模型列表中", modelID)
 }

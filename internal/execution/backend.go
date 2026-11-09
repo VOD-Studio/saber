@@ -18,6 +18,7 @@ import (
 type sessionSpec struct {
 	TaskID    int64
 	Workspace string
+	Name      string
 	Env       map[string]string
 	LogDir    string
 }
@@ -142,13 +143,21 @@ func (e *Executor) openEnvironment(ctx context.Context, run scope, workspace str
 	if _, closed := e.closedTasks.Load(run.id); closed {
 		return nil, errors.New("task environment is closed")
 	}
-	e.envMu.Lock()
-	entry := e.envs[run.id]
-	if entry == nil {
-		entry = &envEntry{taskID: run.id}
-		e.envs[run.id] = entry
+	e.derivedMu.Lock()
+	derived := e.derived[run.dir]
+	e.derivedMu.Unlock()
+	var entry *envEntry
+	if derived != nil {
+		entry = derived.entry
+	} else {
+		e.envMu.Lock()
+		entry = e.envs[run.id]
+		if entry == nil {
+			entry = &envEntry{taskID: run.id}
+			e.envs[run.id] = entry
+		}
+		e.envMu.Unlock()
 	}
-	e.envMu.Unlock()
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
 	if entry.state == envClosing || entry.state == envClosed {
@@ -166,11 +175,23 @@ func (e *Executor) openEnvironment(ctx context.Context, run scope, workspace str
 	}
 	entry.state = envOpening
 	record := environmentRecord{TaskID: run.id, Backend: name, Workspace: run.dir, State: envActive}
-	if err := e.writeEnvironmentRecord(record); err != nil {
-		entry.state = envClosed
-		return nil, fmt.Errorf("cannot record task environment: %w", err)
+	if derived == nil {
+		if err := e.writeEnvironmentRecord(record); err != nil {
+			entry.state = envClosed
+			return nil, fmt.Errorf("cannot record task environment: %w", err)
+		}
 	}
-	spec := sessionSpec{TaskID: run.id, Workspace: run.dir, Env: env, LogDir: e.cfg.LogDir}
+	if derived != nil {
+		e.derivedMu.Lock()
+		derived.executed = true
+		recordErr := derived.persist(envActive)
+		e.derivedMu.Unlock()
+		if recordErr != nil {
+			entry.state = envClosed
+			return nil, recordErr
+		}
+	}
+	spec := sessionSpec{TaskID: run.id, Name: workspace, Workspace: run.dir, Env: env, LogDir: e.cfg.LogDir}
 	impl, err := e.backend(name).Open(ctx, spec)
 	if err != nil {
 		entry.state = envClosed
@@ -181,20 +202,28 @@ func (e *Executor) openEnvironment(ctx context.Context, run scope, workspace str
 }
 
 func (e *Executor) backend(name string) backend {
+	e.backendMu.Lock()
+	defer e.backendMu.Unlock()
 	if impl, ok := e.backends[name]; ok {
 		return impl
 	}
 	switch name {
 	case "docker":
 		e.backends[name] = &dockerBackend{cfg: e.cfg, owner: e.owner, executor: e}
-	default:
+	case "local":
 		e.backends[name] = &localBackend{executor: e}
+	case "ssh":
+		e.backends[name] = &sshBackend{cfg: e.cfg.SSH, executor: e}
+	default:
+		e.backends[name] = &cloudBackend{cfg: e.cfg, name: name, executor: e}
 	}
 	return e.backends[name]
 }
 
 // CloseTask 停止后台作业、关闭环境并归档终态；失败时锁定工作区等待人工核查。
 func (e *Executor) CloseTask(ctx context.Context, taskID int64) error {
+	e.transferMu.Lock()
+	defer e.transferMu.Unlock()
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
 	e.processMu.Lock()
@@ -203,6 +232,24 @@ func (e *Executor) CloseTask(ctx context.Context, taskID int64) error {
 	e.processMu.Unlock()
 	e.closedTasks.Store(taskID, true)
 	var errs []error
+	if e.devtools != nil {
+		e.envMu.Lock()
+		current := e.envs[taskID]
+		e.envMu.Unlock()
+		if current != nil && current.workspace != "" {
+			if err := e.devtools.CloseScope(developerScope(taskID, current.workspace)); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	e.derivedMu.Lock()
+	var worktrees []*derivedWorkspace
+	for _, d := range e.derived {
+		if d.tasks[taskID] && (taskID != d.parentID || len(d.tasks) == 1) {
+			worktrees = append(worktrees, d)
+		}
+	}
+	e.derivedMu.Unlock()
 	for _, record := range records {
 		if err := record.stop(cleanupCtx); err != nil {
 			errs = append(errs, err)
@@ -217,6 +264,11 @@ func (e *Executor) CloseTask(ctx context.Context, taskID int64) error {
 		entry.mu.Lock()
 		if entry.state != envActive && entry.state != envOpening {
 			entry.mu.Unlock()
+			for _, d := range worktrees {
+				if err := e.releaseWorktree(cleanupCtx, d); err != nil {
+					errs = append(errs, err)
+				}
+			}
 			return errors.Join(errs...)
 		}
 		entry.state = envClosing
@@ -233,6 +285,11 @@ func (e *Executor) CloseTask(ctx context.Context, taskID int64) error {
 			if err := e.markEnvironmentClosed(record); err != nil {
 				errs = append(errs, err)
 			}
+		}
+	}
+	for _, d := range worktrees {
+		if err := e.releaseWorktree(cleanupCtx, d); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	if err := errors.Join(errs...); err != nil {
@@ -253,9 +310,20 @@ func (e *Executor) Close(ctx context.Context) error {
 		ids = append(ids, id)
 	}
 	e.envMu.Unlock()
+	e.derivedMu.Lock()
+	var remaining []*derivedWorkspace
+	for _, d := range e.derived {
+		remaining = append(remaining, d)
+	}
+	e.derivedMu.Unlock()
 	var errs []error
 	for _, id := range ids {
 		if err := e.CloseTask(ctx, id); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	for _, d := range remaining {
+		if err := e.releaseWorktree(ctx, d); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -325,6 +393,7 @@ func (e *Executor) finishDockerRecords(ctx context.Context) error {
 		if err := e.markEnvironmentClosed(record); err != nil {
 			return err
 		}
+		e.blocked.Delete(record.Workspace)
 	}
 	return nil
 }

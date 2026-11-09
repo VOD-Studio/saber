@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -13,8 +12,8 @@ import (
 	"net/http"
 	"time"
 
-	"rua.plus/saber/internal/agent"
 	"rua.plus/saber/internal/ai"
+	"rua.plus/saber/internal/chat"
 )
 
 const (
@@ -106,11 +105,18 @@ type openAIChunk struct {
 
 // openAIChatInput 是校验后的 HTTP 请求，消息已限制为纯文本。
 type openAIChatInput struct {
-	Model       string
-	Messages    []ai.OpenAIMessage
-	Stream      bool
-	Temperature *float64
-	MaxTokens   int
+	Model        string
+	Messages     []ai.OpenAIMessage
+	Stream       bool
+	Temperature  *float64
+	MaxTokens    int
+	Session      string
+	ID           string
+	Attachments  []chat.Attachment
+	ToolNames    []string
+	ToolChoice   string
+	DisableTools bool
+	IncludeUsage bool
 }
 
 // openAIEnabled 判断服务是否具备模型能力；新接口不要求任务数据库。
@@ -140,7 +146,7 @@ func (h *handler) models(w http.ResponseWriter, r *http.Request) {
 	respond(w, openAIModelList{Object: "list", Data: data})
 }
 
-// chatCompletions 提供非任务、不持久化的 OpenAI 兼容聊天入口。
+// chatCompletions 使用持久化 Agent 任务执行已认证 OpenAI 请求。
 func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	if !h.openAIEnabled() {
 		openAIErrorResponse(w, http.StatusServiceUnavailable, "AI 服务未启用", "service_unavailable", "ai_disabled")
@@ -164,145 +170,7 @@ func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		openAIErrorResponse(w, http.StatusInternalServerError, "模型解析失败", "server_error", "model_resolution_failed")
 		return
 	}
-	request := ai.OpenAIChatRequest{
-		Model:       model,
-		Messages:    input.Messages,
-		Stream:      input.Stream,
-		Temperature: input.Temperature,
-		MaxTokens:   input.MaxTokens,
-	}
-	if input.Stream {
-		h.streamChat(w, r, request)
-		return
-	}
-	h.completeChat(w, r, request)
-}
-
-// completeChat 运行一次同步 Agent 并返回完整响应。
-func (h *handler) completeChat(w http.ResponseWriter, r *http.Request, request ai.OpenAIChatRequest) {
-	result, err := h.service.RunOpenAIChat(r.Context(), request, nil)
-	if err != nil {
-		writeOpenAIRunError(w, err)
-		return
-	}
-	if result.Status != agent.Completed {
-		openAIErrorResponse(w, http.StatusBadGateway, "模型运行未完成", "server_error", "incomplete_response")
-		return
-	}
-	respond(w, openAIChatCompletion{
-		ID:      newChatCompletionID(),
-		Object:  "chat.completion",
-		Created: time.Now().Unix(),
-		Model:   result.Model,
-		Choices: []openAIChoice{{Index: 0, Message: openAIMessage{Role: "assistant", Content: result.Content}, FinishReason: "stop"}},
-		Usage:   openAIUsage{PromptTokens: result.Usage.PromptTokens, CompletionTokens: result.Usage.CompletionTokens, TotalTokens: result.Usage.TotalTokens},
-	})
-}
-
-// streamChat 以 SSE 转发 Agent 的文本增量；断开连接会取消运行。
-func (h *handler) streamChat(w http.ResponseWriter, r *http.Request, request ai.OpenAIChatRequest) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	controller := http.NewResponseController(w)
-
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-
-	// emit 必须在运行 goroutine 内快速返回，缓冲不足或调用方停读时由 ctx 解除阻塞。
-	events := make(chan agent.Event, 64)
-	type outcome struct {
-		result ai.OpenAIChatResult
-		err    error
-	}
-	done := make(chan outcome, 1)
-	go func() {
-		defer close(events)
-		result, err := h.service.RunOpenAIChat(ctx, request, func(event agent.Event) {
-			if event.Kind != agent.TextDelta {
-				return
-			}
-			select {
-			case events <- event:
-			case <-ctx.Done():
-			}
-		})
-		done <- outcome{result: result, err: err}
-	}()
-
-	id := newChatCompletionID()
-	created := time.Now().Unix()
-	send := func(value any) bool {
-		data, err := json.Marshal(value)
-		if err != nil {
-			return false
-		}
-		return writeSSE(w, controller, "data: "+string(data)+"\n\n")
-	}
-	sendRaw := func(payload string) bool {
-		return writeSSE(w, controller, "data: "+payload+"\n\n")
-	}
-	chunk := func(delta openAIChunkDelta, finish *string) bool {
-		return send(openAIChunk{
-			ID: id, Object: "chat.completion.chunk", Created: created, Model: request.Model,
-			Choices: []openAIChunkChoice{{Index: 0, Delta: delta, FinishReason: finish}},
-		})
-	}
-
-	if !chunk(openAIChunkDelta{Role: "assistant"}, nil) {
-		cancel()
-		return
-	}
-	wroteContent := false
-	for event := range events {
-		if event.Text == "" {
-			continue
-		}
-		if !chunk(openAIChunkDelta{Content: event.Text}, nil) {
-			cancel()
-			return
-		}
-		wroteContent = true
-	}
-	result := <-done
-	if result.err != nil || result.result.Status != agent.Completed {
-		message, code := "模型运行失败", "upstream_error"
-		if errors.Is(result.err, context.DeadlineExceeded) {
-			message, code = "模型运行超时", "timeout"
-		}
-		if !send(openAIError{Error: openAIErrorBody{Message: message, Type: "server_error", Code: code}}) {
-			return
-		}
-		_ = sendRaw("[DONE]")
-		return
-	}
-	if !wroteContent && result.result.Content != "" {
-		if !chunk(openAIChunkDelta{Content: result.result.Content}, nil) {
-			return
-		}
-	}
-	stop := "stop"
-	if !chunk(openAIChunkDelta{}, &stop) {
-		return
-	}
-	_ = sendRaw("[DONE]")
-}
-
-// writeOpenAIRunError 把运行错误映射为 OpenAI 错误响应，不暴露内部细节。
-func writeOpenAIRunError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, ai.ErrOpenAIModelNotFound):
-		openAIErrorResponse(w, http.StatusNotFound, "模型不存在", "invalid_request_error", "model_not_found")
-	case errors.Is(err, context.Canceled):
-		// 客户端已断开，没有可写的响应。
-	case errors.Is(err, context.DeadlineExceeded):
-		openAIErrorResponse(w, http.StatusGatewayTimeout, "模型运行超时", "server_error", "timeout")
-	default:
-		slog.Warn("OpenAI 兼容接口运行失败", "error", err)
-		openAIErrorResponse(w, http.StatusBadGateway, "模型运行失败", "server_error", "upstream_error")
-	}
+	h.persistentChat(w, r, input, model)
 }
 
 // openAIErrorResponse 写出 OpenAI 风格错误，响应体不含密钥或内部堆栈。
@@ -359,7 +227,7 @@ func decodeOpenAIChatRequest(w http.ResponseWriter, r *http.Request) (openAIChat
 	// 只接受本版本实现的参数；其余字段显式拒绝，避免静默忽略客户端意图。
 	for key, value := range raw {
 		switch key {
-		case "model", "messages", "stream", "temperature", "max_tokens":
+		case "model", "messages", "stream", "temperature", "max_tokens", "max_completion_tokens", "session", "session_id", "id", "tools", "tool_choice", "stream_options":
 		case "n":
 			var count int
 			if err = json.Unmarshal(value, &count); err != nil || count != 1 {
@@ -394,6 +262,9 @@ func decodeOpenAIChatRequest(w http.ResponseWriter, r *http.Request) (openAIChat
 		if err = json.Unmarshal(value, &input.MaxTokens); err != nil || input.MaxTokens <= 0 {
 			return input, &openAIErrorBody{Message: "max_tokens 必须是正整数", Type: "invalid_request_error", Code: "invalid_request"}, http.StatusBadRequest
 		}
+	}
+	if apiError := decodeAgentChatOptions(raw, &input); apiError != nil {
+		return input, apiError, http.StatusBadRequest
 	}
 
 	messages, apiError := decodeOpenAIMessages(raw["messages"])
@@ -435,22 +306,18 @@ func decodeOpenAIMessages(value json.RawMessage) ([]ai.OpenAIMessage, *openAIErr
 			return nil, &openAIErrorBody{Message: fmt.Sprintf("messages[%d].role 必须是字符串", index), Type: "invalid_request_error", Code: "invalid_request"}
 		}
 		switch role {
-		case "system", "user", "assistant":
+		case "system", "developer", "user", "assistant":
 		default:
 			return nil, &openAIErrorBody{Message: fmt.Sprintf("不支持的消息角色 %q", role), Type: "invalid_request_error", Code: "unsupported_role"}
 		}
-		rawContent := fields["content"]
-		if len(rawContent) == 0 || rawContent[0] != '"' {
-			return nil, &openAIErrorBody{Message: fmt.Sprintf("messages[%d].content 只支持字符串", index), Type: "invalid_request_error", Code: "unsupported_content"}
-		}
-		var content string
-		if err := json.Unmarshal(rawContent, &content); err != nil {
-			return nil, &openAIErrorBody{Message: fmt.Sprintf("messages[%d].content 只支持字符串", index), Type: "invalid_request_error", Code: "unsupported_content"}
+		content, images, err := decodeChatContent(fields["content"])
+		if err != nil {
+			return nil, &openAIErrorBody{Message: fmt.Sprintf("messages[%d]: %s", index, err), Type: "invalid_request_error", Code: "unsupported_content"}
 		}
 		if len(content) > maxOpenAIMessageBytes {
 			return nil, &openAIErrorBody{Message: fmt.Sprintf("messages[%d].content 超过 128 KiB", index), Type: "invalid_request_error", Code: "message_too_large"}
 		}
-		messages = append(messages, ai.OpenAIMessage{Role: role, Content: content})
+		messages = append(messages, ai.OpenAIMessage{Role: role, Content: content, Images: images})
 	}
 	return messages, nil
 }

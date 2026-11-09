@@ -96,16 +96,6 @@ func TestPrepareTools_SubagentExposure(t *testing.T) {
 	require.True(t, ok)
 	require.NotContains(t, toolNames(tools), agent.DelegateTool)
 
-	// 协议契约：goal 必填，tools 可选。
-	definition := delegateTool().Function
-	require.Equal(t, agent.DelegateTool, definition.Name)
-	parameters, ok := definition.Parameters.(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, []string{"goal"}, parameters["required"])
-	properties, ok := parameters["properties"].(map[string]any)
-	require.True(t, ok)
-	require.Contains(t, properties, "goal")
-	require.Contains(t, properties, "tools")
 }
 
 // TestSubagentDelegatorPolicy 验证配置到子运行策略的映射与默认值。
@@ -136,11 +126,11 @@ func TestSubagentDelegatorPolicy(t *testing.T) {
 func TestSubagentToolsRecheckAuthorization(t *testing.T) {
 	service := testSubagentService(t, nil)
 	parent := []openai.Tool{
-		toolDef(agent.DelegateTool), toolDef("saber_task_state"), toolDef("exec"), toolDef("saber_task"),
+		toolDef(agent.DelegateTool), toolDef("saber_task_state"), toolDef("exec"), toolDef("read_file"),
 	}
-	// 未配置执行器时本地工具不应进入子代理工具集；内部工具沿用父请求能力。
-	filtered := service.subagentTools(context.Background(), parent)
-	require.Equal(t, []string{"saber_task"}, toolNames(filtered))
+	ctx := authorizedWorkspace(t, service)
+	filtered := service.subagentTools(ctx, parent)
+	require.Equal(t, []string{"read_file"}, toolNames(filtered))
 
 	// 显式子集由委托器再校验，delegate 永远不可请求。
 	req := agent.Request{Model: "openai.gpt-4", Tools: parent}

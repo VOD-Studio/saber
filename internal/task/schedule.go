@@ -865,5 +865,22 @@ func (m *Manager) checkScheduledTask(ctx context.Context, t Task) (bool, error) 
 			return true, errors.Join(err, saveErr)
 		}
 	}
+	if m.prepareSchedule != nil {
+		req, prepareErr := m.prepareSchedule(ctx, s)
+		if prepareErr != nil {
+			_, saveErr := m.store.db.ExecContext(ctx, `UPDATE schedules SET status='paused',reason=? WHERE id=?`, prepareErr.Error(), s.ID)
+			return true, errors.Join(prepareErr, saveErr)
+		}
+		data, marshalErr := json.Marshal(req)
+		if marshalErr != nil {
+			return true, marshalErr
+		}
+		if _, err = m.store.db.ExecContext(ctx, `UPDATE tasks SET request=? WHERE id=?`, data, t.ID); err != nil {
+			return true, err
+		}
+		m.mu.Lock()
+		m.transientRequests[t.ID] = req
+		m.mu.Unlock()
+	}
 	return true, nil
 }

@@ -132,56 +132,11 @@ type dockerEnvironment struct {
 
 // Start 通过 docker exec 运行 helper supervisor，输出解帧后写入归档。
 func (d *dockerEnvironment) Start(ctx context.Context, command string, out io.Writer) (ownedProcess, error) {
-	d.mu.Lock()
-	if d.closed {
-		d.mu.Unlock()
-		return nil, errors.New("task container is closed")
+	p, err := d.StartInteractive(ctx, launchOptions{Command: command}, out)
+	if err == nil {
+		err = p.CloseWrite()
 	}
-	if d.broken != nil {
-		err := d.broken
-		d.mu.Unlock()
-		return nil, err
-	}
-	d.mu.Unlock()
-	if err := checkMountFiles(ctx, d.spec.Workspace); err != nil {
-		return nil, err
-	}
-	payload, err := json.Marshal(map[string]any{"command": command, "env": d.spec.Env})
-	if err != nil {
-		return nil, err
-	}
-	cmd := exec.Command("docker", "exec", "-i", d.name, "/usr/bin/env", "PATH=/usr/local/bin:/usr/bin:/bin", "python3", "-I", "-c", helper)
-	for _, key := range []string{"PATH", "HOME", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"} {
-		if v, ok := os.LookupEnv(key); ok {
-			cmd.Env = append(cmd.Env, key+"="+v)
-		}
-	}
-	cmd.Stdin = bytes.NewReader(append(payload, '\n'))
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	diagnostics := &limitedBuffer{limit: 8192}
-	cmd.Stderr = diagnostics
-	if err = cmd.Start(); err != nil {
-		return nil, err
-	}
-	process := &dockerProcess{environment: d, cmd: cmd, out: out, stdout: stdout, started: make(chan struct{}), done: make(chan struct{})}
-	go process.read()
-	select {
-	case <-process.started:
-		go process.watch(ctx)
-		return process, nil
-	case <-process.done:
-		<-process.started
-		if err := process.result(); err != nil {
-			return nil, err
-		}
-		return process, nil
-	case <-ctx.Done():
-		_ = process.Stop(context.Background())
-		return nil, ctx.Err()
-	}
+	return p, err
 }
 
 // breakEnvironment 在协议失联或清理失败后销毁容器，禁止继续执行。
@@ -228,6 +183,9 @@ type dockerProcess struct {
 	exited      bool
 	err         error
 	outputErr   error
+	input       io.WriteCloser
+	inputMu     sync.Mutex
+	stderr      io.Writer
 }
 
 func (p *dockerProcess) markStarted(pgid int) {
@@ -280,6 +238,7 @@ func (p *dockerProcess) frame(line []byte) error {
 		Data     string `json:"data"`
 		ExitCode *int   `json:"exit_code"`
 		Message  string `json:"message"`
+		Stream   string `json:"stream"`
 	}
 	if err := json.Unmarshal(bytes.TrimSpace(line), &frame); err != nil {
 		return fmt.Errorf("invalid supervisor frame: %w", err)
@@ -292,7 +251,11 @@ func (p *dockerProcess) frame(line []byte) error {
 		if err != nil {
 			return fmt.Errorf("invalid output frame: %w", err)
 		}
-		n, err := p.out.Write(chunk)
+		target := p.out
+		if frame.Stream == "stderr" && p.stderr != nil {
+			target = p.stderr
+		}
+		n, err := target.Write(chunk)
 		if err != nil {
 			p.mu.Lock()
 			p.outputErr = err
@@ -412,6 +375,13 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+
+func (b *limitedBuffer) Bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return bytes.Clone(b.data.Bytes())
+}
+func (b *limitedBuffer) String() string { b.mu.Lock(); defer b.mu.Unlock(); return b.data.String() }
 
 // probeDocker 启动时验证活动 Docker 工作区依赖：CLI、daemon 与预装镜像。
 func probeDocker(ctx context.Context, cfg config.ExecutionConfig) error {

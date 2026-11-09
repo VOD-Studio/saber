@@ -14,13 +14,19 @@ import (
 )
 
 func (c *Client) usesResponses() bool {
-	return c.config != nil && (c.config.API == "openai-responses" || c.config.API == "" && c.config.Provider == "openai-responses")
+	return c.config != nil && effectiveAPI(c.config.Provider, c.config.API) == "openai-responses"
 }
 
 // responseRequest 使用完整历史和 store=false，不依赖中继持久化 response ID。
 func (c *Client) responseRequest(req ChatCompletionRequest) (openai.CreateResponseRequest, error) {
 	input := make([]any, 0, len(req.Messages))
+	var instructions strings.Builder
 	for _, msg := range req.Messages {
+		if c.config.Provider == "openai-codex" && (msg.Role == "system" || msg.Role == "developer") {
+			instructions.WriteString(msg.Content)
+			instructions.WriteByte('\n')
+			continue
+		}
 		if msg.Role == openai.ChatMessageRoleTool {
 			if msg.ToolCallID == "" {
 				return openai.CreateResponseRequest{}, errors.New("tool result has no call ID")
@@ -38,10 +44,30 @@ func (c *Client) responseRequest(req ChatCompletionRequest) (openai.CreateRespon
 		}
 		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
 			if output := req.ResponsesHistory[msg.ToolCalls[0].ID]; len(output) > 0 {
-				for _, item := range output {
-					input = append(input, item)
+				var native nativeHistory
+				if json.Unmarshal(output[0], &native) != nil || native.Protocol == "" {
+					for _, item := range output {
+						var fields map[string]json.RawMessage
+						if err := json.Unmarshal(item, &fields); err != nil {
+							return openai.CreateResponseRequest{}, err
+						}
+						var kind, origin, model string
+						_ = json.Unmarshal(fields["type"], &kind)
+						_ = json.Unmarshal(fields["_saber_origin"], &origin)
+						_ = json.Unmarshal(fields["_saber_model"], &model)
+						if kind == "reasoning" && (origin != c.responseOrigin() || model != c.getModelName(req.Model)) {
+							continue
+						}
+						delete(fields, "_saber_origin")
+						delete(fields, "_saber_model")
+						encoded, err := json.Marshal(fields)
+						if err != nil {
+							return openai.CreateResponseRequest{}, err
+						}
+						input = append(input, json.RawMessage(encoded))
+					}
+					continue
 				}
-				continue
 			}
 		}
 		if msg.Content != "" && len(msg.MultiContent) > 0 {
@@ -84,8 +110,19 @@ func (c *Client) responseRequest(req ChatCompletionRequest) (openai.CreateRespon
 		Model: c.getModelName(req.Model), Input: input, MaxOutputTokens: req.MaxTokens,
 		Store: &store, Include: []openai.ResponseInclude{openai.ResponseIncludeReasoningEncryptedContent},
 	}
+	if c.config.Provider == "openai-codex" {
+		result.Instructions = strings.TrimSpace(instructions.String())
+		if result.Instructions == "" {
+			result.Instructions = "You are Saber, a helpful assistant."
+		}
+		result.MaxOutputTokens = 0
+	}
 	if req.ToolChoice != nil {
-		result.ToolChoice = *req.ToolChoice
+		choice, err := responsesToolChoice(req.ToolChoice)
+		if err != nil {
+			return result, err
+		}
+		result.ToolChoice = choice
 	}
 	for _, tool := range req.Tools {
 		if tool.Type != openai.ToolTypeFunction || tool.Function == nil {
@@ -175,7 +212,28 @@ func responseResult(resp openai.CreateResponseResponse) (*ChatCompletionResponse
 
 // createResponse 统一三种调用入口；仅终态确认成功后通知工具和完成回调。
 func (c *Client) createResponse(ctx context.Context, req ChatCompletionRequest, handler StreamingChatCompletionHandler) (result *ChatCompletionResponse, err error) {
+	if c.config.Provider == "openai-codex" {
+		req.Stream = true
+	}
 	defer func() {
+		if err == nil && result != nil {
+			for index, raw := range result.ResponsesOutput {
+				var fields map[string]json.RawMessage
+				if marshalErr := json.Unmarshal(raw, &fields); marshalErr != nil {
+					err = marshalErr
+					break
+				}
+				origin, _ := json.Marshal(c.responseOrigin())
+				model, _ := json.Marshal(c.getModelName(req.Model))
+				fields["_saber_origin"], fields["_saber_model"] = origin, model
+				encoded, marshalErr := json.Marshal(fields)
+				if marshalErr != nil {
+					err = marshalErr
+					break
+				}
+				result.ResponsesOutput[index] = encoded
+			}
+		}
 		// 失败响应不能在任务恢复时被误判为可回放的完整工具轮次。
 		if err != nil && result != nil {
 			result.FinishReason = ""
@@ -283,3 +341,5 @@ func (c *Client) createResponse(ctx context.Context, req ChatCompletionRequest, 
 		}
 	}
 }
+
+func (c *Client) responseOrigin() string { return strings.TrimRight(c.config.BaseURL, "/") }

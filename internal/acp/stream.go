@@ -1,8 +1,6 @@
 package acp
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -31,32 +29,6 @@ type upstreamError struct {
 // Error 实现 error 接口。
 func (e *upstreamError) Error() string {
 	return fmt.Sprintf("Saber 服务返回 %d: %s", e.Status, e.Message)
-}
-
-// chatMessage 是 OpenAI 兼容接口的纯文本消息。
-type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// chatRequest 是流式聊天请求；model 为空时由服务端选择默认模型。
-type chatRequest struct {
-	Model    string        `json:"model,omitempty"`
-	Messages []chatMessage `json:"messages"`
-	Stream   bool          `json:"stream"`
-}
-
-// streamChunk 是 SSE 数据块；上游可能用 error 字段表示运行失败。
-type streamChunk struct {
-	Choices []struct {
-		Delta struct {
-			Content string `json:"content"`
-		} `json:"delta"`
-	} `json:"choices"`
-	Error *struct {
-		Message string `json:"message"`
-		Code    string `json:"code"`
-	} `json:"error"`
 }
 
 // chatClient 调用本机 Saber 的 OpenAI 兼容接口。
@@ -121,31 +93,6 @@ func (c *chatClient) probe(ctx context.Context) error {
 	return nil
 }
 
-// stream 运行一次流式聊天；每收到一段文本就调用 emit。
-func (c *chatClient) stream(ctx context.Context, model string, messages []chatMessage, emit func(string) error) error {
-	payload, err := json.Marshal(chatRequest{Model: model, Messages: messages, Stream: true})
-	if err != nil {
-		return fmt.Errorf("编码聊天请求失败: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint+"/v1/chat/completions", bytes.NewReader(payload))
-	if err != nil {
-		return fmt.Errorf("构造聊天请求失败: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return readUpstreamError(resp)
-	}
-	return readSSE(ctx, resp.Body, emit)
-}
-
 // readUpstreamError 提取 OpenAI 风格错误消息并截断到可读长度。
 func readUpstreamError(resp *http.Response) error {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
@@ -170,54 +117,6 @@ func readUpstreamError(resp *http.Response) error {
 		message = http.StatusText(resp.StatusCode)
 	}
 	return &upstreamError{Status: resp.StatusCode, Message: truncate(message, 500)}
-}
-
-// readSSE 解析按行分隔的 SSE 流；忽略注释与心跳，[DONE] 结束。
-func readSSE(ctx context.Context, body io.Reader, emit func(string) error) error {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
-	for scanner.Scan() {
-		line := strings.TrimRight(scanner.Text(), "\r")
-		if line == "" || strings.HasPrefix(line, ":") {
-			continue
-		}
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "" {
-			continue
-		}
-		if payload == "[DONE]" {
-			return nil
-		}
-		var chunk streamChunk
-		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			return fmt.Errorf("解析流式响应失败: %w", err)
-		}
-		if chunk.Error != nil {
-			message := chunk.Error.Message
-			if message == "" {
-				message = "上游模型运行失败"
-			}
-			return &upstreamError{Status: http.StatusBadGateway, Message: truncate(message, 500)}
-		}
-		for _, choice := range chunk.Choices {
-			if choice.Delta.Content == "" {
-				continue
-			}
-			if err := emit(choice.Delta.Content); err != nil {
-				return err
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return fmt.Errorf("读取流式响应失败: %w", err)
-	}
-	return nil
 }
 
 // truncate 按字符截断消息，避免多字节字符被切断。
